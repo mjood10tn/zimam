@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "build": {
+      "enum": [
+        "release",
+        "e2e"
+      ],
+      "type": "string"
+    },
+    "protocols": {
+      "items": {
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "version": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "build",
+    "protocols",
+    "version"
+  ],
+  "title": "agent.version result",
+  "type": "object"
+}

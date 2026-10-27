@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "job": {
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job"
+  ],
+  "title": "job.status params",
+  "type": "object"
+}

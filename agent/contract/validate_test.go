@@ -332,6 +332,20 @@ func TestJobID(t *testing.T) {
 		})
 }
 
+func TestJobState(t *testing.T) {
+	checkValues(t,
+		[]JobState{JobQueued, JobRunning, JobSucceeded, JobFailed, JobCancelled},
+		[]JobState{"", "waiting", "Running", "done"})
+}
+
+func TestLogOffset(t *testing.T) {
+	checkValues(t, []LogOffset{0, 1, 1 << 40}, []LogOffset{-1, -1 << 40})
+}
+
+func TestBuild(t *testing.T) {
+	checkValues(t, []Build{BuildRelease, BuildE2E}, []Build{"", "debug", "Release"})
+}
+
 func TestLogSource(t *testing.T) {
 	valid := []LogSource{"journal.php-8.4", "journal.php-8.2"}
 	for _, s := range fixedLogSources {

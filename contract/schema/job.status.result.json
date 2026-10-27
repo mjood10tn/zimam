@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "command": {
+      "type": "string"
+    },
+    "error_code": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "finished_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "job": {
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+      "type": "string"
+    },
+    "log_size": {
+      "type": "integer"
+    },
+    "message": {
+      "type": "string"
+    },
+    "result": {},
+    "started_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "state": {
+      "enum": [
+        "queued",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelled"
+      ],
+      "type": "string"
+    },
+    "subject": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command",
+    "error_code",
+    "finished_at",
+    "job",
+    "log_size",
+    "message",
+    "result",
+    "started_at",
+    "state",
+    "subject"
+  ],
+  "title": "job.status result",
+  "type": "object"
+}

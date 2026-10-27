@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "from_offset": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "job": {
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "from_offset",
+    "job"
+  ],
+  "title": "job.follow params",
+  "type": "object"
+}
