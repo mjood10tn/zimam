@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
-    "state": {
+    "status": {
       "enum": [
         "queued",
         "running",
@@ -14,7 +14,7 @@
     }
   },
   "required": [
-    "state"
+    "status"
   ],
   "title": "job.cancel result",
   "type": "object"

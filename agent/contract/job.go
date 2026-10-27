@@ -66,7 +66,7 @@ type JobStatusResult struct {
 	Job        JobID           `json:"job"`
 	Command    string          `json:"command"`
 	Subject    string          `json:"subject"`
-	State      JobState        `json:"state"`
+	Status     JobState        `json:"status"`
 	ErrorCode  *ErrorCode      `json:"error_code"` // set when the job failed
 	Message    string          `json:"message"`
 	Result     json.RawMessage `json:"result"` // the command's result; null until it succeeds
@@ -76,7 +76,7 @@ type JobStatusResult struct {
 }
 
 type JobCancelResult struct {
-	State JobState `json:"state"`
+	Status JobState `json:"status"`
 }
 
 type JobState string
