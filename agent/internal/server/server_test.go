@@ -63,7 +63,7 @@ func request(command, params string) []byte {
 func testHandlers(t testing.TB) commands.Handlers {
 	unblock := make(chan struct{})
 	t.Cleanup(func() { close(unblock) })
-	h := commands.New()
+	h := commands.New(nil)
 	h["test.read"] = func(_ context.Context, p contract.Params) (any, error) {
 		return testResult{Name: p.(*testParams).Name}, nil
 	}
@@ -368,6 +368,63 @@ func TestReadsAreNotAudited(t *testing.T) {
 	resultReply(t, exchange(t, srv.sock, request("test.read", `{"name":"shop"}`)))
 	if entries := srv.auditEntries(t); len(entries) != 0 {
 		t.Errorf("audit = %v, want no entries", entries)
+	}
+}
+
+// A job command's handler returns contract.Accepted, which goes out as the
+// accepted line.
+func TestAcceptedReply(t *testing.T) {
+	srv := startServer(t, func(s *Server) {
+		s.Handlers["test.read"] = func(context.Context, contract.Params) (any, error) {
+			return contract.Accepted{Job: testID}, nil
+		}
+	})
+	out := exchange(t, srv.sock, request("test.read", `{"name":"shop"}`))
+	if want := `{"type":"accepted","job":"` + testID + `"}` + "\n"; string(out) != want {
+		t.Errorf("reply = %s, want %s", out, want)
+	}
+}
+
+// job.follow's handler returns a commands.Stream. It runs after the handler,
+// free of DirectTimeout, and sends its own lines.
+func TestStreamReply(t *testing.T) {
+	srv := startServer(t, func(s *Server) {
+		s.DirectTimeout = 100 * time.Millisecond
+		s.Handlers["test.read"] = func(context.Context, contract.Params) (any, error) {
+			return commands.Stream(func(ctx context.Context, send func(any) error) error {
+				if err := send(contract.LogLine{Type: "log", Job: testID, Line: "first"}); err != nil {
+					return err
+				}
+				select {
+				case <-time.After(300 * time.Millisecond): // past DirectTimeout
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+				return send(contract.Result{Type: "result", OK: true, Data: json.RawMessage(`{}`)})
+			}), nil
+		}
+	})
+	out := exchange(t, srv.sock, request("test.read", `{"name":"shop"}`))
+	want := `{"type":"log","job":"` + testID + `","offset":0,"line":"first"}` + "\n" + `{"type":"result","ok":true,"data":{}}` + "\n"
+	if string(out) != want {
+		t.Errorf("reply =\n%s\nwant\n%s", out, want)
+	}
+}
+
+// Handlers that audit, such as job.cancel's, find the caller in their context.
+func TestHandlersGetCaller(t *testing.T) {
+	srv := startServer(t, func(s *Server) {
+		s.Handlers["test.read"] = func(ctx context.Context, _ contract.Params) (any, error) {
+			return audit.CallerFrom(ctx), nil
+		}
+	})
+	data := resultReply(t, exchange(t, srv.sock, request("test.read", `{"name":"shop"}`)))
+	var c audit.Caller
+	if err := json.Unmarshal(data, &c); err != nil {
+		t.Fatal(err)
+	}
+	if c.Actor != "user:1" || c.RequestID != testID || c.PeerUID == nil || *c.PeerUID != uint32(os.Getuid()) {
+		t.Errorf("caller = %+v, want user:1, the request id and this process's uid", c)
 	}
 }
 

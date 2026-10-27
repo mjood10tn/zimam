@@ -27,7 +27,7 @@ var subcommands = map[string]subcommand{
 	"panel setup-link":   notImplemented("panel setup-link"),
 	"hook cert-deployed": notImplemented("hook cert-deployed"),
 	"maintenance":        notImplemented("maintenance"),
-	"job run":            notImplemented("job run"),
+	"job run":            jobRun,
 	"as-user":            notImplemented("as-user"),
 }
 

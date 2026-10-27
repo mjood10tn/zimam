@@ -63,9 +63,18 @@ func (s *Server) dispatch(ctx context.Context, cl *call, line []byte) any {
 		}
 		return s.reject(cl, ae.Code, ae.Message, ae.Fields)
 	}
+	// Handlers that audit, such as job.cancel's, need the caller.
+	ctx = audit.WithCaller(ctx, audit.Caller{PeerUID: cl.uid, Actor: clip(req.Actor), RequestID: req.ID})
 	v, err := s.run(ctx, h, p)
 	if err != nil {
 		return failure(req.Command, err)
+	}
+	switch v := v.(type) {
+	case contract.Accepted:
+		v.Type = "accepted"
+		return v
+	case commands.Stream:
+		return v // serveConn runs it
 	}
 	data, err := json.Marshal(v)
 	if err != nil {

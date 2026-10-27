@@ -38,7 +38,8 @@ func serve(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return fail(err)
 	}
 	p := paths.Paths{}
-	if _, err := config.Load(p); err != nil {
+	cfg, err := config.Load(p)
+	if err != nil {
 		return fail(err)
 	}
 	// /run is a tmpfs, so after a reboot the locks directory is gone until
@@ -53,11 +54,19 @@ func serve(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	log.SetFlags(0) // the journal adds timestamps
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
+	m := jobManager(p, cfg, -1) // serve reads job logs; only job run writes them
+	// Jobs whose units ended while the agent was down (§5.7). If this fails,
+	// those jobs wait for the next reconcile and the agent serves anyway.
+	if n, err := m.Reconcile(ctx); err != nil {
+		log.Printf("reconciling jobs: %v", err)
+	} else if n > 0 {
+		log.Printf("reconciled %d jobs", n)
+	}
 	s := &server.Server{
 		Listener:       ln,
 		Allowed:        server.AllowRootAndZimam(zimam, zimamExists),
 		Audit:          audit.Writer{Paths: p},
-		Handlers:       commands.New(),
+		Handlers:       commands.New(m),
 		RequestTimeout: 10 * time.Second, // §5.2
 		DirectTimeout:  30 * time.Second, // §5.2
 	}
