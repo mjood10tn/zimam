@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 	"zimam/agent/contract"
 	"zimam/agent/internal/audit"
 	"zimam/agent/internal/commands"
+	"zimam/agent/internal/jobs"
 	"zimam/agent/internal/paths"
 	"zimam/agent/internal/release"
 )
@@ -409,6 +411,15 @@ func TestStreamReply(t *testing.T) {
 	if string(out) != want {
 		t.Errorf("reply =\n%s\nwant\n%s", out, want)
 	}
+}
+
+// job.follow for an unknown job fails before its first line, so the server
+// sends the error as the only line.
+func TestFollowUnknownJob(t *testing.T) {
+	srv := startServer(t, func(s *Server) {
+		maps.Copy(s.Handlers, commands.New(&jobs.Manager{Paths: paths.Paths{Root: t.TempDir()}}))
+	})
+	expectError(t, srv, request("job.follow", `{"job":"01JBX7Q3A1B2C3D4E5F6G7H8J9","from_offset":0}`), contract.ErrNotFound)
 }
 
 // Handlers that audit, such as job.cancel's, find the caller in their context.
