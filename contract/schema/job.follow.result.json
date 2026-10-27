@@ -48,7 +48,7 @@
         }
       ]
     },
-    "state": {
+    "status": {
       "enum": [
         "queued",
         "running",
@@ -71,7 +71,7 @@
     "message",
     "result",
     "started_at",
-    "state",
+    "status",
     "subject"
   ],
   "title": "job.follow result",
