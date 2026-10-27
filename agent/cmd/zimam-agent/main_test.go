@@ -57,8 +57,14 @@ func TestUnknownSubcommand(t *testing.T) {
 	}
 }
 
+// implemented are the subcommands later tasks have filled in.
+var implemented = map[string]bool{"serve": true}
+
 func TestSubcommandsNotImplementedYet(t *testing.T) {
 	for _, name := range wantSubcommands {
+		if implemented[name] {
+			continue
+		}
 		args := append(strings.Fields(name), "extra")
 		code, _, stderr := runCapture(args)
 		if code != 70 {

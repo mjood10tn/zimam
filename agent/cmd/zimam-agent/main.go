@@ -22,7 +22,7 @@ type subcommand func(args []string, stdin io.Reader, stdout, stderr io.Writer) i
 // subcommands maps each name, one or two words, to its handler. Later tasks
 // replace the placeholders.
 var subcommands = map[string]subcommand{
-	"serve":              notImplemented("serve"),
+	"serve":              serve,
 	"bootstrap":          notImplemented("bootstrap"),
 	"panel setup-link":   notImplemented("panel setup-link"),
 	"hook cert-deployed": notImplemented("hook cert-deployed"),
