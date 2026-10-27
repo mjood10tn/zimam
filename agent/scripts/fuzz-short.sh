@@ -27,9 +27,11 @@ if [ "${#targets[@]}" -eq 0 ]; then
 	exit 1
 fi
 
+# -fuzzminimizetime=0 skips minimizing new inputs, which otherwise takes most
+# of a short run's budget. A failing input is then reported unminimized.
 for target in "${targets[@]}"; do
 	read -r pkg name <<<"$target"
 	echo "== $name ($pkg)"
-	go test -run='^$' -fuzz="^${name}\$" -fuzztime="$fuzztime" "$pkg"
+	go test -run='^$' -fuzz="^${name}\$" -fuzztime="$fuzztime" -fuzzminimizetime=0 "$pkg"
 done
 echo "fuzz-short: ran ${#targets[@]} targets for $fuzztime each"
