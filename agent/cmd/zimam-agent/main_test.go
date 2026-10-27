@@ -58,7 +58,7 @@ func TestUnknownSubcommand(t *testing.T) {
 }
 
 // implemented are the subcommands later tasks have filled in.
-var implemented = map[string]bool{"serve": true}
+var implemented = map[string]bool{"serve": true, "job run": true}
 
 func TestSubcommandsNotImplementedYet(t *testing.T) {
 	for _, name := range wantSubcommands {

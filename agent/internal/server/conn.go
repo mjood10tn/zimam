@@ -114,9 +114,28 @@ func (s *Server) serveConn(ctx context.Context, c net.Conn) {
 	} else {
 		reply = s.dispatch(ctx, cl, line)
 	}
+	if st, ok := reply.(commands.Stream); ok {
+		s.stream(ctx, c, cl.req.Command, st)
+		return
+	}
 	c.SetWriteDeadline(time.Now().Add(writeTimeout))
 	if err := writeLine(c, reply); err != nil {
 		log.Printf("writing the reply: %v", err)
+	}
+}
+
+// stream runs a streaming reply on the connection's context, free of
+// DirectTimeout. A client that has gone is noticed at the next send. If the
+// stream fails before its last line, the server sends the error instead.
+func (s *Server) stream(ctx context.Context, c net.Conn, command string, st commands.Stream) {
+	var sendErr error
+	send := func(v any) error {
+		c.SetWriteDeadline(time.Now().Add(writeTimeout))
+		sendErr = writeLine(c, v)
+		return sendErr
+	}
+	if err := st(ctx, send); err != nil && sendErr == nil && ctx.Err() == nil {
+		send(failure(command, err))
 	}
 }
 
