@@ -33,4 +33,6 @@ jobs:
       - name: go test
         run: go test ./...
       - name: short fuzz
-        run: bash scripts/fuzz-short.sh
+        # -fuzzminimizetime=0 skips minimizing new inputs, which otherwise takes
+        # most of a 10s run's budget. A failing input is then saved unminimized.
+        run: bash scripts/fuzz-short.sh 10s -fuzzminimizetime=0

@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Runs every Fuzz* target in the agent module briefly (design §14.1). Longer
 # runs happen in nightly.yml. New targets are picked up automatically.
-# Usage: scripts/fuzz-short.sh [fuzztime]   (default 10s)
+# Usage: scripts/fuzz-short.sh [fuzztime [go test flags...]]   (default 10s)
+# Extra flags go to every fuzz run; without them Go's defaults apply.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 fuzztime="${1:-10s}"
+extra=("${@:2}")
 
 # `go test -list` prints each package's matching names, then "ok <package>".
 listing="$(go test -list '^Fuzz' ./...)"
@@ -27,11 +29,9 @@ if [ "${#targets[@]}" -eq 0 ]; then
 	exit 1
 fi
 
-# -fuzzminimizetime=0 skips minimizing new inputs, which otherwise takes most
-# of a short run's budget. A failing input is then reported unminimized.
 for target in "${targets[@]}"; do
 	read -r pkg name <<<"$target"
 	echo "== $name ($pkg)"
-	go test -run='^$' -fuzz="^${name}\$" -fuzztime="$fuzztime" -fuzzminimizetime=0 "$pkg"
+	go test -run='^$' -fuzz="^${name}\$" -fuzztime="$fuzztime" "${extra[@]}" "$pkg"
 done
 echo "fuzz-short: ran ${#targets[@]} targets for $fuzztime each"
