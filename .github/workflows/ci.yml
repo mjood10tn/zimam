@@ -36,3 +36,25 @@ jobs:
         # -fuzzminimizetime=0 skips minimizing new inputs, which otherwise takes
         # most of a 10s run's budget. A failing input is then saved unminimized.
         run: bash scripts/fuzz-short.sh 10s -fuzzminimizetime=0
+  contract:
+    runs-on: ubuntu-26.04
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - name: schemas match the Go types
+        # git diff can't see new files, so untracked ones fail the job too.
+        run: |
+          go generate ./...
+          git diff --exit-code -- ../contract/
+          untracked="$(git ls-files --others --exclude-standard -- ../contract/)"
+          if [ -n "$untracked" ]; then
+            echo "go generate wrote files that aren't committed:"
+            echo "$untracked"
+            exit 1
+          fi

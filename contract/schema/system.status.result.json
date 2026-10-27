@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "acme_directory": {
+      "type": "string"
+    },
+    "agent_version": {
+      "type": "string"
+    },
+    "nginx_version": {
+      "type": "string"
+    },
+    "panel_domain": {
+      "maxLength": 253,
+      "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+([a-z]{1,63}|xn--[a-z0-9-]{0,58}[a-z0-9])$",
+      "type": "string"
+    },
+    "php": {
+      "additionalProperties": false,
+      "properties": {
+        "available": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "security_end": {
+                "type": "string"
+              },
+              "supported": {
+                "type": "boolean"
+              },
+              "version": {
+                "enum": [
+                  "8.2",
+                  "8.3",
+                  "8.4",
+                  "8.5"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "security_end",
+              "supported",
+              "version"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "default": {
+          "enum": [
+            "8.2",
+            "8.3",
+            "8.4",
+            "8.5"
+          ],
+          "type": "string"
+        },
+        "installed": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "fpm_active": {
+                "type": "boolean"
+              },
+              "version": {
+                "enum": [
+                  "8.2",
+                  "8.3",
+                  "8.4",
+                  "8.5"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "fpm_active",
+              "version"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "panel": {
+          "enum": [
+            "8.2",
+            "8.3",
+            "8.4",
+            "8.5"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "available",
+        "default",
+        "installed",
+        "panel"
+      ],
+      "type": "object"
+    },
+    "protocols": {
+      "items": {
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "reboot_required": {
+      "type": "boolean"
+    },
+    "updates": {
+      "additionalProperties": false,
+      "properties": {
+        "checked_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "security": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "total": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "checked_at",
+        "security",
+        "total"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "acme_directory",
+    "agent_version",
+    "nginx_version",
+    "panel_domain",
+    "php",
+    "protocols",
+    "reboot_required",
+    "updates"
+  ],
+  "title": "system.status result",
+  "type": "object"
+}

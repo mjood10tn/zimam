@@ -1,0 +1,132 @@
+{
+  "$defs": {
+    "accepted": {
+      "additionalProperties": false,
+      "properties": {
+        "job": {
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string"
+        },
+        "type": {
+          "const": "accepted"
+        }
+      },
+      "required": [
+        "job",
+        "type"
+      ],
+      "type": "object"
+    },
+    "error": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "fields": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "message": {
+          "type": "string"
+        },
+        "type": {
+          "const": "error"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "type"
+      ],
+      "type": "object"
+    },
+    "log": {
+      "additionalProperties": false,
+      "properties": {
+        "job": {
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string"
+        },
+        "line": {
+          "type": "string"
+        },
+        "offset": {
+          "type": "integer"
+        },
+        "type": {
+          "const": "log"
+        }
+      },
+      "required": [
+        "job",
+        "line",
+        "offset",
+        "type"
+      ],
+      "type": "object"
+    },
+    "request": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "type": "string"
+        },
+        "command": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "params": {},
+        "v": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "actor",
+        "command",
+        "id",
+        "params",
+        "v"
+      ],
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {},
+        "ok": {
+          "type": "boolean"
+        },
+        "type": {
+          "const": "result"
+        }
+      },
+      "required": [
+        "data",
+        "ok",
+        "type"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/accepted"
+    },
+    {
+      "$ref": "#/$defs/log"
+    },
+    {
+      "$ref": "#/$defs/result"
+    },
+    {
+      "$ref": "#/$defs/error"
+    }
+  ],
+  "title": "agent response line (the request line is $defs/request)"
+}
