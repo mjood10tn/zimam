@@ -1,0 +1,142 @@
+// Package paths names every file and directory the agent uses (design §5.9
+// and §9.1). Each path is a method, so tests can move all of them under a
+// temporary root.
+package paths
+
+import (
+	"path/filepath"
+
+	"zimam/agent/contract"
+)
+
+// Paths turns every §5.9 path into a method. Root is "" in production and
+// t.TempDir() in tests. Arguments must already be validated: the typed ones
+// by their contract type, a lock subject by the command that builds it.
+type Paths struct{ Root string }
+
+func (p Paths) at(elem ...string) string {
+	return filepath.Join(append([]string{p.Root, "/"}, elem...)...)
+}
+
+func (p Paths) AgentBinary() string { return p.at("usr/local/sbin/zimam-agent") }
+
+// /etc/zimam
+
+func (p Paths) ConfigDir() string      { return p.at("etc/zimam") }
+func (p Paths) AgentConfig() string    { return p.at("etc/zimam/agent.json") }
+func (p Paths) InstallerState() string { return p.at("etc/zimam/installer.state") } // D17
+func (p Paths) LogrotateConf() string  { return p.at("etc/zimam/logrotate.conf") }
+func (p Paths) LogrotateDir() string   { return p.at("etc/zimam/logrotate.d") }
+func (p Paths) SiteLogrotateConf(name contract.SiteName) string {
+	return p.at("etc/zimam/logrotate.d", "site-"+string(name)+".conf")
+}
+
+// /run/zimam
+
+func (p Paths) RunDir() string     { return p.at("run/zimam") }
+func (p Paths) Socket() string     { return p.at("run/zimam/agent.sock") }
+func (p Paths) LocksDir() string   { return p.at("run/zimam/locks") }
+func (p Paths) SubmitLock() string { return p.at("run/zimam/locks/submit.lock") }
+func (p Paths) AuditLock() string  { return p.at("run/zimam/locks/audit.lock") }
+func (p Paths) ReloadLock() string { return p.at("run/zimam/locks/reload.lock") } // §5.5
+
+// SubjectLock is a job subject's lock (§5.7), such as "site:shop" or "server".
+func (p Paths) SubjectLock(subject string) string {
+	return p.at("run/zimam/locks", subject+".lock")
+}
+
+// /var/lib/zimam
+
+func (p Paths) StateDir() string { return p.at("var/lib/zimam") }
+func (p Paths) JobsDir() string  { return p.at("var/lib/zimam/jobs") }
+func (p Paths) JobDir(id contract.JobID) string {
+	return p.at("var/lib/zimam/jobs", string(id))
+}
+func (p Paths) JobSpec(id contract.JobID) string  { return filepath.Join(p.JobDir(id), "spec.json") }
+func (p Paths) JobState(id contract.JobID) string { return filepath.Join(p.JobDir(id), "state.json") }
+func (p Paths) SitesStateDir() string             { return p.at("var/lib/zimam/sites") }
+
+// SiteState is the site's state file (D15).
+func (p Paths) SiteState(name contract.SiteName) string {
+	return p.at("var/lib/zimam/sites", string(name)+".json")
+}
+func (p Paths) DownloadsDir() string   { return p.at("var/lib/zimam/downloads") }
+func (p Paths) CertsDir() string       { return p.at("var/lib/zimam/certs") }
+func (p Paths) UpdatesCache() string   { return p.at("var/lib/zimam/updates.json") }
+func (p Paths) LogrotateState() string { return p.at("var/lib/zimam/logrotate.state") }
+
+// /var/log/zimam
+
+func (p Paths) LogDir() string     { return p.at("var/log/zimam") }
+func (p Paths) AuditLog() string   { return p.at("var/log/zimam/audit.log") }
+func (p Paths) JobLogsDir() string { return p.at("var/log/zimam/jobs") }
+func (p Paths) JobLog(id contract.JobID) string {
+	return p.at("var/log/zimam/jobs", string(id)+".log")
+}
+func (p Paths) SitesLogDir() string { return p.at("var/log/zimam/sites") }
+func (p Paths) SiteLogDir(name contract.SiteName) string {
+	return p.at("var/log/zimam/sites", string(name))
+}
+func (p Paths) SiteAccessLog(name contract.SiteName) string {
+	return filepath.Join(p.SiteLogDir(name), "access.log")
+}
+func (p Paths) SiteErrorLog(name contract.SiteName) string {
+	return filepath.Join(p.SiteLogDir(name), "error.log")
+}
+
+// Nginx
+
+func (p Paths) ACMEWebroot() string   { return p.at("var/www/zimam-acme") }
+func (p Paths) NginxZimamDir() string { return p.at("etc/nginx/zimam") }
+func (p Paths) SiteNginxDir(name contract.SiteName) string {
+	return p.at("etc/nginx/zimam", string(name))
+}
+func (p Paths) SiteSecurityConf(name contract.SiteName) string {
+	return filepath.Join(p.SiteNginxDir(name), "security.conf")
+}
+func (p Paths) SiteHtpasswd(name contract.SiteName) string {
+	return filepath.Join(p.SiteNginxDir(name), "htpasswd")
+}
+func (p Paths) NginxSiteAvailable(name contract.SiteName) string {
+	return p.at("etc/nginx/sites-available", "zimam-"+string(name)+".conf")
+}
+func (p Paths) NginxSiteEnabled(name contract.SiteName) string {
+	return p.at("etc/nginx/sites-enabled", "zimam-"+string(name)+".conf")
+}
+
+// PHP-FPM
+
+func (p Paths) PHPPool(v contract.PHPVersion, name contract.SiteName) string {
+	return p.at("etc/php", string(v), "fpm/pool.d", "zimam-"+string(name)+".conf")
+}
+func (p Paths) PHPSocket(name contract.SiteName, v contract.PHPVersion) string {
+	return p.at("run/php", "zimam-"+string(name)+"-"+string(v)+".sock")
+}
+
+// Homes. Root never opens these itself; the helper does, as the owner (D5).
+
+func (p Paths) PanelHome() string        { return p.at("home/zimam") }
+func (p Paths) PanelReleasesDir() string { return p.at("home/zimam/panel/releases") }
+func (p Paths) PanelCurrent() string     { return p.at("home/zimam/panel/current") }
+func (p Paths) PanelSharedDir() string   { return p.at("home/zimam/panel/shared") }
+func (p Paths) SiteHome(name contract.SiteName) string {
+	return p.at("home", "s_"+string(name))
+}
+func (p Paths) SiteDir(name contract.SiteName) string {
+	return filepath.Join(p.SiteHome(name), "site")
+}
+func (p Paths) SiteReleasesDir(name contract.SiteName) string {
+	return filepath.Join(p.SiteDir(name), "releases")
+}
+func (p Paths) SiteCurrent(name contract.SiteName) string {
+	return filepath.Join(p.SiteDir(name), "current")
+}
+func (p Paths) SiteTmpDir(name contract.SiteName) string {
+	return filepath.Join(p.SiteHome(name), "tmp")
+}
+func (p Paths) SiteHomeLogsDir(name contract.SiteName) string {
+	return filepath.Join(p.SiteHome(name), "logs")
+}
+func (p Paths) SitePHPErrorLog(name contract.SiteName) string {
+	return filepath.Join(p.SiteHomeLogsDir(name), "php-error.log")
+}
