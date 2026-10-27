@@ -1,0 +1,9 @@
+# Go build and test output
+/agent/zimam-agent
+/agent/bin/
+*.test
+*.out
+
+# Operating system files
+.DS_Store
+Thumbs.db

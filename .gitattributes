@@ -1,0 +1,8 @@
+# Text files use LF in the repository and in every checkout, whatever
+# core.autocrlf says. Shell scripts, Go files and templates must reach Linux
+# with LF endings.
+* text=auto eol=lf
+
+# Windows batch files need CRLF to run under cmd.exe.
+*.bat text eol=crlf
+*.cmd text eol=crlf
