@@ -323,7 +323,7 @@ func TestSubmitArgvHasNoSecrets(t *testing.T) {
 	}
 	c := f.sd.started[0]
 	wantArgv := []string{f.m.Paths.AgentBinary(), "job", "run", string(id)}
-	wantProps := []string{"Type=exec", "MemoryMax=512M", "RuntimeMaxSec=300"}
+	wantProps := []string{"Type=exec", "MemoryMax=512M", "MemorySwapMax=0", "RuntimeMaxSec=300"}
 	if c.unit != "zimam-job-"+string(id) || !slices.Equal(c.argv, wantArgv) || !slices.Equal(c.props, wantProps) {
 		t.Errorf("started %+v, want unit zimam-job-%s, props %q, argv %q", c, id, wantProps, wantArgv)
 	}

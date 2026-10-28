@@ -29,7 +29,14 @@ func LimitsFor(command string) (Limits, bool) {
 	return l, ok
 }
 
-// properties are the unit properties systemd-run gets.
+// properties are the unit properties systemd-run gets. MemorySwapMax=0 makes
+// MemoryMax a hard limit: on a server with swap, a job over its limit would
+// otherwise page instead of being killed (oom-kill).
 func (l Limits) properties() []string {
-	return []string{"Type=exec", "MemoryMax=" + l.MemoryMax, "RuntimeMaxSec=" + strconv.Itoa(l.RuntimeMaxSec)}
+	return []string{
+		"Type=exec",
+		"MemoryMax=" + l.MemoryMax,
+		"MemorySwapMax=0",
+		"RuntimeMaxSec=" + strconv.Itoa(l.RuntimeMaxSec),
+	}
 }
