@@ -28,7 +28,7 @@ var subcommands = map[string]subcommand{
 	"hook cert-deployed": notImplemented("hook cert-deployed"),
 	"maintenance":        notImplemented("maintenance"),
 	"job run":            jobRun,
-	"as-user":            notImplemented("as-user"),
+	"as-user":            runAsUser,
 }
 
 func main() {

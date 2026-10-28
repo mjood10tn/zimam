@@ -16,6 +16,7 @@ import (
 	"zimam/agent/contract"
 	"zimam/agent/internal/audit"
 	"zimam/agent/internal/config"
+	"zimam/agent/internal/helper"
 	"zimam/agent/internal/paths"
 	"zimam/agent/internal/sysexec"
 )
@@ -31,9 +32,10 @@ type Manager struct {
 	// Prechecks the prechecks some of them have.
 	Handlers  map[string]Handler
 	Prechecks map[string]Precheck
-	// Config and Run go to job handlers.
+	// Config, Run and Helper go to job handlers.
 	Config config.Agent
 	Run    sysexec.Runner
+	Helper *helper.Client
 	// LogGID is the group job logs get (zimam-agent, §5.1); -1 leaves it.
 	LogGID int
 	Now    func() time.Time // nil means time.Now

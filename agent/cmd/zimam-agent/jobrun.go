@@ -15,6 +15,7 @@ import (
 	"zimam/agent/internal/audit"
 	"zimam/agent/internal/commands"
 	"zimam/agent/internal/config"
+	"zimam/agent/internal/helper"
 	"zimam/agent/internal/jobs"
 	"zimam/agent/internal/paths"
 	"zimam/agent/internal/sysexec"
@@ -62,6 +63,7 @@ func jobManager(p paths.Paths, cfg config.Agent, logGID int) *jobs.Manager {
 		Handlers: commands.JobHandlers(),
 		Config:   cfg,
 		Run:      run,
+		Helper:   &helper.Client{AgentBinary: p.AgentBinary()},
 		LogGID:   logGID,
 	}
 }
