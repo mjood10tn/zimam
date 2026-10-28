@@ -2,16 +2,13 @@
 
 Zimam is a server control panel for a clean Ubuntu 26.04 LTS server. A root Go agent is the only privileged code. A Laravel 13 + Filament 5 panel runs as the `zimam` user and talks to the agent over a Unix socket.
 
-- Design: [docs/superpowers/specs/2026-10-25-zimam-walking-skeleton-design.md](docs/superpowers/specs/2026-10-25-zimam-walking-skeleton-design.md)
-- Implementation plan: [docs/superpowers/plans/2026-10-26-zimam-walking-skeleton.md](docs/superpowers/plans/2026-10-26-zimam-walking-skeleton.md)
-- Spike results: [docs/superpowers/spikes/2026-10-zimam-spikes.md](docs/superpowers/spikes/2026-10-zimam-spikes.md)
+References such as "design §5.6" are to the project's design document, which isn't kept in this repository.
 
 ## Layout
 
 | Path | Contents |
 | --- | --- |
 | `agent/` | The Go agent (`module zimam/agent`). It uses only the standard library and `golang.org/x/sys`. |
-| `docs/superpowers/` | Design, plan and spike results. |
 | `.github/workflows/` | CI. `ci.yml` runs on every pull request and every push to `master`. |
 
 Later tasks add `contract/`, `panel/`, `installer/`, `e2e/` and `release/` (design §3).

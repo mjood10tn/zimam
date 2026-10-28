@@ -7,3 +7,15 @@
 # Operating system files
 .DS_Store
 Thumbs.db
+
+# AI tools and what they produce: kept locally, never in the repository
+/.claude/
+/.superpowers/
+/.impeccable/
+/docs/superpowers/
+/docs/design/
+/prototypes/
+/DESIGN.md
+/PRODUCT.md
+/CLAUDE.md
+/.mcp.json
