@@ -112,6 +112,30 @@ func (p Paths) PHPPool(v contract.PHPVersion, name contract.SiteName) string {
 func (p Paths) PHPSocket(name contract.SiteName, v contract.PHPVersion) string {
 	return p.at("run/php", "zimam-"+string(name)+"-"+string(v)+".sock")
 }
+func (p Paths) PHPPoolDir(v contract.PHPVersion) string {
+	return p.at("etc/php", string(v), "fpm/pool.d")
+}
+
+// PHPIni is Zimam's baseline ini file for a version's FPM (§8.3).
+func (p Paths) PHPIni(v contract.PHPVersion) string {
+	return p.at("etc/php", string(v), "fpm/conf.d/99-zimam.ini")
+}
+
+// PHPGlobalConf holds FPM's [global] settings, in pool.d (§8.3, Task 1).
+func (p Paths) PHPGlobalConf(v contract.PHPVersion) string {
+	return filepath.Join(p.PHPPoolDir(v), "00-zimam-global.conf")
+}
+
+// PHPWwwPool is the package's stock pool, which php.install deletes (§8.3).
+func (p Paths) PHPWwwPool(v contract.PHPVersion) string {
+	return filepath.Join(p.PHPPoolDir(v), "www.conf")
+}
+
+// APT: the sury repository (§8.2)
+
+func (p Paths) SuryKeyring() string { return p.at("etc/apt/keyrings/zimam-sury.gpg") }
+func (p Paths) SurySources() string { return p.at("etc/apt/sources.list.d/zimam-sury.sources") }
+func (p Paths) SuryPin() string     { return p.at("etc/apt/preferences.d/zimam-sury.pref") }
 
 // Homes. Root never opens these itself; the helper does, as the owner (D5).
 

@@ -1,0 +1,6 @@
+# Managed by Zimam. Changes here are overwritten.
+Types: deb
+URIs: https://packages.sury.org/php/
+Suites: resolute
+Components: main
+Signed-By: /etc/apt/keyrings/zimam-sury.gpg
