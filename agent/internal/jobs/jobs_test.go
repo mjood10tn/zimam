@@ -352,6 +352,32 @@ func TestSubmitAudited(t *testing.T) {
 	}
 }
 
+// A precheck's refusal reaches the caller as it is, is audited, and leaves no
+// job behind.
+func TestSubmitPrecheck(t *testing.T) {
+	f := newFixture(t)
+	f.m.Prechecks = map[string]Precheck{
+		"site.provision": func(_ context.Context, p contract.Params) error {
+			if p.(*testParams).Name == "taken" {
+				return &contract.AgentError{Code: contract.ErrConflict, Message: "the site exists"}
+			}
+			return nil
+		},
+	}
+	_, err := f.m.Submit(callerCtx, testCommands["site.provision"], &testParams{Name: "taken"})
+	expectCode(t, err, contract.ErrConflict)
+	if ids, err := f.m.jobIDs(); len(ids) != 0 || err != nil {
+		t.Errorf("the refused submission left jobs %v (%v)", ids, err)
+	}
+	if len(f.sd.started) != 0 {
+		t.Errorf("started %d units for a refused submission", len(f.sd.started))
+	}
+	if e := f.audit.last(t); e.Outcome != "error:conflict" || e.Command != "site.provision" {
+		t.Errorf("entry = %+v, want site.provision error:conflict", e)
+	}
+	f.submit(t, "site.provision", &testParams{Name: "shop"}) // the precheck lets others through
+}
+
 func TestSubmitStartFailure(t *testing.T) {
 	f := newFixture(t)
 	f.sd.startErr = errors.New("systemd-run failed")
