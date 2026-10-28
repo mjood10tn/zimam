@@ -21,6 +21,18 @@ Agent work happens in WSL with an Ubuntu 26.04 distro (design §14.6). Unit test
 cd agent && test -z "$(gofmt -l .)" && go vet ./... && go test ./...
 ```
 
+Every file root reads is rendered from a template, and `agent/internal/templates/testdata/golden/` holds the expected output. After changing a template, rewrite the golden files and review the diff:
+
+```bash
+cd agent && go test ./internal/templates -update
+```
+
+The `configcheck` job tests each golden case with `nginx -t`, `php-fpm<v> -t`, `logrotate -d` and `systemd-analyze verify` inside an Ubuntu 26.04 container. To run it locally with Docker:
+
+```bash
+cd agent && docker build -t zimam-configcheck scripts/configcheck && bash scripts/configcheck/run.sh zimam-configcheck internal/templates/testdata/golden
+```
+
 ## Merge gates
 
 Every check in design §14 blocks a merge. Once the repository is on GitHub, the owner marks every CI job as a required status check under branch protection for `master` (Settings → Branches, or a ruleset).
