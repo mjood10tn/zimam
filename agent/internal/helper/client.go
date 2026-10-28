@@ -175,8 +175,8 @@ func (c *Client) List(ctx context.Context, a Account, dir string) (Listing, erro
 	return l, err
 }
 
-// SymlinkSwap points link at target, releases/<name>, by renaming a new
-// symlink over it.
+// SymlinkSwap points link at target by renaming a new symlink over it. The
+// target is relative and, read from link's directory, stays inside the home.
 func (c *Client) SymlinkSwap(ctx context.Context, a Account, link, target string) error {
 	return c.run(ctx, a, "symlink-swap", nil, &struct{}{}, link, target)
 }

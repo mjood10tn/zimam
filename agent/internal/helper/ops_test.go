@@ -398,18 +398,57 @@ func TestSymlinkSwapRefusesAbsoluteTarget(t *testing.T) {
 	}
 }
 
-func TestSymlinkSwapRefusesOtherTargets(t *testing.T) {
-	root, home, _ := testHome(t)
-	for _, target := range []string{
-		"", ".", "..", "../x", "releases", "releases/", "releases/.", "releases/..", "releases/../..",
-		"releases/a/b", "x/releases/a", "releases/.hidden", "releases/a\nb", "releases/" + strings.Repeat("a", 129),
+func TestSymlinkSwapRefusesEscapingTargets(t *testing.T) {
+	root, home, outside := testHome(t)
+	if err := os.Mkdir(filepath.Join(home, "site"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range [][2]string{
+		{"current", ""},
+		{"current", ".."},
+		{"current", "../x"},
+		{"current", "releases/../.."},
+		{"site/current", "../.."},
+		{"site/current", "../../outside"},
+		{"../current", "releases/one"},
+		{"site/../../current", "releases/one"},
+		{".", "releases/one"},
 	} {
-		if err := symlinkSwap(root, "current", target); err == nil {
-			t.Errorf("symlinkSwap(%q): no error", target)
+		if err := symlinkSwap(root, c[0], c[1]); err == nil {
+			t.Errorf("symlinkSwap(%q, %q): no error", c[0], c[1])
 		}
 	}
-	if ns := names(t, home); len(ns) != 0 {
+	if ns := names(t, home); !slices.Equal(ns, []string{"site"}) {
 		t.Errorf("the home holds %q", ns)
+	}
+	if ns := names(t, filepath.Join(home, "site")); len(ns) != 0 {
+		t.Errorf("site/ holds %q", ns)
+	}
+	if ns := names(t, outside); len(ns) != 0 {
+		t.Errorf("outside holds %q", ns)
+	}
+}
+
+// A release links its shared files with targets that climb out of the
+// release but stay inside the home (design §4 step 6).
+func TestSymlinkSwapAcceptsTargetsInsideHome(t *testing.T) {
+	root, home, _ := testHome(t)
+	if err := os.MkdirAll(filepath.Join(home, "panel/releases/1.0.0/database"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range [][2]string{
+		{"panel/releases/1.0.0/.env", "../../shared/.env"},
+		{"panel/releases/1.0.0/storage", "../../shared/storage"},
+		{"panel/releases/1.0.0/database/database.sqlite", "../../../shared/database.sqlite"},
+		{"panel/current", "releases/1.0.0"},
+	} {
+		if err := symlinkSwap(root, c[0], c[1]); err != nil {
+			t.Errorf("symlinkSwap(%q, %q): %v", c[0], c[1], err)
+			continue
+		}
+		if got, err := os.Readlink(filepath.Join(home, c[0])); err != nil || got != c[1] {
+			t.Errorf("%s -> %q, %v; want %s", c[0], got, err, c[1])
+		}
 	}
 }
 
