@@ -1,0 +1,16 @@
+# Managed by Zimam. Changes here are overwritten.
+# Answers requests for names no site serves: HTTP gets no response, and TLS
+# handshakes are refused.
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    access_log off;
+    return 444;
+}
+
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    access_log off;
+    ssl_reject_handshake on;
+}
