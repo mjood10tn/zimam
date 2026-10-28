@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os/exec"
 	"path/filepath"
@@ -109,6 +110,20 @@ type Deps struct {
 	Logf   func(format string, args ...any) // the job log, or stderr for CLI runs
 	Now    func() time.Time
 	HTTP   *http.Client // downloads; nil means defaultHTTP
+	DNS    Resolver     // nil means net.DefaultResolver
+}
+
+// Resolver looks up a host's addresses, as *net.Resolver does.
+type Resolver interface {
+	LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
+}
+
+// DNSResolver returns the resolver lookups use.
+func (d Deps) DNSResolver() Resolver {
+	if d.DNS != nil {
+		return d.DNS
+	}
+	return net.DefaultResolver
 }
 
 // defaultHTTP is the client for downloads when Deps.HTTP is nil. Its timeout

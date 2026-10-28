@@ -27,7 +27,7 @@ Every file root reads is rendered from a template, and `agent/internal/templates
 cd agent && go test ./internal/templates -update
 ```
 
-The `configcheck` job tests each golden case with `nginx -t`, `php-fpm<v> -t`, `logrotate -d` and `systemd-analyze verify` inside an Ubuntu 26.04 container. To run it locally with Docker:
+The `configcheck` job tests each golden case inside an Ubuntu 26.04 container, with the tools that read it: `nginx -t`, `php-fpm<v> -t`, `apt-cache policy`, `logrotate -d` and `systemd-analyze verify`. To run it locally with Docker:
 
 ```bash
 cd agent && docker build -t zimam-configcheck scripts/configcheck && bash scripts/configcheck/run.sh zimam-configcheck internal/templates/testdata/golden
