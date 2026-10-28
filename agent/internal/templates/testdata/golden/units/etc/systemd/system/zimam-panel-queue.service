@@ -1,0 +1,15 @@
+# Managed by Zimam. Changes here are overwritten.
+[Unit]
+Description=Zimam panel queue worker
+After=network.target
+
+[Service]
+User=zimam
+Group=zimam
+WorkingDirectory=/home/zimam/panel/current
+ExecStart=/usr/bin/php8.4 artisan queue:work --sleep=1 --max-time=3600
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

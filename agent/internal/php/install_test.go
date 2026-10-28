@@ -80,8 +80,10 @@ func TestInstallRemovesWwwConf(t *testing.T) {
 				t.Errorf("%s lacks %q:\n%s", path, w, got)
 			}
 		}
-		if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o644 {
-			t.Errorf("%s: mode %v, %v; want 0644", path, fi.Mode().Perm(), err)
+		if fi, err := os.Stat(path); err != nil {
+			t.Error(err)
+		} else if fi.Mode().Perm() != 0o644 {
+			t.Errorf("%s: mode %v, want 0644", path, fi.Mode().Perm())
 		}
 	}
 }
@@ -95,7 +97,8 @@ func TestInstallWithoutPoolsDisablesFPM(t *testing.T) {
 	if want := line(systemctlCmd("disable", "--now", "php8.4-fpm")); lastOf(got) != want {
 		t.Errorf("ran %q, want %q last", got, want)
 	}
-	// With no pool left, php-fpm -t fails (Task 1), so it must not run.
+	// With no pool left, php-fpm -t exits 78 ("No pool defined"), so it must
+	// not run.
 	if slices.Contains(got, line(fpmTest("8.4"))) {
 		t.Errorf("ran php-fpm8.4 -t without a pool: %q", got)
 	}

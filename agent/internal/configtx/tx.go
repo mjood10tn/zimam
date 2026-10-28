@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"zimam/agent/internal/paths"
@@ -153,6 +154,17 @@ func (s *staging) restore() error {
 }
 
 func (s *staging) commit() { _ = os.Remove(s.path + ".zimam-prev") }
+
+// RunTest runs a tool's config test, such as nginx -t. If the tool ran and
+// failed, the error is a *TestFailed carrying its output.
+func RunTest(ctx context.Context, run sysexec.Runner, cmd sysexec.Cmd) error {
+	res, err := run.Run(ctx, cmd)
+	var exit *sysexec.ExitError
+	if errors.As(err, &exit) {
+		return &TestFailed{Output: strings.TrimSpace(string(res.Stdout) + string(res.Stderr))}
+	}
+	return err
+}
 
 // WithReloadLock runs fn holding the reload lock, so tests and reloads of the
 // same service never overlap (§5.5). The locks directory must exist.

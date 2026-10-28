@@ -152,6 +152,12 @@ if [ -f "$src/etc/zimam/logrotate.conf" ]; then
 		ensure_user "$u"
 		ensure_group "$g"
 	done < <(grep -hE '^[[:space:]]*su[[:space:]]' "${confs[@]}" | awk '{ print $2, $3 }' || true)
+	# While logrotate -d tests a changed rules file, configtx keeps its
+	# previous version beside it as .zimam-prev. logrotate.conf must skip
+	# those, or each rule counts twice.
+	for f in "$src"/etc/zimam/logrotate.d/*.conf; do
+		cp "/etc/zimam/logrotate.d/$(basename "$f")" "/etc/zimam/logrotate.d/$(basename "$f").zimam-prev"
+	done
 	echo "== logrotate -d"
 	out=$(logrotate -d --state /tmp/configcheck-logrotate.state /etc/zimam/logrotate.conf 2>&1) || {
 		printf '%s\n' "$out"

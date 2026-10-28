@@ -51,6 +51,46 @@ var goldenCases = map[string][]goldenFile{
 	"apt-sury-mirror": suryRepo("https://mirror.example.com/sury/php/", "mirror.example.com"),
 	// What php.install writes for each version on the allowlist (§8.3).
 	"php-base": phpBase(),
+	// The panel's vhost and pool (§7.1, §9.3), before and after its
+	// certificate exists.
+	"panel-http":  panel(false),
+	"panel-https": panel(true),
+	// Zimam's own units (§7.1, §11.3).
+	"units": units(),
+	// The log policy (§11.3): Zimam's own rules, one site's, and the journal's.
+	"log-policy": logPolicy(),
+}
+
+func panel(https bool) []goldenFile {
+	var p paths.Paths
+	files := []goldenFile{
+		{path: p.NginxPanelAvailable(), tmpl: "nginx/panel.conf", data: func() any { return PanelVhost{Domain: "panel.example.com", HTTPS: https} }},
+		{path: p.PanelPool("8.4"), tmpl: "php/panel-pool.conf"},
+	}
+	if https {
+		files = append(files, goldenFile{path: "/etc/nginx/zimam/tls.conf", tmpl: "nginx/tls.conf"})
+	}
+	return files
+}
+
+func units() []goldenFile {
+	var p paths.Paths
+	var files []goldenFile
+	for _, name := range []string{"zimam-panel-queue.service", "zimam-panel-scheduler.service", "zimam-panel-scheduler.timer", "zimam-maintenance.service", "zimam-maintenance.timer"} {
+		files = append(files, goldenFile{path: p.SystemdUnit(name), tmpl: "systemd/" + name, data: func() any { return PanelUnits{PanelPHP: "8.4"} }})
+	}
+	return files
+}
+
+func logPolicy() []goldenFile {
+	var p paths.Paths
+	policy := func() any { return LogPolicy{RetentionDays: 14} }
+	return []goldenFile{
+		{path: p.LogrotateConf(), tmpl: "logrotate/zimam.conf"},
+		{path: p.OwnLogrotateConf(), tmpl: "logrotate/zimam-own.conf", data: policy},
+		{path: p.SiteLogrotateConf("shop"), tmpl: "logrotate/site.conf", data: func() any { return SiteLogs{Name: "shop", RetentionDays: 14} }},
+		{path: p.JournaldDropIn(), tmpl: "journald/50-zimam.conf", data: policy},
+	}
 }
 
 func suryRepo(url, host string) []goldenFile {

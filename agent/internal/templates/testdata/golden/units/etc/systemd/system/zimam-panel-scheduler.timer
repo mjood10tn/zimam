@@ -1,0 +1,10 @@
+# Managed by Zimam. Changes here are overwritten.
+[Unit]
+Description=Run the Zimam panel scheduler every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
