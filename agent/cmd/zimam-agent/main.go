@@ -25,7 +25,7 @@ var subcommands = map[string]subcommand{
 	"serve":              serve,
 	"bootstrap":          notImplemented("bootstrap"),
 	"panel setup-link":   notImplemented("panel setup-link"),
-	"hook cert-deployed": notImplemented("hook cert-deployed"),
+	"hook cert-deployed": hookCertDeployed,
 	"maintenance":        notImplemented("maintenance"),
 	"job run":            jobRun,
 	"as-user":            runAsUser,

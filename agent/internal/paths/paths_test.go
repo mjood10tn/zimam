@@ -10,7 +10,7 @@ import (
 
 // production is every method's path with Root "", for site "shop", PHP 8.4,
 // job testJob and subject "site:shop" (design §5.5, §5.7, §5.9, §7.1, §8.2,
-// §8.3, §9.1, §9.3, §11.3, D15, D17).
+// §8.3, §9.1, §9.3, §10, §11.3, D15, D17).
 var production = map[string]string{
 	"AgentBinary":         "/usr/local/sbin/zimam-agent",
 	"ConfigDir":           "/etc/zimam",
@@ -67,6 +67,8 @@ var production = map[string]string{
 	"SystemdUnit":         "/etc/systemd/system/site:shop", // the test passes every string argument "site:shop"
 	"JournaldDropIn":      "/etc/systemd/journald.conf.d/50-zimam.conf",
 	"OwnLogrotateConf":    "/etc/zimam/logrotate.d/zimam-own.conf",
+	"LetsEncryptCert":     "/etc/letsencrypt/live/site:shop/cert.pem",
+	"CertRecord":          "/var/lib/zimam/certs/site:shop.json",
 	"PanelHome":           "/home/zimam",
 	"PanelReleasesDir":    "/home/zimam/panel/releases",
 	"PanelCurrent":        "/home/zimam/panel/current",

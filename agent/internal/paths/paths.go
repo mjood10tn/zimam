@@ -60,10 +60,14 @@ func (p Paths) SitesStateDir() string             { return p.at("var/lib/zimam/s
 func (p Paths) SiteState(name contract.SiteName) string {
 	return p.at("var/lib/zimam/sites", string(name)+".json")
 }
-func (p Paths) DownloadsDir() string   { return p.at("var/lib/zimam/downloads") }
-func (p Paths) CertsDir() string       { return p.at("var/lib/zimam/certs") }
-func (p Paths) UpdatesCache() string   { return p.at("var/lib/zimam/updates.json") }
-func (p Paths) LogrotateState() string { return p.at("var/lib/zimam/logrotate.state") }
+func (p Paths) DownloadsDir() string { return p.at("var/lib/zimam/downloads") }
+func (p Paths) CertsDir() string     { return p.at("var/lib/zimam/certs") }
+
+// CertRecord is a certificate's expiry record (§10): name is "panel" or a
+// site's name.
+func (p Paths) CertRecord(name string) string { return p.at("var/lib/zimam/certs", name+".json") }
+func (p Paths) UpdatesCache() string          { return p.at("var/lib/zimam/updates.json") }
+func (p Paths) LogrotateState() string        { return p.at("var/lib/zimam/logrotate.state") }
 
 // /var/log/zimam
 
@@ -153,6 +157,12 @@ func (p Paths) JournaldDropIn() string         { return p.at("etc/systemd/journa
 
 // OwnLogrotateConf rotates the audit log and the panel's Laravel log (§11.3).
 func (p Paths) OwnLogrotateConf() string { return p.at("etc/zimam/logrotate.d/zimam-own.conf") }
+
+// LetsEncryptCert is the certificate certbot keeps in a lineage (§10), such
+// as zimam-panel or zimam-shop.
+func (p Paths) LetsEncryptCert(certName string) string {
+	return p.at("etc/letsencrypt/live", certName, "cert.pem")
+}
 
 // APT: the sury repository (§8.2)
 
