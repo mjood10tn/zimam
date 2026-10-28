@@ -257,6 +257,26 @@ func TestApplySetsModeAndOwner(t *testing.T) {
 	}
 }
 
+func TestRootFileKeepsTheWritersOwner(t *testing.T) {
+	// -1 leaves the owner as created: root:root for the agent, the test's
+	// own user here.
+	conf := filepath.Join(t.TempDir(), "zimam.conf")
+	c := RootFile(conf, []byte("x\n"), 0o644)
+	if c.UID != -1 || c.GID != -1 || c.Mode != 0o644 || c.Remove || string(c.Content) != "x\n" {
+		t.Fatalf("RootFile = %+v", c)
+	}
+	if err := Apply(context.Background(), []Change{c}, pass); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	fi, err := os.Stat(conf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := fi.Sys().(*syscall.Stat_t); int(st.Uid) != os.Geteuid() || int(st.Gid) != os.Getegid() {
+		t.Errorf("owner = %d:%d, want the writer's %d:%d", st.Uid, st.Gid, os.Geteuid(), os.Getegid())
+	}
+}
+
 func TestReloadLockSerialises(t *testing.T) {
 	p := paths.Paths{Root: t.TempDir()}
 	if err := os.MkdirAll(p.LocksDir(), 0o700); err != nil {

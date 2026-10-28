@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os/exec"
 	"path/filepath"
 	"time"
@@ -107,4 +108,17 @@ type Deps struct {
 	Config config.Agent
 	Logf   func(format string, args ...any) // the job log, or stderr for CLI runs
 	Now    func() time.Time
+	HTTP   *http.Client // downloads; nil means defaultHTTP
+}
+
+// defaultHTTP is the client for downloads when Deps.HTTP is nil. Its timeout
+// covers the whole request, body included.
+var defaultHTTP = &http.Client{Timeout: 5 * time.Minute}
+
+// HTTPClient returns the client downloads use.
+func (d Deps) HTTPClient() *http.Client {
+	if d.HTTP != nil {
+		return d.HTTP
+	}
+	return defaultHTTP
 }

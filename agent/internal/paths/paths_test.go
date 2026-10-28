@@ -9,7 +9,8 @@ import (
 )
 
 // production is every method's path with Root "", for site "shop", PHP 8.4,
-// job testJob and subject "site:shop" (design §5.5, §5.7, §5.9, §9.1, D15, D17).
+// job testJob and subject "site:shop" (design §5.5, §5.7, §5.9, §8.2, §8.3,
+// §9.1, D15, D17).
 var production = map[string]string{
 	"AgentBinary":        "/usr/local/sbin/zimam-agent",
 	"ConfigDir":          "/etc/zimam",
@@ -53,6 +54,13 @@ var production = map[string]string{
 	"NginxSiteEnabled":   "/etc/nginx/sites-enabled/zimam-shop.conf",
 	"PHPPool":            "/etc/php/8.4/fpm/pool.d/zimam-shop.conf",
 	"PHPSocket":          "/run/php/zimam-shop-8.4.sock",
+	"PHPPoolDir":         "/etc/php/8.4/fpm/pool.d",
+	"PHPIni":             "/etc/php/8.4/fpm/conf.d/99-zimam.ini",
+	"PHPGlobalConf":      "/etc/php/8.4/fpm/pool.d/00-zimam-global.conf",
+	"PHPWwwPool":         "/etc/php/8.4/fpm/pool.d/www.conf",
+	"SuryKeyring":        "/etc/apt/keyrings/zimam-sury.gpg",
+	"SurySources":        "/etc/apt/sources.list.d/zimam-sury.sources",
+	"SuryPin":            "/etc/apt/preferences.d/zimam-sury.pref",
 	"PanelHome":          "/home/zimam",
 	"PanelReleasesDir":   "/home/zimam/panel/releases",
 	"PanelCurrent":       "/home/zimam/panel/current",

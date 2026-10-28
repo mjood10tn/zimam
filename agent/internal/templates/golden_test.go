@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"zimam/agent/contract"
+	"zimam/agent/internal/paths"
 )
 
 var update = flag.Bool("update", false, "rewrite testdata/golden from the templates")
@@ -44,6 +45,33 @@ var goldenCases = map[string][]goldenFile{
 		{path: "/etc/nginx/zimam/tls.conf", tmpl: "nginx/tls.conf"},
 		{path: "/etc/nginx/sites-available/zimam-default.conf", tmpl: "nginx/default.conf"},
 	},
+	// The sury repository (§8.2), from the default php_repo_url and from a
+	// mirror.
+	"apt-sury":        suryRepo("https://packages.sury.org/php/", "packages.sury.org"),
+	"apt-sury-mirror": suryRepo("https://mirror.example.com/sury/php/", "mirror.example.com"),
+	// What php.install writes for each version on the allowlist (§8.3).
+	"php-base": phpBase(),
+}
+
+func suryRepo(url, host string) []goldenFile {
+	var p paths.Paths
+	data := func() any { return SuryRepo{URL: url, Host: host} }
+	return []goldenFile{
+		{path: p.SurySources(), tmpl: "apt/zimam-sury.sources", data: data},
+		{path: p.SuryPin(), tmpl: "apt/zimam-sury.pref", data: data},
+	}
+}
+
+func phpBase() []goldenFile {
+	var p paths.Paths
+	var files []goldenFile
+	for _, r := range contract.PHPAllowlist {
+		files = append(files,
+			goldenFile{path: p.PHPIni(r.Version), tmpl: "php/99-zimam.ini"},
+			goldenFile{path: p.PHPGlobalConf(r.Version), tmpl: "php/00-zimam-global.conf"},
+		)
+	}
+	return files
 }
 
 func TestGolden(t *testing.T) {
@@ -156,14 +184,51 @@ func TestStringsInFindsNestedStrings(t *testing.T) {
 	}
 }
 
+// renderedString is one string in a golden file's data that its template
+// writes into the output.
+type renderedString struct {
+	what  string
+	file  goldenFile
+	index int // into stringsIn(file.data())
+}
+
+// renderedStrings finds every string a golden case's template renders: a
+// sentinel put there shows up in the output. A field the template doesn't
+// use, such as SuryRepo.Host in the source file, is left out.
+func renderedStrings(t testing.TB) []renderedString {
+	const sentinel = "zimamsentinel"
+	var found []renderedString
+	for name, files := range goldenCases {
+		for _, gf := range files {
+			if gf.data == nil {
+				continue
+			}
+			_, fields := stringsIn(gf.data())
+			for i := range fields {
+				root, fields := stringsIn(gf.data())
+				fields[i].SetString(sentinel)
+				out, err := Render(gf.tmpl, root.Interface())
+				if err != nil {
+					t.Fatalf("%s %s with %q in string %d: %v", name, gf.tmpl, sentinel, i, err)
+				}
+				if bytes.Contains(out, []byte(sentinel)) {
+					found = append(found, renderedString{fmt.Sprintf("%s %s (string %d)", name, gf.tmpl, i), gf, i})
+				}
+			}
+		}
+	}
+	return found
+}
+
 // FuzzRenderSafe puts random strings through safe, and into every string a
-// golden case's data holds. Rendering either fails, or the value appears
-// exactly as given and adds no line break.
+// golden case's template renders. Rendering either fails, or the value
+// appears exactly as given and adds no line break.
 func FuzzRenderSafe(f *testing.F) {
 	for _, s := range []string{"shop.example.com", "packages.sury.org", "a;b", "a\nb", "a{b", "$host", `a"b`, "a b", ""} {
 		f.Add(s)
 	}
 	set := testSet(f, map[string]string{"test/safe.conf": "server_name {{safe .}};\n"})
+	targets := renderedStrings(f)
 	f.Fuzz(func(t *testing.T, s string) {
 		check := func(what string, out []byte, err error) {
 			if err != nil {
@@ -178,19 +243,32 @@ func FuzzRenderSafe(f *testing.F) {
 		}
 		out, err := render(set, "test/safe.conf", s)
 		check("safe", out, err)
-		for name, files := range goldenCases {
-			for _, gf := range files {
-				if gf.data == nil {
-					continue
-				}
-				_, fields := stringsIn(gf.data())
-				for i := range fields {
-					root, fields := stringsIn(gf.data())
-					fields[i].SetString(s)
-					out, err := Render(gf.tmpl, root.Interface())
-					check(fmt.Sprintf("%s %s (string %d)", name, gf.tmpl, i), out, err)
-				}
-			}
+		for _, target := range targets {
+			root, fields := stringsIn(target.file.data())
+			fields[target.index].SetString(s)
+			out, err := Render(target.file.tmpl, root.Interface())
+			check(target.what, out, err)
 		}
 	})
+}
+
+func TestRenderedStringsFindsTemplateFields(t *testing.T) {
+	found := map[string]bool{}
+	for _, r := range renderedStrings(t) {
+		found[r.what] = true
+	}
+	// SuryRepo's string 0 is URL, which only the source file renders; string
+	// 1 is Host, which only the pin renders.
+	for _, c := range []string{"apt-sury", "apt-sury-mirror"} {
+		for what, want := range map[string]bool{
+			c + " apt/zimam-sury.sources (string 0)": true,
+			c + " apt/zimam-sury.sources (string 1)": false,
+			c + " apt/zimam-sury.pref (string 0)":    false,
+			c + " apt/zimam-sury.pref (string 1)":    true,
+		} {
+			if found[what] != want {
+				t.Errorf("%s: found = %v, want %v", what, found[what], want)
+			}
+		}
+	}
 }

@@ -105,6 +105,25 @@ if [ -d "$src/etc/nginx" ]; then
 	nginx -t || fail "nginx -t failed"
 fi
 
+if [ -d "$src/etc/apt" ]; then
+	# apt-cache policy reads every source and pin; it fails on a malformed
+	# entry, but not on a Signed-By keyring that doesn't exist.
+	for f in "$src"/etc/apt/sources.list.d/*.sources; do
+		for keyring in $(sed -n 's/^Signed-By:[[:space:]]*//p' "$f"); do
+			[ -f "$keyring" ] || fail "$(basename "$f") names a keyring that doesn't exist: $keyring"
+		done
+	done
+	echo "== apt-cache policy"
+	out=$(apt-cache policy 2>&1) || {
+		printf '%s\n' "$out"
+		fail "apt-cache policy failed"
+	}
+	if grep -E '^(E|W):' <<<"$out"; then
+		fail "apt-cache policy reported a problem"
+	fi
+	echo "every source and pin parses"
+fi
+
 # The image keeps each version's stock www.conf, so a version whose case
 # holds no pool (only ini files or the global config) still has one, and
 # php-fpm -t can run.

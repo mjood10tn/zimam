@@ -16,13 +16,21 @@ import (
 	"zimam/agent/internal/sysexec"
 )
 
-// Change is one file to write, or to remove when Remove is set.
+// Change is one file to write, or to remove when Remove is set. UID and GID
+// are the owner to set; -1 keeps the writer's own.
 type Change struct {
 	Path     string
 	Content  []byte
 	Mode     os.FileMode
 	UID, GID int
 	Remove   bool
+}
+
+// RootFile is a change to a file root owns. It keeps the writer as owner,
+// which is root:root for the agent (and the test's own user in tests, which
+// don't run as root).
+func RootFile(path string, content []byte, mode os.FileMode) Change {
+	return Change{Path: path, Content: content, Mode: mode, UID: -1, GID: -1}
 }
 
 // TestFailed carries the tester's output into the job's failure message.
