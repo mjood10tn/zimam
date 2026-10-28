@@ -262,6 +262,12 @@ func (LogSearch) JSONSchema() Schema {
 	return Schema{"type": "string", "maxLength": maxLogSearchRunes, "pattern": `^[^\x00-\x1f\x7f-\x9f]*$`}
 }
 
+// Match reports whether line contains q, ignoring case. q is plain text,
+// never a regex; the helper's search and logs.read both match with it.
+func (q LogSearch) Match(line string) bool {
+	return strings.Contains(strings.ToLower(line), strings.ToLower(string(q)))
+}
+
 const GiB = int64(1) << 30
 
 type RetentionDays int

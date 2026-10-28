@@ -5,6 +5,9 @@ import (
 	"os/user"
 	"strings"
 	"testing"
+
+	"zimam/agent/internal/config"
+	"zimam/agent/internal/paths"
 )
 
 func TestJobRunUsage(t *testing.T) {
@@ -17,6 +20,14 @@ func TestJobRunUsage(t *testing.T) {
 		if code != 2 || !strings.Contains(stderr, "usage") {
 			t.Errorf("run(%q) = %d, %q; want 2 and usage", args, code, stderr)
 		}
+	}
+}
+
+func TestJobManagerHelper(t *testing.T) {
+	p := paths.Paths{Root: "/tmp/zimam-test"}
+	m := jobManager(p, config.Agent{}, -1)
+	if m.Helper == nil || m.Helper.AgentBinary != p.AgentBinary() {
+		t.Errorf("Helper = %+v, want one running %s", m.Helper, p.AgentBinary())
 	}
 }
 

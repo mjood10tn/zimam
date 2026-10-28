@@ -369,6 +369,28 @@ func TestLogSearch(t *testing.T) {
 		[]LogSearch{LogSearch(strings.Repeat("ش", 201)), "\xff", "a\x00b", "a\nb", "a\u0085b"})
 }
 
+func TestLogSearchMatch(t *testing.T) {
+	for _, c := range []struct {
+		q, line string
+		want    bool
+	}{
+		{"error", "PHP Fatal ERROR in x", true},
+		{"ERROR", "an error", true},
+		{"ÄRGER", "großer ärger", true},
+		{"", "anything", true},
+		{".*", "literal .* here", true},
+		// Plain text, never a regex.
+		{".*", "no dot star", false},
+		{"a+b", "aab", false},
+		{"[x]", "x", false},
+		{"missing", "error", false},
+	} {
+		if got := LogSearch(c.q).Match(c.line); got != c.want {
+			t.Errorf("LogSearch(%q).Match(%q) = %v, want %v", c.q, c.line, got, c.want)
+		}
+	}
+}
+
 func TestRetentionDays(t *testing.T) {
 	checkValues(t, []RetentionDays{1, 14, 365}, []RetentionDays{0, -1, 366})
 }

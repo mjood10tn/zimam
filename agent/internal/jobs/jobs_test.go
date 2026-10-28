@@ -15,6 +15,7 @@ import (
 
 	"zimam/agent/contract"
 	"zimam/agent/internal/audit"
+	"zimam/agent/internal/helper"
 	"zimam/agent/internal/paths"
 )
 
@@ -480,6 +481,20 @@ func TestStatusReconcilesFirst(t *testing.T) {
 	}
 	_, err = f.m.Status(context.Background(), "01JBX7Q3A1B2C3D4E5F6G7H8J9")
 	expectCode(t, err, contract.ErrNotFound)
+}
+
+func TestRunGivesHandlersTheHelper(t *testing.T) {
+	f := newFixture(t)
+	f.m.Helper = &helper.Client{AgentBinary: "/usr/local/sbin/zimam-agent"}
+	var got *helper.Client
+	f.m.Handlers["php.default"] = func(_ context.Context, j *Context, _ contract.Params) (any, error) {
+		got = j.Helper
+		return testResult{Greeting: "hi"}, nil
+	}
+	f.run(t, f.submit(t, "php.default", &testParams{}))
+	if got != f.m.Helper {
+		t.Errorf("the handler got helper %v, want the manager's %v", got, f.m.Helper)
+	}
 }
 
 func TestNewJobIDIsULID(t *testing.T) {

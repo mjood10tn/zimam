@@ -16,6 +16,7 @@ import (
 
 	"zimam/agent/contract"
 	"zimam/agent/internal/config"
+	"zimam/agent/internal/helper"
 	"zimam/agent/internal/paths"
 	"zimam/agent/internal/sysexec"
 )
@@ -32,6 +33,7 @@ type Context struct {
 	Config config.Agent
 	Paths  paths.Paths
 	Run    sysexec.Runner
+	Helper *helper.Client
 }
 
 // RunJob is the body of `zimam-agent job run <id>`, inside the job's unit
@@ -105,7 +107,7 @@ func (m *Manager) call(ctx context.Context, id contract.JobID, sp spec, logf fun
 			err = fmt.Errorf("panic: %v", r)
 		}
 	}()
-	return h(ctx, &Context{ID: id, Logf: logf, Config: m.Config, Paths: m.Paths, Run: m.Run}, p)
+	return h(ctx, &Context{ID: id, Logf: logf, Config: m.Config, Paths: m.Paths, Run: m.Run, Helper: m.Helper}, p)
 }
 
 // record writes a run's final state and audits it.
