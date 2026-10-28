@@ -1,0 +1,25 @@
+# Managed by Zimam. Changes here are overwritten.
+/var/log/zimam/audit.log {
+    daily
+    maxsize 200M
+    rotate 1000
+    maxage {{.RetentionDays}}
+    missingok
+    notifempty
+    compress
+    dateext
+    dateformat -%Y%m%d-%s
+}
+
+/home/zimam/panel/shared/storage/logs/*.log {
+    su zimam zimam
+    daily
+    maxsize 200M
+    rotate 1000
+    maxage {{.RetentionDays}}
+    missingok
+    notifempty
+    compress
+    dateext
+    dateformat -%Y%m%d-%s
+}

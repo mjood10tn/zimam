@@ -1,0 +1,7 @@
+# Managed by Zimam. Changes here are overwritten.
+[Unit]
+Description=Zimam maintenance: log rotation and caps, job cleanup
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/zimam-agent maintenance

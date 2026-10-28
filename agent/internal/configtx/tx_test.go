@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"zimam/agent/internal/paths"
+	"zimam/agent/internal/sysexec"
 )
 
 func writeFile(t *testing.T, path, content string) {
@@ -274,6 +275,27 @@ func TestRootFileKeepsTheWritersOwner(t *testing.T) {
 	}
 	if st := fi.Sys().(*syscall.Stat_t); int(st.Uid) != os.Geteuid() || int(st.Gid) != os.Getegid() {
 		t.Errorf("owner = %d:%d, want the writer's %d:%d", st.Uid, st.Gid, os.Geteuid(), os.Getegid())
+	}
+}
+
+func TestRunTestCarriesOutput(t *testing.T) {
+	nginxT := sysexec.Script{Path: "/usr/sbin/nginx", Args: []string{"-t"}}
+	failing := nginxT
+	failing.Result = sysexec.Result{ExitCode: 1, Stdout: []byte("checking\n"), Stderr: []byte("nginx: [emerg] bad\n")}
+	run := sysexec.NewFakeRunner(failing, nginxT)
+	cmd := sysexec.Cmd{Path: "/usr/sbin/nginx", Args: []string{"-t"}}
+	err := RunTest(context.Background(), run, cmd)
+	var failed *TestFailed
+	if !errors.As(err, &failed) || failed.Output != "checking\nnginx: [emerg] bad" {
+		t.Errorf("RunTest = %#v, want a TestFailed with stdout and stderr", err)
+	}
+	if err := RunTest(context.Background(), run, cmd); err != nil {
+		t.Errorf("RunTest of a passing test = %v", err)
+	}
+	// A tool that didn't run at all isn't a failed test.
+	err = RunTest(context.Background(), run, sysexec.Cmd{Path: "/usr/sbin/missing"})
+	if err == nil || errors.As(err, &failed) {
+		t.Errorf("RunTest of an unscripted tool = %v, want a plain error", err)
 	}
 }
 

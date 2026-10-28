@@ -17,7 +17,7 @@ func TestPackagesPerVersion(t *testing.T) {
 			want = append(want, "php"+v+"-"+ext)
 		}
 		// §8.1: OPcache is a package of its own before 8.5; sury publishes
-		// -redis for 8.2–8.5 (Task 1, 2026-10-27).
+		// -redis for 8.2–8.5 (checked on 2026-10-27).
 		if v != "8.5" {
 			want = append(want, "php"+v+"-opcache")
 		}

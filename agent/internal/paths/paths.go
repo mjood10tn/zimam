@@ -104,6 +104,15 @@ func (p Paths) NginxSiteEnabled(name contract.SiteName) string {
 	return p.at("etc/nginx/sites-enabled", "zimam-"+string(name)+".conf")
 }
 
+// The panel's vhost (§9.3). "panel" is a reserved site name, so no site's
+// files can collide with the panel's.
+func (p Paths) NginxPanelAvailable() string {
+	return p.at("etc/nginx/sites-available/zimam-panel.conf")
+}
+func (p Paths) NginxPanelEnabled() string {
+	return p.at("etc/nginx/sites-enabled/zimam-panel.conf")
+}
+
 // PHP-FPM
 
 func (p Paths) PHPPool(v contract.PHPVersion, name contract.SiteName) string {
@@ -116,12 +125,18 @@ func (p Paths) PHPPoolDir(v contract.PHPVersion) string {
 	return p.at("etc/php", string(v), "fpm/pool.d")
 }
 
+// PanelPool is the panel's pool, on the panel's PHP version (§7.1).
+func (p Paths) PanelPool(v contract.PHPVersion) string {
+	return filepath.Join(p.PHPPoolDir(v), "zimam-panel.conf")
+}
+
 // PHPIni is Zimam's baseline ini file for a version's FPM (§8.3).
 func (p Paths) PHPIni(v contract.PHPVersion) string {
 	return p.at("etc/php", string(v), "fpm/conf.d/99-zimam.ini")
 }
 
-// PHPGlobalConf holds FPM's [global] settings, in pool.d (§8.3, Task 1).
+// PHPGlobalConf holds FPM's [global] settings. FPM reads it from pool.d
+// like a pool file (§8.3).
 func (p Paths) PHPGlobalConf(v contract.PHPVersion) string {
 	return filepath.Join(p.PHPPoolDir(v), "00-zimam-global.conf")
 }
@@ -130,6 +145,14 @@ func (p Paths) PHPGlobalConf(v contract.PHPVersion) string {
 func (p Paths) PHPWwwPool(v contract.PHPVersion) string {
 	return filepath.Join(p.PHPPoolDir(v), "www.conf")
 }
+
+// systemd: Zimam's own units (§7.1) and the journal's limits (§11.3)
+
+func (p Paths) SystemdUnit(name string) string { return p.at("etc/systemd/system", name) }
+func (p Paths) JournaldDropIn() string         { return p.at("etc/systemd/journald.conf.d/50-zimam.conf") }
+
+// OwnLogrotateConf rotates the audit log and the panel's Laravel log (§11.3).
+func (p Paths) OwnLogrotateConf() string { return p.at("etc/zimam/logrotate.d/zimam-own.conf") }
 
 // APT: the sury repository (§8.2)
 

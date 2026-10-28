@@ -1,7 +1,8 @@
 # The config check image (design §14.1): Ubuntu 26.04 with Nginx, logrotate,
 # systemd and PHP 8.2–8.5 FPM, where check.sh tests the golden files. PHP
 # comes from packages.sury.org, set up as §8.2 does it, and the keyring is
-# trusted only if its primary key has the fingerprint recorded in Task 1.
+# trusted only if its primary key has the fingerprint the agent checks
+# (php.SuryFingerprint).
 FROM ubuntu:26.04
 
 ARG SURY_FINGERPRINT=15058500A0235D97F5D10063B188E2B695BD4743

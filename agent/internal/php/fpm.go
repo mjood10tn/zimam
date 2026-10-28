@@ -71,6 +71,5 @@ func ApplyFPM(ctx context.Context, d sysexec.Deps, v contract.PHPVersion) error 
 
 // testFPM runs php-fpm<v> -t. A failure carries its output.
 func testFPM(ctx context.Context, d sysexec.Deps, v contract.PHPVersion) error {
-	res, err := d.Run.Run(ctx, sysexec.Cmd{Path: "/usr/sbin/php-fpm" + string(v), Args: []string{"-t"}})
-	return testResult(res, err)
+	return configtx.RunTest(ctx, d.Run, sysexec.Cmd{Path: "/usr/sbin/php-fpm" + string(v), Args: []string{"-t"}})
 }

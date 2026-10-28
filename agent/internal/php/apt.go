@@ -2,7 +2,6 @@ package php
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	"zimam/agent/internal/configtx"
 	"zimam/agent/internal/sysexec"
@@ -72,8 +70,7 @@ func EnsureRepo(ctx context.Context, d sysexec.Deps) error {
 	}
 	d.Logf("Writing the sury keyring, source and pin, then running apt-get update")
 	return configtx.Apply(ctx, changes, func(ctx context.Context) error {
-		res, err := d.Run.Run(ctx, sysexec.Cmd{Path: aptGet, Args: append(slices.Clone(aptLockWait), "update"), Env: aptEnv})
-		return testResult(res, err)
+		return configtx.RunTest(ctx, d.Run, sysexec.Cmd{Path: aptGet, Args: append(slices.Clone(aptLockWait), "update"), Env: aptEnv})
 	})
 }
 
@@ -99,14 +96,4 @@ func download(ctx context.Context, c *http.Client, u string) ([]byte, error) {
 		return nil, fmt.Errorf("%s is larger than %d bytes", u, maxKeyringBytes)
 	}
 	return b, nil
-}
-
-// testResult turns a test command that ran and failed into a
-// configtx.TestFailed carrying its output.
-func testResult(res sysexec.Result, err error) error {
-	var exit *sysexec.ExitError
-	if errors.As(err, &exit) {
-		return &configtx.TestFailed{Output: strings.TrimSpace(string(res.Stdout) + string(res.Stderr))}
-	}
-	return err
 }

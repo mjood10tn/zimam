@@ -61,8 +61,10 @@ func TestEnsureRepoMirrorPinHost(t *testing.T) {
 		t.Error("the keyring written isn't the one downloaded")
 	}
 	for _, path := range []string{e.p.SuryKeyring(), e.p.SurySources(), e.p.SuryPin()} {
-		if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o644 {
-			t.Errorf("%s: mode %v, %v; want 0644", path, fi.Mode().Perm(), err)
+		if fi, err := os.Stat(path); err != nil {
+			t.Error(err)
+		} else if fi.Mode().Perm() != 0o644 {
+			t.Errorf("%s: mode %v, want 0644", path, fi.Mode().Perm())
 		}
 	}
 	calls := e.run.Calls()

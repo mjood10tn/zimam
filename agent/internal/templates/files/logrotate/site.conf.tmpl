@@ -1,0 +1,29 @@
+# Managed by Zimam. Changes here are overwritten.
+/var/log/zimam/sites/{{safe .Name}}/*.log {
+    daily
+    maxsize 200M
+    rotate 1000
+    maxage {{.RetentionDays}}
+    missingok
+    notifempty
+    compress
+    dateext
+    dateformat -%Y%m%d-%s
+    sharedscripts
+    postrotate
+        /usr/sbin/nginx -s reopen >/dev/null 2>&1 || true
+    endscript
+}
+
+/home/s_{{safe .Name}}/logs/*.log {
+    su s_{{safe .Name}} s_{{safe .Name}}
+    daily
+    maxsize 200M
+    rotate 1000
+    maxage {{.RetentionDays}}
+    missingok
+    notifempty
+    compress
+    dateext
+    dateformat -%Y%m%d-%s
+}
