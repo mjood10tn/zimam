@@ -10,7 +10,6 @@ import (
 	"io/fs"
 	"os"
 	"path"
-	"regexp"
 	"slices"
 	"syscall"
 	"time"
@@ -243,15 +242,15 @@ func readNames(root *os.Root, dir string, n int) ([]string, error) {
 	return names, err
 }
 
-// releaseTargetRe is the only symlink target symlink-swap accepts.
-var releaseTargetRe = regexp.MustCompile(`^releases/[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$`)
-
 // symlinkSwap points link at target: it creates a temporary symlink beside
-// link and renames it over link, so link is never missing. target is
-// relative to link's directory and must be releases/<name>.
+// link and renames it over link, so link is never missing. target must be
+// relative and, read from link's directory, stay inside the home, as
+// linkStaysInside checks an archive's links: current -> releases/<name>, or
+// a release's .env -> ../../shared/.env (§4 step 6). os.Root refuses a link
+// path outside the home.
 func symlinkSwap(root *os.Root, link, target string) error {
-	if !releaseTargetRe.MatchString(target) {
-		return fmt.Errorf("symlink target %q is not releases/<name>", target)
+	if linkStaysInside(link, target) != nil {
+		return fmt.Errorf("symlink %s -> %q would leave the home", link, target)
 	}
 	tmp := link + ".zimam-tmp-" + rand.Text()
 	if err := root.Symlink(target, tmp); err != nil {
