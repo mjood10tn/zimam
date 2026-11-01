@@ -8,6 +8,7 @@ import (
 
 	"zimam/agent/contract"
 	"zimam/agent/internal/jobs"
+	"zimam/agent/internal/sysexec"
 )
 
 // Handler answers a command whose params already passed Validate. A
@@ -24,12 +25,14 @@ type Stream func(ctx context.Context, send func(any) error) error
 // Handlers maps a command name to its handler.
 type Handlers map[string]Handler
 
-// New returns the handlers serve installs. Given a job manager, they include
-// job.status, job.follow and job.cancel, and a submit handler for every job
-// command the manager can run.
-func New(m *jobs.Manager) Handlers {
+// New returns the handlers serve installs. The read commands look at the
+// system through d. Given a job manager, the handlers include job.status,
+// job.follow and job.cancel, and a submit handler for every job command the
+// manager can run.
+func New(d sysexec.Deps, m *jobs.Manager) Handlers {
 	h := Handlers{
 		"agent.version": agentVersion,
+		"system.status": systemStatus(d),
 	}
 	if m == nil {
 		return h

@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"zimam/agent/internal/configtx"
 	"zimam/agent/internal/sysexec"
@@ -122,5 +123,35 @@ func TestEnsureRepoRestoresOnUpdateFailure(t *testing.T) {
 		if got := readFile(t, path); got != "previous\n" {
 			t.Errorf("%s = %q, want the previous file back", path, got)
 		}
+	}
+}
+
+// Maintenance's weekly refresh, php.install and bootstrap all set up the
+// repository. One lock keeps their transactions on the same three files
+// apart: each stages a .zimam-prev the other could replace.
+func TestEnsureRepoWaitsForTheRepoLock(t *testing.T) {
+	e := newEnv(t, fixture(t, "sury-apt.gpg"), "/php/")
+	e.run.Add(aptUpdate)
+	unlock, err := sysexec.Lock(context.Background(), e.p.AptRepoLock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	err = EnsureRepo(ctx, e.d)
+	unlock()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("EnsureRepo = %v, want it to wait for the lock until the deadline", err)
+	}
+	for _, path := range []string{e.p.SuryKeyring(), e.p.SurySources(), e.p.SuryPin()} {
+		if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("%s was written while the lock was held (Lstat: %v)", path, err)
+		}
+	}
+	if calls := e.run.Calls(); len(calls) != 0 {
+		t.Errorf("ran %q while the lock was held", commands(calls))
+	}
+	if err := EnsureRepo(context.Background(), e.d); err != nil {
+		t.Errorf("EnsureRepo after the lock was released: %v", err)
 	}
 }

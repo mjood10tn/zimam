@@ -9,8 +9,8 @@ import (
 )
 
 // production is every method's path with Root "", for site "shop", PHP 8.4,
-// job testJob and subject "site:shop" (design §5.5, §5.7, §5.9, §7.1, §8.2,
-// §8.3, §9.1, §9.3, §10, §11.3, D15, D17).
+// job testJob and subject "site:shop" (design §5.5, §5.7, §5.9, §7.1, §7.5,
+// §8.2, §8.3, §9.1, §9.3, §10, §11.3, D15, D17, D23).
 var production = map[string]string{
 	"AgentBinary":         "/usr/local/sbin/zimam-agent",
 	"ConfigDir":           "/etc/zimam",
@@ -25,6 +25,8 @@ var production = map[string]string{
 	"SubmitLock":          "/run/zimam/locks/submit.lock",
 	"AuditLock":           "/run/zimam/locks/audit.lock",
 	"ReloadLock":          "/run/zimam/locks/reload.lock",
+	"MaintenanceLock":     "/run/zimam/locks/maintenance.lock",
+	"AptRepoLock":         "/run/zimam/locks/apt-repo.lock",
 	"SubjectLock":         "/run/zimam/locks/site:shop.lock",
 	"StateDir":            "/var/lib/zimam",
 	"JobsDir":             "/var/lib/zimam/jobs",
@@ -36,7 +38,11 @@ var production = map[string]string{
 	"DownloadsDir":        "/var/lib/zimam/downloads",
 	"CertsDir":            "/var/lib/zimam/certs",
 	"UpdatesCache":        "/var/lib/zimam/updates.json",
+	"KeyringRefresh":      "/var/lib/zimam/keyring-refresh.json",
 	"LogrotateState":      "/var/lib/zimam/logrotate.state",
+	"RebootRequired":      "/run/reboot-required",
+	"AptCheck":            "/usr/lib/update-notifier/apt-check",
+	"PHPFPMBinary":        "/usr/sbin/php-fpm8.4",
 	"LogDir":              "/var/log/zimam",
 	"AuditLog":            "/var/log/zimam/audit.log",
 	"JobLogsDir":          "/var/log/zimam/jobs",
