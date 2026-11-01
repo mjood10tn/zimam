@@ -121,6 +121,12 @@ final class DashboardTest extends TestCase
             ->assertSee(__('zimam.agent.banner.heading'));
     }
 
+    /** A page left open refreshes both widgets, so the server facts never look fresher than the bulletin. */
+    public function testBothWidgetsRefreshEvery10Seconds(): void
+    {
+        $this->assertSame(2, substr_count($this->get('/admin')->assertOk()->getContent(), 'wire:poll.10s'));
+    }
+
     private function useAgent(FakeAgentClient $agent): void
     {
         $this->agent = $agent;
