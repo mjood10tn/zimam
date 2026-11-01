@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Platform;
 
+use Tests\Support\EvaluatesConfigFiles;
 use Tests\TestCase;
 
 final class SessionConfigTest extends TestCase

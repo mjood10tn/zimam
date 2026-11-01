@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests\Feature\Platform;
+namespace Tests\Support;
 
 /**
  * Evaluates a config file the way the server's own environment would, rather

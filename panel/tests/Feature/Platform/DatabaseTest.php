@@ -4,6 +4,7 @@ namespace Tests\Feature\Platform;
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Tests\Support\EvaluatesConfigFiles;
 use Tests\TestCase;
 
 final class DatabaseTest extends TestCase
