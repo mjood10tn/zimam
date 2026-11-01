@@ -2,6 +2,9 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Auth\LongSecretAppAuthentication;
+use App\Filament\Pages\Auth\Login;
+use Filament\Auth\MultiFactor\Http\Middleware\EnsureMultiFactorAuthenticationIsEnabled;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -27,8 +30,12 @@ class AdminPanelProvider extends PanelProvider
             ->default()
             ->id('admin')
             ->path('admin')
-            ->login()
+            ->login(Login::class)
             ->brandName(fn (): string => __('zimam.brand'))
+            // Required 2FA with authenticator apps and recovery codes (§7.2).
+            ->multiFactorAuthentication([
+                LongSecretAppAuthentication::make()->recoverable(),
+            ], isRequired: true)
             ->colors([
                 'primary' => Color::Amber,
             ])
@@ -55,6 +62,11 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->authMiddleware([
                 Authenticate::class,
+            ])
+            // Livewire update requests re-run only persistent middleware; without
+            // this one they skip the 2FA check (Task 3, step 3).
+            ->persistentMiddleware([
+                EnsureMultiFactorAuthenticationIsEnabled::class,
             ]);
     }
 }
