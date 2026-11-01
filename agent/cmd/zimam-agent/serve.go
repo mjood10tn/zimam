@@ -18,6 +18,7 @@ import (
 	"zimam/agent/internal/config"
 	"zimam/agent/internal/paths"
 	"zimam/agent/internal/server"
+	"zimam/agent/internal/sysexec"
 )
 
 // serve is `zimam-agent serve`. systemd starts it through
@@ -62,11 +63,14 @@ func serve(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	} else if n > 0 {
 		log.Printf("reconciled %d jobs", n)
 	}
+	// The read commands' view of the system. system.status reads agent.json
+	// itself on each call, since jobs change it while serve runs.
+	d := sysexec.Deps{Paths: p, Run: sysexec.ExecRunner{}, Logf: log.Printf, Now: time.Now}
 	s := &server.Server{
 		Listener:       ln,
 		Allowed:        server.AllowRootAndZimam(zimam, zimamExists),
 		Audit:          audit.Writer{Paths: p},
-		Handlers:       commands.New(m),
+		Handlers:       commands.New(d, m),
 		RequestTimeout: 10 * time.Second, // §5.2
 		DirectTimeout:  30 * time.Second, // §5.2
 	}

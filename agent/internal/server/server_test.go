@@ -22,15 +22,18 @@ import (
 	"zimam/agent/internal/jobs"
 	"zimam/agent/internal/paths"
 	"zimam/agent/internal/release"
+	"zimam/agent/internal/sysexec"
 )
 
 // Commands that exist only in this test binary: test.read answers with its
-// params, test.block never answers, and test.e2e is E2EOnly.
+// params, test.block never answers, test.e2e is E2EOnly, and test.unhandled
+// has no handler.
 func init() {
 	for _, d := range []contract.Descriptor{
 		{Name: "test.read"},
 		{Name: "test.block"},
 		{Name: "test.e2e", E2EOnly: true},
+		{Name: "test.unhandled"},
 	} {
 		d.Kind = contract.KindRead
 		d.Params = func() contract.Params { return &testParams{} }
@@ -65,7 +68,7 @@ func request(command, params string) []byte {
 func testHandlers(t testing.TB) commands.Handlers {
 	unblock := make(chan struct{})
 	t.Cleanup(func() { close(unblock) })
-	h := commands.New(nil)
+	h := commands.New(sysexec.Deps{}, nil)
 	h["test.read"] = func(_ context.Context, p contract.Params) (any, error) {
 		return testResult{Name: p.(*testParams).Name}, nil
 	}
@@ -293,8 +296,8 @@ func TestUnsupportedProtocol(t *testing.T) {
 func TestUnknownCommand(t *testing.T) {
 	srv := startServer(t)
 	expectError(t, srv, request("nope.nothing", "{}"), contract.ErrUnknownCommand)
-	// Registered, but this agent has no handler for it yet.
-	expectError(t, srv, request("system.status", "{}"), contract.ErrUnknownCommand)
+	// Registered, but this agent has no handler for it.
+	expectError(t, srv, request("test.unhandled", `{"name":"shop"}`), contract.ErrUnknownCommand)
 }
 
 func TestUnknownTopLevelField(t *testing.T) {
@@ -417,7 +420,7 @@ func TestStreamReply(t *testing.T) {
 // sends the error as the only line.
 func TestFollowUnknownJob(t *testing.T) {
 	srv := startServer(t, func(s *Server) {
-		maps.Copy(s.Handlers, commands.New(&jobs.Manager{Paths: paths.Paths{Root: t.TempDir()}}))
+		maps.Copy(s.Handlers, commands.New(sysexec.Deps{}, &jobs.Manager{Paths: paths.Paths{Root: t.TempDir()}}))
 	})
 	expectError(t, srv, request("job.follow", `{"job":"01JBX7Q3A1B2C3D4E5F6G7H8J9","from_offset":0}`), contract.ErrNotFound)
 }

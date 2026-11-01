@@ -40,6 +40,11 @@ func (p Paths) SubmitLock() string { return p.at("run/zimam/locks/submit.lock") 
 func (p Paths) AuditLock() string  { return p.at("run/zimam/locks/audit.lock") }
 func (p Paths) ReloadLock() string { return p.at("run/zimam/locks/reload.lock") } // §5.5
 
+// MaintenanceLock keeps two maintenance runs apart, and AptRepoLock two
+// setups of the sury repository.
+func (p Paths) MaintenanceLock() string { return p.at("run/zimam/locks/maintenance.lock") }
+func (p Paths) AptRepoLock() string     { return p.at("run/zimam/locks/apt-repo.lock") }
+
 // SubjectLock is a job subject's lock (§5.7), such as "site:shop" or "server".
 func (p Paths) SubjectLock(subject string) string {
 	return p.at("run/zimam/locks", subject+".lock")
@@ -68,6 +73,16 @@ func (p Paths) CertsDir() string     { return p.at("var/lib/zimam/certs") }
 func (p Paths) CertRecord(name string) string { return p.at("var/lib/zimam/certs", name+".json") }
 func (p Paths) UpdatesCache() string          { return p.at("var/lib/zimam/updates.json") }
 func (p Paths) LogrotateState() string        { return p.at("var/lib/zimam/logrotate.state") }
+
+// KeyringRefresh records maintenance's last try at refreshing the sury
+// keyring (D23).
+func (p Paths) KeyringRefresh() string { return p.at("var/lib/zimam/keyring-refresh.json") }
+
+// What system.status and maintenance read from the system (§7.5): Ubuntu's
+// reboot marker and update counter.
+
+func (p Paths) RebootRequired() string { return p.at("run/reboot-required") }
+func (p Paths) AptCheck() string       { return p.at("usr/lib/update-notifier/apt-check") }
 
 // /var/log/zimam
 
@@ -125,6 +140,13 @@ func (p Paths) PHPPool(v contract.PHPVersion, name contract.SiteName) string {
 func (p Paths) PHPSocket(name contract.SiteName, v contract.PHPVersion) string {
 	return p.at("run/php", "zimam-"+string(name)+"-"+string(v)+".sock")
 }
+
+// PHPFPMBinary is a version's FPM, which exists while the version is
+// installed.
+func (p Paths) PHPFPMBinary(v contract.PHPVersion) string {
+	return p.at("usr/sbin", "php-fpm"+string(v))
+}
+
 func (p Paths) PHPPoolDir(v contract.PHPVersion) string {
 	return p.at("etc/php", string(v), "fpm/pool.d")
 }

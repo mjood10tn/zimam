@@ -31,7 +31,16 @@ var aptEnv = []string{"DEBIAN_FRONTEND=noninteractive"}
 // then writes the keyring, the deb822 source and the pin through configtx,
 // with apt-get update as the test. Each run fetches the keyring again, so a
 // key whose expiry sury has extended gets refreshed.
+//
+// Bootstrap, php.install and maintenance's weekly refresh all call it. It
+// holds the repository lock throughout, so their transactions on the same
+// three files never overlap. The locks directory must exist.
 func EnsureRepo(ctx context.Context, d sysexec.Deps) error {
+	unlock, err := sysexec.Lock(ctx, d.Paths.AptRepoLock())
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	repo, err := url.Parse(d.Config.PHPRepoURL)
 	if err != nil {
 		return err
