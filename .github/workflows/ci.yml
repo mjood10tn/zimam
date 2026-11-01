@@ -77,3 +77,46 @@ jobs:
             echo "$untracked"
             exit 1
           fi
+  panel-php:
+    # The panel's tests on the lowest PHP it supports (config.platform.php,
+    # D7) and the newest one, plus its asset build.
+    name: panel (PHP ${{ matrix.php }})
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.5']
+    defaults:
+      run:
+        working-directory: panel
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: intl, mbstring, pdo_sqlite, sqlite3, zip
+          coverage: none
+      - name: composer install
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: php artisan test
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+          php artisan test
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: panel/package-lock.json
+      - name: npm ci && npm run build
+        run: npm ci && npm run build
+  panel:
+    # One check name for branch protection over the PHP matrix. A job
+    # skipped because the matrix failed would count as passed there, so
+    # this one always runs and fails unless every PHP version passed.
+    if: always()
+    needs: panel-php
+    runs-on: ubuntu-26.04
+    steps:
+      - name: every PHP version passed
+        run: test "${{ needs.panel-php.result }}" = success

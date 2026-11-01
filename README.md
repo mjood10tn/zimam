@@ -9,9 +9,11 @@ References such as "design §5.6" are to the project's design document, which is
 | Path | Contents |
 | --- | --- |
 | `agent/` | The Go agent (`module zimam/agent`). It uses only the standard library and `golang.org/x/sys`. |
+| `contract/` | JSON Schemas generated from the agent's Go types by `go generate ./...` in `agent/`. CI fails when they drift. |
+| `panel/` | The Laravel 13 + Filament 5 panel, on SQLite. |
 | `.github/workflows/` | CI. `ci.yml` runs on every pull request and every push to `master`. |
 
-Later tasks add `contract/`, `panel/`, `installer/`, `e2e/` and `release/` (design §3).
+Later tasks add `installer/`, `e2e/` and `release/` (design §3).
 
 ## Agent development
 
@@ -32,6 +34,22 @@ The `configcheck` job tests each golden case inside an Ubuntu 26.04 container, w
 ```bash
 cd agent && docker build -t zimam-configcheck scripts/configcheck && bash scripts/configcheck/run.sh zimam-configcheck internal/templates/testdata/golden
 ```
+
+## Panel development
+
+Panel work happens on Windows under Herd, with the fake agent client (`ZIMAM_AGENT=fake`, design §14.6):
+
+```bash
+cd panel && composer install && cp .env.example .env && php artisan key:generate && php artisan migrate
+```
+
+Then `herd link zimam-panel`, run in `panel/`, serves it at `http://zimam-panel.test`. The tests:
+
+```bash
+cd panel && php artisan test
+```
+
+`composer.json` sets `config.platform.php` to 8.3, the lowest PHP the panel supports, so the lock file is resolved for it (D7). CI runs the tests on PHP 8.3 and 8.5. On Windows, `composer` runs through cmd, which drops a `^` typed on the command line, so write version constraints there with `~`.
 
 ## Merge gates
 
