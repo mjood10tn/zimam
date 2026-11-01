@@ -22,7 +22,7 @@ final class LivewireTwoFactorTest extends TestCase
         $user = User::factory()->create();
         $user->forceFill(['app_authentication_secret' => 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP'])->save();
         $this->actingAs($user);
-        $snapshot = $this->snapshotOf('Filament\Pages\Dashboard', $this->get('/admin')->assertOk()->getContent());
+        $snapshot = $this->snapshotOf('App\Filament\Pages\Dashboard', $this->get('/admin')->assertOk()->getContent());
 
         $this->refresh($snapshot)->assertOk();
 
