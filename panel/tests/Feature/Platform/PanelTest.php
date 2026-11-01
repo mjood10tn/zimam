@@ -2,10 +2,14 @@
 
 namespace Tests\Feature\Platform;
 
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 final class PanelTest extends TestCase
 {
+    // Every request reads the IP allowlist from the settings table.
+    use RefreshDatabase;
+
     /** The brand comes from lang/en (D3), not from APP_NAME, Filament's default. */
     public function testLoginPageRenders(): void
     {
