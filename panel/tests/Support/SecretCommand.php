@@ -11,6 +11,20 @@ use App\Agent\AgentCommandKind;
  */
 final class SecretCommand extends AgentCommand
 {
+    /**
+     * Held in properties, as real commands hold their params, so a queued
+     * copy of the command carries the secrets.
+     *
+     * @param  list<array{username: string, password_hash: string}>  $users
+     */
+    public function __construct(
+        public readonly string $token = 'top-level secret',
+        public readonly array $users = [
+            ['username' => 'ann', 'password_hash' => '$2y$10$annannannannannannannannannannannannannannannannannan'],
+            ['username' => 'bob', 'password_hash' => '$2y$10$bobbobbobbobbobbobbobbobbobbobbobbobbobbobbobbobbobbo'],
+        ],
+    ) {}
+
     public function name(): string
     {
         return 'test.secret';
@@ -25,11 +39,8 @@ final class SecretCommand extends AgentCommand
     {
         return [
             'name' => 'shop',
-            'token' => 'top-level secret',
-            'users' => [
-                ['username' => 'ann', 'password_hash' => '$2y$10$annannannannannannannannannannannannannannannannannan'],
-                ['username' => 'bob', 'password_hash' => '$2y$10$bobbobbobbobbobbobbobbobbobbobbobbobbobbobbobbobbobbo'],
-            ],
+            'token' => $this->token,
+            'users' => $this->users,
         ];
     }
 

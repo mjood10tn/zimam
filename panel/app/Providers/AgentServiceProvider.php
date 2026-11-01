@@ -3,8 +3,10 @@
 namespace App\Providers;
 
 use App\Agent\AgentClient;
+use App\Agent\AgentHealth;
 use App\Agent\AuditingAgentClient;
 use App\Agent\FakeAgentClient;
+use App\Agent\JobOutcomes;
 use App\Agent\SocketAgentClient;
 use App\Agent\UnixSocketTransport;
 use Illuminate\Support\ServiceProvider;
@@ -17,5 +19,9 @@ class AgentServiceProvider extends ServiceProvider
         $this->app->singleton(AgentClient::class, fn (): AgentClient => config('zimam.agent') === 'fake'
             ? FakeAgentClient::demo()
             : new AuditingAgentClient(new SocketAgentClient(new UnixSocketTransport(config('zimam.agent_socket')))));
+        // Tasks 25-36 register their outcome handlers on the one instance.
+        $this->app->singleton(JobOutcomes::class);
+        // One answer per request or queued job, so a worker never keeps a stale one.
+        $this->app->scoped(AgentHealth::class);
     }
 }
