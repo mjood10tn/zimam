@@ -90,7 +90,10 @@ install_sh() {
 	install_sh --panel-domain panel.example.com
 	[ "$status" -eq 0 ]
 	[ -f "$T/etc-zimam/installer.state" ]
-	[ "$(head -2 "$T/apt-get.log")" = "$(printf 'update -q\ninstall -y -q nginx certbot ufw curl ca-certificates openssl')" ]
+	# apt-get waits for a dpkg lock that cloud-init or unattended-upgrades
+	# holds on a server that has just booted.
+	[ "$(head -2 "$T/apt-get.log")" = "$(printf '%s\n' "-o DPkg::Lock::Timeout=300 update -q" \
+		"-o DPkg::Lock::Timeout=300 install -y -q nginx certbot ufw curl ca-certificates openssl")" ]
 	[ "$(cat "$T/groupadd.log")" = "--system zimam-agent" ]
 	[ "$(cat "$T/useradd.log")" = "--system --create-home --home-dir $T/home/zimam --shell /usr/sbin/nologin --user-group --groups zimam-agent zimam" ]
 	# zimam's groups are set, not added to, so a re-run takes away sudo.
