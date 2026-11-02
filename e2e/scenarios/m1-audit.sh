@@ -7,7 +7,8 @@
 # shellcheck source=../scripts/common.sh
 source "$(dirname "$0")/../scripts/common.sh"
 
-lxc file pull -q "$E2E_CONTAINER/var/log/zimam/audit.log" "$E2E_WORK/audit.log"
+# Read through cat, so this user owns the copy: lxc runs as root here.
+in_c cat /var/log/zimam/audit.log >"$E2E_WORK/audit.log"
 python3 -I - "$E2E_WORK/audit.log" <<'PY'
 import json, sys
 

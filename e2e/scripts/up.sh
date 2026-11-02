@@ -20,7 +20,10 @@ if ! type -P lxc >/dev/null && [[ ! -x /snap/bin/lxc ]]; then
 	as_root snap install lxd --channel=5.21/stable
 fi
 if ! lxc network show lxdbr0 >/dev/null 2>&1; then
-	as_root "$(type -P lxd || echo /snap/bin/lxd)" init --auto
+	# The default "dir" pool would share the host's disk, and a GitHub
+	# runner has about 10 GiB free: less than the installer's 15 GiB. A
+	# sparse loop file only takes what the container writes.
+	as_root "$(type -P lxd || echo /snap/bin/lxd)" init --auto --storage-backend=btrfs --storage-create-loop=30
 fi
 # Docker's FORWARD DROP policy would cut the container off (Task 2 spike).
 if as_root iptables -L DOCKER-USER -n >/dev/null 2>&1; then
