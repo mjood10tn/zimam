@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # Builds a signed release into dist/ at the top of the repository (design §3):
-# the static agents for amd64 and arm64, the panel tarball, install.sh with
-# the release key and base URL filled in, manifest.json and its signature.
-# release.yml runs it on a tag; e2e and local checks run it with a throwaway
-# key. It needs go, php with composer, npm, git, GNU tar, gzip and GNU date.
+# the static agents for amd64 and arm64, install.sh with the release key and
+# base URL filled in, the panel tarball from build-panel.sh, manifest.json and
+# its signature. release.yml runs it on a tag; e2e and local checks run it
+# with a throwaway key.
 #
-# Usage: build-release.sh <version> <base-url> <private-key> [--e2e]
+# The key is on disk while this runs, so it runs nothing but Go, git and the
+# shell: no Composer, npm or PHP. The panel tarball is only hashed and
+# copied, never unpacked. It needs go, git and GNU date.
+#
+# Usage: build-release.sh <version> <base-url> <private-key> <panel-tarball> [--e2e]
 set -Eeuo pipefail
 
 usage() {
-	echo "usage: build-release.sh <version> <base-url> <private-key> [--e2e]" >&2
+	echo "usage: build-release.sh <version> <base-url> <private-key> <panel-tarball> [--e2e]" >&2
 	exit 2
 }
 
@@ -18,11 +22,12 @@ die() {
 	exit 1
 }
 
-[[ $# -eq 3 || ($# -eq 4 && $4 == --e2e) ]] || usage
+[[ $# -eq 4 || ($# -eq 5 && $5 == --e2e) ]] || usage
 version=$1
 base_url=$2
 key=$3
-e2e=${4:-}
+panel_tarball=$4
+e2e=${5:-}
 
 # The version names files here and directories on servers; the release
 # tool then checks it is full SemVer.
@@ -34,16 +39,18 @@ e2e=${4:-}
 	die "base URL $base_url isn't a plain http(s) or file URL without a trailing slash"
 [[ -f $key ]] || die "no private key at $key"
 key=$(realpath "$key")
+# The tarball comes from a job that ran other people's code: take exactly
+# the file build-panel.sh names, and nothing else.
+tarball=zimam-panel-$version.tar.gz
+[[ $(basename "$panel_tarball") == "$tarball" && -f $panel_tarball && ! -L $panel_tarball ]] ||
+	die "the panel tarball must be a regular file named $tarball, not $panel_tarball"
+panel_tarball=$(realpath "$panel_tarball")
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 dist=$root/dist
 installer=$root/installer/install.sh
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-
-# Every timestamp in the panel tarball is the release commit's, so one
-# commit always gives the same tarball.
-epoch=$(git -C "$root" log -1 --format=%ct)
 
 rm -rf "$dist"
 mkdir -p "$dist"
@@ -65,27 +72,11 @@ for arch in amd64 arm64; do
 done
 
 echo "== panel"
-panel=$work/panel
-mkdir "$panel"
-# Only committed files, so a local .env, database or node_modules can
-# never reach the tarball.
-git -C "$root" archive --format=tar HEAD:panel | tar -x -C "$panel"
-(
-	cd "$panel"
-	composer install --no-dev --classmap-authoritative --no-interaction --no-progress --prefer-dist
-	# No package install scripts run where a signing key is on disk; the
-	# asset build needs none (composer.json's setup script does the same).
-	npm ci --ignore-scripts --no-audit --no-fund
-	npm run build
-	# storage/ is linked in from the server's shared/ (design §4 step 6), and
-	# symlink-swap can't replace a directory, so the release has none.
-	rm -rf node_modules tests storage .env .env.*
-)
-tarball=zimam-panel-$version.tar.gz
-(cd "$panel" && find . -mindepth 1 -printf '%P\n' | LC_ALL=C sort) >"$work/panel-files"
-tar --create --format=gnu --no-recursion --verbatim-files-from --hard-dereference \
-	--owner=0 --group=0 --numeric-owner --mtime="@$epoch" --mode='u+rwX,go+rX,go-w' \
-	-C "$panel" -T "$work/panel-files" | gzip -9 -n >"$dist/$tarball"
+cp "$panel_tarball" "$dist/$tarball"
+# panel_php_min (D7) comes from the committed composer.json and lock, never
+# from the tarball, so the panel's build can't choose a signed field.
+git -C "$root" show HEAD:panel/composer.json >"$work/composer.json"
+git -C "$root" show HEAD:panel/composer.lock >"$work/composer.lock"
 
 echo "== install.sh"
 [[ -f $installer ]] || die "installer/install.sh is missing"
@@ -101,7 +92,7 @@ chmod 0755 "$dist/install.sh"
 
 echo "== manifest"
 expires=$(date -u -d '+30 days' +%Y-%m-%dT%H:%M:%SZ)
-"$work/release" manifest -version "$version" -expires "$expires" -composer "$panel/composer.json" \
+"$work/release" manifest -version "$version" -expires "$expires" -composer "$work/composer.json" \
 	-out "$dist/manifest.json" \
 	"$dist/zimam-agent-linux-amd64" "$dist/zimam-agent-linux-arm64" "$dist/$tarball" "$dist/install.sh"
 "$work/release" sign -key "$key" "$dist/manifest.json"

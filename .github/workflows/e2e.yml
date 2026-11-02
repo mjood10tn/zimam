@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: shellcheck the harness, in ubuntu:26.04
         run: |
           docker run --rm -v "$PWD:/w:ro" -w /w ubuntu:26.04 bash -c '
@@ -24,18 +24,18 @@ jobs:
             apt-get update -qq
             DEBIAN_FRONTEND=noninteractive apt-get install -y -qq shellcheck >/dev/null
             shellcheck e2e/scripts/*.sh e2e/scenarios/*.sh e2e/probes/*.sh'
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: agent/go.mod
           cache-dependency-path: agent/go.sum
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           # The panel's minimum (config.platform.php, D7), as release.yml uses.
           php-version: '8.3'
           extensions: intl, mbstring, pdo_sqlite, sqlite3, zip
           tools: composer
           coverage: none
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
           cache: npm
@@ -67,7 +67,7 @@ jobs:
       - name: collect logs
         if: failure()
         run: bash e2e/scripts/collect-logs.sh
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
           name: e2e-logs

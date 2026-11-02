@@ -11,13 +11,16 @@ source "$(dirname "$0")/common.sh"
 load_state
 
 w=$E2E_WORK
-rm -rf "${w:?}/keys" "${w:?}/dist" "${w:?}/contract-test" "${w:?}/bin"
+rm -rf "${w:?}/keys" "${w:?}/panel-dist" "${w:?}/dist" "${w:?}/contract-test" "${w:?}/bin"
 mkdir -p "$w/keys" "$w/bin"
 chmod 0700 "$w/keys"
 
 log "a throwaway key and the e2e release $E2E_VERSION for http://$BRIDGE:$E2E_PORT"
 (cd "$E2E_ROOT/agent" && go run ./tools/release keygen -out "$w/keys")
-bash "$E2E_ROOT/.github/scripts/build-release.sh" "$E2E_VERSION" "http://$BRIDGE:$E2E_PORT" "$w/keys/release-key" --e2e
+# The same two steps as release.yml: the panel first, then the signed release.
+bash "$E2E_ROOT/.github/scripts/build-panel.sh" "$E2E_VERSION" "$w/panel-dist"
+bash "$E2E_ROOT/.github/scripts/build-release.sh" "$E2E_VERSION" "http://$BRIDGE:$E2E_PORT" "$w/keys/release-key" \
+	"$w/panel-dist/zimam-panel-$E2E_VERSION.tar.gz" --e2e
 mv "$E2E_ROOT/dist" "$w/dist"
 
 log "the panel with its dev dependencies"
