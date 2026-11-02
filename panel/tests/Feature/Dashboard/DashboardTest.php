@@ -121,6 +121,27 @@ final class DashboardTest extends TestCase
             ->assertSee(__('zimam.agent.banner.heading'));
     }
 
+    /** The bulletin's headline is the page's one heading; Filament's "Dashboard" heading is gone. */
+    public function testHeadlineIsThePageHeading(): void
+    {
+        $html = $this->get('/admin')->assertOk()->getContent();
+
+        $this->assertSame(1, substr_count($html, '<h1'));
+        $this->assertMatchesRegularExpression('/<h1 class="zimam-headline">\s*No warnings\.\s*<\/h1>/', $html);
+    }
+
+    /** A stale value keeps its time, struck through, in the age column (DESIGN.md). */
+    public function testStaleServerFactsStrikeTheirTime(): void
+    {
+        $this->get('/admin')->assertOk()->assertDontSee('<s>03:41:20</s>', false);
+
+        $this->agentDown();
+
+        $this->get('/admin')->assertOk()
+            ->assertSee('<s>Issued 03:41:20</s>', false)
+            ->assertSee('<span class="zimam-age"><s>03:41:20</s></span>', false);
+    }
+
     /** A page left open refreshes both widgets, so the server facts never look fresher than the bulletin. */
     public function testBothWidgetsRefreshEvery10Seconds(): void
     {

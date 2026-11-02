@@ -1,0 +1,630 @@
+@import '../../../../vendor/filament/filament/resources/css/theme.css';
+
+@source '../../../../app/Filament/**/*';
+@source '../../../../resources/views/filament/**/*';
+
+/*
+ * Atkinson Hyperlegible, self-hosted: the Latin and Latin Extended subsets
+ * of fontsource 5.3.0, under the SIL Open Font License 1.1
+ * (resources/fonts/atkinson-hyperlegible/OFL.txt).
+ */
+@font-face {
+    font-family: 'Atkinson Hyperlegible';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('../../../fonts/atkinson-hyperlegible/latin-ext-400.woff2') format('woff2');
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: 'Atkinson Hyperlegible';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('../../../fonts/atkinson-hyperlegible/latin-400.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: 'Atkinson Hyperlegible';
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url('../../../fonts/atkinson-hyperlegible/latin-ext-700.woff2') format('woff2');
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: 'Atkinson Hyperlegible';
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url('../../../fonts/atkinson-hyperlegible/latin-700.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/*
+ * DESIGN.md's tokens. Filament switches themes with the .dark class on
+ * <html>, and its "system" setting follows the device, so the dark
+ * siblings hang off :root.dark rather than prefers-color-scheme.
+ */
+:root {
+    --z-ground: #f8fafc;
+    --z-surface: #ffffff;
+    --z-ink: #0b2545;
+    --z-ink-2: #3b4f6b;
+    --z-ink-3: #56677e;
+    --z-rule: #dce3ec;
+    --z-rule-2: #b9c6d6;
+    --z-track: #e4e9f0;
+    --z-brand: #047857;
+    --z-brand-hover: #065f46;
+    --z-on-brand: #ffffff;
+    --z-warn: #b45309;
+    --z-warn-line: #edbf7a;
+    --z-crit: #b91c1c;
+    --z-crit-line: #eda5a5;
+    --z-crit-bg: #fef2f2;
+    --z-scrim: rgb(11 37 69 / 0.45);
+    --z-drawer-shadow: 0 8px 24px rgb(0 0 0 / 0.16), 0 2px 6px rgb(0 0 0 / 0.08);
+
+    /* The top bar keeps its navy in both themes. */
+    --z-topbar: #0b2545;
+    --z-topbar-ink: #f8fafc;
+    --z-topbar-host: #c9d6e6;
+    --z-topbar-rule: #1e3a5f;
+}
+
+:root.dark {
+    --z-ground: #0a1a30;
+    --z-surface: #0f223d;
+    --z-ink: #eef2f7;
+    --z-ink-2: #c3cfde;
+    --z-ink-3: #9db0c7;
+    --z-rule: #1f3657;
+    --z-rule-2: #3a5679;
+    --z-track: #1b3150;
+    --z-brand: #34d399;
+    --z-brand-hover: #6ee7b7;
+    --z-on-brand: #0b2545;
+    --z-warn: #fbbf24;
+    --z-warn-line: #7a5b17;
+    --z-crit: #f87171;
+    --z-crit-line: #8a2e2e;
+    --z-crit-bg: #2b1418;
+    --z-scrim: rgb(2 8 20 / 0.6);
+    --z-drawer-shadow: 0 8px 24px rgb(0 0 0 / 0.45), 0 2px 6px rgb(0 0 0 / 0.3);
+}
+
+/*
+ * Everything below is unlayered, so it wins over Filament's layered
+ * component and utility classes without needing !important.
+ */
+
+.fi-body {
+    --topbar-height: 3.5rem;
+
+    background-color: var(--z-ground);
+    color: var(--z-ink);
+    caret-color: var(--z-ink);
+    font-variant-numeric: tabular-nums;
+}
+
+::selection {
+    background-color: var(--z-rule-2);
+    color: var(--z-ink);
+}
+
+/* Focus is a 2px ink outline at a 2px offset, never emerald; on the navy bars it is drawn in paper. */
+.fi-body {
+    --z-focus: var(--z-ink);
+}
+
+.fi-topbar,
+.fi-body-has-topbar .fi-sidebar-header {
+    --z-focus: var(--z-topbar-ink);
+}
+
+.fi-topbar .fi-dropdown-panel {
+    --z-focus: var(--z-ink);
+}
+
+.fi-body :is(a, button, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--z-focus);
+    outline-offset: 2px;
+}
+
+/* The Flat Sheet Rule: surfaces keep their hairline rings and lose their drop shadows. */
+.fi-section,
+.fi-simple-main,
+.fi-btn,
+.fi-btn-group,
+.fi-input-wrp,
+.fi-topbar {
+    --tw-shadow: 0 0 #0000;
+}
+
+/* Buttons: 44px tall, bold, 8px corners. */
+.fi-btn {
+    min-height: 44px;
+    padding-inline: 16px;
+    border-radius: 8px;
+    font-size: 0.9375rem;
+    font-weight: 700;
+    transition: background-color 0.15s ease-out;
+}
+
+/*
+ * The Emerald Is the Brand rule: primary is navy ink everywhere else, and
+ * only a filled primary button takes the emerald, with white text in light
+ * mode and navy text on the light emerald in dark mode.
+ */
+.fi-btn.fi-color-primary:not(.fi-outlined):not(label):not([aria-pressed]) {
+    --bg: var(--z-brand);
+    --hover-bg: var(--z-brand-hover);
+    --text: var(--z-on-brand);
+    --hover-text: var(--z-on-brand);
+    --dark-bg: var(--z-brand);
+    --dark-hover-bg: var(--z-brand-hover);
+    --dark-text: var(--z-on-brand);
+    --dark-hover-text: var(--z-on-brand);
+}
+
+/* Secondary buttons: a white sheet with a strong hairline. */
+.fi-btn:not(.fi-color):not([aria-pressed]) {
+    background-color: var(--z-surface);
+    color: var(--z-ink);
+    --tw-ring-color: var(--z-rule-2);
+
+    &:not(.fi-disabled):not([disabled]):hover {
+        background-color: var(--z-ground);
+    }
+}
+
+/* The one-line lockup: navy letters on light grounds, reversed on navy. */
+.zimam-logo {
+    display: block;
+    height: 100%;
+    width: auto;
+}
+
+.zimam-logo-reversed,
+:root.dark .zimam-logo-ink {
+    display: none;
+}
+
+:root.dark .zimam-logo-reversed {
+    display: block;
+}
+
+/* The top bar: navy in both themes, 56px tall, with the lockup on phones too. */
+.fi-topbar {
+    padding-inline: 8px;
+    background-color: var(--z-topbar);
+    color: var(--z-topbar-ink);
+    --tw-ring-color: transparent;
+    border-bottom: 1px solid var(--z-topbar-rule);
+
+    & .fi-icon-btn {
+        width: 44px;
+        height: 44px;
+        border-radius: 8px;
+        color: var(--z-topbar-ink);
+
+        &:hover {
+            background-color: rgb(248 250 252 / 0.1);
+        }
+
+        & > .fi-icon {
+            color: inherit;
+        }
+    }
+
+    & .fi-user-menu-trigger {
+        display: grid;
+        place-items: center;
+        min-width: 44px;
+        min-height: 44px;
+        border-radius: 8px;
+    }
+}
+
+.fi-topbar,
+.fi-body-has-topbar .fi-sidebar-header {
+    & .zimam-logo-ink {
+        display: none;
+    }
+
+    & .zimam-logo-reversed {
+        display: block;
+    }
+}
+
+.fi-topbar-start {
+    display: flex;
+    flex: 1;
+    gap: 12px;
+    min-width: 0;
+    margin-inline-end: 8px;
+
+    & > a {
+        display: flex;
+        flex: none;
+        align-items: center;
+        min-height: 44px;
+        margin-inline-start: 4px;
+        border-radius: 6px;
+    }
+}
+
+/* The panel's domain, truncated with an ellipsis on narrow screens. */
+.zimam-topbar-host {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--z-topbar-host);
+    font-size: 0.9375rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+@media (min-width: 1024px) {
+    .fi-topbar {
+        padding-inline-start: 24px;
+    }
+
+    .fi-topbar-start > a {
+        margin-inline-start: 0;
+    }
+}
+
+/* Sidebar: a drawer on a white sheet below 1024px, the ground with a hairline edge above. */
+.fi-sidebar {
+    background-color: var(--z-surface);
+    transition-duration: 0.28s;
+    transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+
+    &.fi-sidebar-open {
+        --tw-ring-color: transparent;
+        --tw-shadow: var(--z-drawer-shadow);
+    }
+}
+
+.fi-body-has-topbar .fi-sidebar-header {
+    padding-inline: 16px;
+    background-color: var(--z-topbar);
+    --tw-ring-color: transparent;
+    border-bottom: 1px solid var(--z-topbar-rule);
+}
+
+.fi-sidebar-close-overlay {
+    background-color: var(--z-scrim);
+}
+
+.fi-sidebar-nav {
+    padding: 8px;
+}
+
+.fi-sidebar-nav-groups {
+    margin-inline: 0;
+}
+
+.fi-sidebar-item-btn {
+    justify-content: flex-start;
+    min-height: 44px;
+    padding: 0 12px;
+    border-radius: 8px;
+    color: var(--z-ink-2);
+
+    & > .fi-icon {
+        color: var(--z-ink-3);
+    }
+
+    & > .fi-sidebar-item-label {
+        color: inherit;
+        font-size: 1rem;
+        font-weight: 400;
+    }
+}
+
+.fi-sidebar-item.fi-sidebar-item-has-url > .fi-sidebar-item-btn:hover {
+    background-color: var(--z-ground);
+    color: var(--z-ink);
+}
+
+/* The current item is track grey with bold ink, never emerald. */
+.fi-sidebar-item.fi-active > .fi-sidebar-item-btn {
+    background-color: var(--z-track);
+    color: var(--z-ink);
+
+    & > .fi-icon {
+        color: var(--z-ink);
+    }
+
+    & > .fi-sidebar-item-label {
+        color: inherit;
+        font-weight: 700;
+    }
+}
+
+@media (max-width: 1023.98px) {
+    .fi-sidebar.fi-sidebar-open {
+        width: min(300px, 84vw);
+    }
+}
+
+@media (min-width: 1024px) {
+    .fi-sidebar {
+        background-color: var(--z-ground);
+        border-inline-end: 1px solid var(--z-rule);
+
+        &.fi-sidebar-open {
+            --tw-shadow: 0 0 #0000;
+        }
+    }
+
+    .fi-sidebar-nav {
+        padding: 16px 12px;
+    }
+}
+
+/* The sign-in card: a white sheet with a hairline edge. */
+.fi-simple-main {
+    background-color: var(--z-surface);
+    --tw-ring-color: var(--z-rule);
+}
+
+/*
+ * The dashboard (prototypes/dashboard): one column of 640px at most on a
+ * phone; from 1024px the triage column sits beside the state column, 5:6.
+ */
+.fi-main:has(> .zimam-dashboard) {
+    max-width: 640px;
+    padding: 20px 16px 48px;
+
+    & > .zimam-banner {
+        margin: 0 0 24px;
+    }
+}
+
+.zimam-dashboard {
+    & .fi-page-header-main-ctn {
+        padding-block: 0;
+    }
+
+    & .fi-sc-has-gap {
+        gap: 24px;
+    }
+}
+
+@media (min-width: 1024px) {
+    .fi-main:has(> .zimam-dashboard) {
+        max-width: 1180px;
+        margin-inline: 0;
+        padding: 32px 40px 64px;
+    }
+
+    .zimam-dashboard {
+        & .fi-grid:has(> .fi-sc-liberated > .zimam-triage) {
+            grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+            column-gap: 40px;
+        }
+
+        /* The triage column stays in view beneath the top bar. */
+        & .fi-sc-liberated:has(> .zimam-triage) {
+            position: sticky;
+            top: calc(var(--topbar-height) + 32px);
+            align-self: start;
+        }
+    }
+}
+
+.zimam-stack {
+    display: grid;
+    gap: 24px;
+}
+
+.zimam-icon {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    margin-top: 1px;
+}
+
+/* The One Age Column rule: right-aligned, never wrapping, at least 5ch wide. */
+.zimam-age {
+    min-width: 5ch;
+    color: var(--z-ink-3);
+    font-size: 0.875rem;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.zimam-dashboard s,
+.zimam-banner s {
+    text-decoration-thickness: 1px;
+}
+
+/* The bulletin opening: the headline, one sentence, then the issued line. */
+.zimam-headline {
+    color: var(--z-ink);
+    font-size: 1.75rem;
+    font-weight: 700;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+
+    @media (min-width: 1024px) {
+        font-size: 2rem;
+    }
+}
+
+.zimam-lede {
+    max-width: 60ch;
+    margin-top: 8px;
+    color: var(--z-ink-2);
+    font-size: 1.0625rem;
+    line-height: 1.45;
+    text-wrap: pretty;
+}
+
+.zimam-issued {
+    margin-top: 10px;
+    color: var(--z-ink-3);
+    font-size: 0.875rem;
+}
+
+/* Warning cards: a white sheet with an amber or red hairline, and the severity word beside its age. */
+.zimam-warnings {
+    display: grid;
+    gap: 10px;
+}
+
+.zimam-warning {
+    padding: 14px 16px;
+    border: 1px solid var(--z-warn-line);
+    border-radius: 10px;
+    background-color: var(--z-surface);
+
+    &.zimam-critical {
+        border-color: var(--z-crit-line);
+    }
+
+    & h2 {
+        color: var(--z-ink);
+        font-size: 1.0625rem;
+        font-weight: 700;
+        line-height: 1.3;
+        text-wrap: balance;
+    }
+}
+
+.zimam-warning-head {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+
+    & .zimam-icon {
+        color: var(--z-warn);
+    }
+
+    .zimam-critical & .zimam-icon {
+        color: var(--z-crit);
+    }
+}
+
+.zimam-warning-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    margin-top: 4px;
+    font-size: 0.9375rem;
+}
+
+.zimam-severity {
+    color: var(--z-warn);
+    font-weight: 700;
+
+    .zimam-critical & {
+        color: var(--z-crit);
+    }
+}
+
+.zimam-detail {
+    margin-top: 4px;
+    color: var(--z-ink-2);
+    font-size: 0.9375rem;
+}
+
+/* The agent banner: a red wash, a red hairline and a bold ink statement. */
+.zimam-banner {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 4px 10px;
+    margin-top: 20px;
+    padding: 14px 16px;
+    border: 1px solid var(--z-crit-line);
+    border-radius: 10px;
+    background-color: var(--z-crit-bg);
+    color: var(--z-ink-2);
+
+    & .zimam-icon {
+        color: var(--z-crit);
+    }
+
+    & strong {
+        color: var(--z-ink);
+        font-weight: 700;
+    }
+
+    & p {
+        grid-column: 2;
+    }
+
+    & code {
+        padding: 2px 6px;
+        border: 1px solid var(--z-rule);
+        border-radius: 6px;
+        background-color: var(--z-surface);
+        color: var(--z-ink);
+        font: 0.875rem/1.4 ui-monospace, 'Cascadia Mono', Menlo, monospace;
+        overflow-wrap: anywhere;
+    }
+}
+
+/* Section heads sit on a hairline: the heading on the left, the age column on the right. */
+.zimam-section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--z-rule);
+
+    & h2 {
+        color: var(--z-ink);
+        font-size: 1.125rem;
+        font-weight: 700;
+        line-height: 1.3;
+    }
+}
+
+.zimam-note {
+    padding-top: 12px;
+    color: var(--z-ink-3);
+    font-size: 0.875rem;
+}
+
+.zimam-facts {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px 16px;
+    padding-top: 12px;
+    font-size: 0.9375rem;
+
+    & dt {
+        color: var(--z-ink-3);
+    }
+
+    & dd {
+        color: var(--z-ink-2);
+        overflow-wrap: anywhere;
+    }
+}
+
+/* Stale values dim to the faded ink; their time is struck in the age column. */
+.zimam-stale .zimam-facts dd {
+    color: var(--z-ink-3);
+}
+
+/* Reduced motion drops the drawer's slide, the scrim's fade and the hover fades. */
+@media (prefers-reduced-motion: reduce) {
+    .fi-sidebar,
+    .fi-sidebar-close-overlay,
+    .fi-sidebar-item-btn,
+    .fi-btn {
+        transition: none;
+    }
+}

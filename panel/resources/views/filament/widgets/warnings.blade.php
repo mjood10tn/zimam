@@ -3,37 +3,46 @@
     use Filament\Support\Icons\Heroicon;
 @endphp
 
-<x-filament-widgets::widget class="zimam-bulletin">
-    <div wire:poll.10s>
-        <x-filament::section>
+{{-- The triage column (dashboard brief §6): the bulletin opening, then the warnings in force. --}}
+<x-filament-widgets::widget class="zimam-triage">
+    <div wire:poll.10s class="zimam-stack">
+        <section class="zimam-bulletin">
+            {{-- Only the headline and the sentence are live: the issued line changes on every 10 s poll. --}}
             <div aria-live="polite">
-                <h2 class="fi-section-header-heading">{{ $headline }}</h2>
-                <p>{{ $lede }}</p>
-                <p class="fi-section-header-description">
-                    @if ($status?->fresh)
-                        {{ __('zimam.dashboard.issued', ['issued' => Warnings::time($status->issuedAt), 'next' => Warnings::time($status->nextAt())]) }}
-                    @elseif ($status)
-                        <s>{{ __('zimam.dashboard.issued_at', ['issued' => Warnings::time($status->issuedAt)]) }}</s> · {{ __('zimam.dashboard.waiting') }}
-                    @else
-                        {{ __('zimam.dashboard.waiting') }}
-                    @endif
-                </p>
+                <h1 class="zimam-headline">{{ $headline }}</h1>
+                <p class="zimam-lede">{{ $lede }}</p>
             </div>
-        </x-filament::section>
+            <p class="zimam-issued">
+                @if ($status?->fresh)
+                    {{ __('zimam.dashboard.issued', ['issued' => Warnings::time($status->issuedAt), 'next' => Warnings::time($status->nextAt())]) }}
+                @elseif ($status)
+                    <s>{{ __('zimam.dashboard.issued_at', ['issued' => Warnings::time($status->issuedAt)]) }}</s> · {{ __('zimam.dashboard.waiting') }}
+                @else
+                    {{ __('zimam.dashboard.waiting') }}
+                @endif
+            </p>
+        </section>
 
         @if ($warnings !== [])
-            <ul aria-label="{{ __('zimam.dashboard.warnings_label') }}">
+            <ul class="zimam-warnings" aria-label="{{ __('zimam.dashboard.warnings_label') }}">
                 @foreach ($warnings as $warning)
-                    <li wire:key="warning-{{ $loop->index }}">
-                        <x-filament::callout
-                            :color="$warning['severity'] === 'critical' ? 'danger' : 'warning'"
-                            :icon="$warning['severity'] === 'critical' ? Heroicon::OutlinedExclamationCircle : Heroicon::OutlinedExclamationTriangle"
-                            :heading="$warning['title']"
-                            :description="new \Illuminate\Support\HtmlString(
-                                '<strong>'.e(__('zimam.dashboard.severity.'.$warning['severity'])).'</strong> · '.e($warning['at'])
-                                .'<br>'.e($warning['detail'])
-                            )"
-                        />
+                    @php
+                        $critical = $warning['severity'] === 'critical';
+                    @endphp
+
+                    <li wire:key="warning-{{ $loop->index }}" @class(['zimam-warning', 'zimam-critical' => $critical])>
+                        <div class="zimam-warning-head">
+                            <x-filament::icon
+                                :icon="$critical ? Heroicon::OutlinedExclamationCircle : Heroicon::OutlinedExclamationTriangle"
+                                class="zimam-icon"
+                            />
+                            <h2>{{ $warning['title'] }}</h2>
+                        </div>
+                        <p class="zimam-warning-meta">
+                            <span class="zimam-severity">{{ __('zimam.dashboard.severity.'.$warning['severity']) }}</span>
+                            <span class="zimam-age">{{ $warning['at'] }}</span>
+                        </p>
+                        <p class="zimam-detail">{{ $warning['detail'] }}</p>
                     </li>
                 @endforeach
             </ul>
