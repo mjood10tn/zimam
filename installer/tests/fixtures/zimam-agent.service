@@ -1,0 +1,9 @@
+# /etc/systemd/system/zimam-agent.service
+[Unit]
+Requires=zimam-agent.socket
+After=zimam-agent.socket
+
+[Service]
+ExecStart=/usr/local/sbin/zimam-agent serve
+Restart=on-failure
+UMask=0077

@@ -1,0 +1,3 @@
+# The tests hand install.sh code to run as single-quoted strings, on
+# purpose: it expands in the installer's shell, not the test's.
+disable=SC2016

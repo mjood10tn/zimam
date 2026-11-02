@@ -77,6 +77,21 @@ jobs:
             echo "$untracked"
             exit 1
           fi
+  installer:
+    # install.sh (design §4) on the Ubuntu it targets: ShellCheck, then the
+    # bats tests (D11), both from Ubuntu 26.04's own packages.
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: shellcheck, then bats, in ubuntu:26.04
+        run: |
+          docker run --rm -v "$PWD:/w:ro" -w /w ubuntu:26.04 bash -c '
+            set -eu
+            apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq bats openssl python3 systemd shellcheck >/dev/null
+            shellcheck --version
+            shellcheck installer/install.sh installer/tests/*.bash installer/tests/*.bats
+            bats installer/tests'
   panel-php:
     # The panel's tests on the lowest PHP it supports (config.platform.php,
     # D7) and the newest one, plus its asset build.

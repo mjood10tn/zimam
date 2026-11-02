@@ -1,0 +1,9 @@
+# /etc/systemd/system/zimam-agent.socket
+[Socket]
+ListenStream=/run/zimam/agent.sock
+SocketUser=root
+SocketGroup=zimam-agent
+SocketMode=0660
+
+[Install]
+WantedBy=sockets.target
