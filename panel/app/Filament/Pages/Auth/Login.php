@@ -4,6 +4,7 @@ namespace App\Filament\Pages\Auth;
 
 use Filament\Auth\Pages\Login as BaseLogin;
 use Illuminate\Support\Str;
+use SensitiveParameter;
 
 /** Filament's login, throttled per email and IP address (§7.2) rather than per IP alone. */
 class Login extends BaseLogin
@@ -20,5 +21,14 @@ class Login extends BaseLogin
         $email = Str::lower(trim((string) ($this->data['email'] ?? '')));
 
         return 'livewire-rate-limiter:'.sha1($component.'|'.$method.'|'.$email.'|'.request()->ip());
+    }
+
+    /** The admin's email is stored in lowercase (Setup), so it's compared that way. */
+    protected function getCredentialsFromFormData(#[SensitiveParameter] array $data): array
+    {
+        return [
+            'email' => Str::lower(trim((string) $data['email'])),
+            'password' => $data['password'],
+        ];
     }
 }

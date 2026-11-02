@@ -39,7 +39,8 @@ class AdminPanelProvider extends PanelProvider
             ->defaultAvatarProvider(InitialAvatarProvider::class)
             // Required 2FA with authenticator apps and recovery codes (§7.2).
             ->multiFactorAuthentication([
-                LongSecretAppAuthentication::make()->recoverable(),
+                // One 30-second period either side, not Filament's eight (±4 minutes).
+                LongSecretAppAuthentication::make()->recoverable()->codeWindow(1),
             ], isRequired: true)
             // The theme (DESIGN.md): navy ink for primary, so emerald appears
             // only on primary action buttons; success and info are quiet ink.

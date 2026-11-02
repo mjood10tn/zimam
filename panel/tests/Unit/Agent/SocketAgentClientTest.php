@@ -252,6 +252,43 @@ final class SocketAgentClientTest extends TestCase
         }
     }
 
+    /**
+     * Without a read timeout, a read waits past PHP's default_socket_timeout
+     * (60 s), which a stream would otherwise inherit: follow() must keep
+     * waiting through a job's silent stretch (M1 review, M1). A child
+     * process plays an agent that answers after 2 s, with the default
+     * lowered to 1 s.
+     */
+    public function testNoReadTimeoutOutlastsTheDefault(): void
+    {
+        if (! in_array('unix', stream_get_transports(), true) || PHP_OS_FAMILY === 'Windows') {
+            $this->markTestSkipped('this PHP has no Unix sockets');
+        }
+        $path = sys_get_temp_dir().'/zimam-slow-'.bin2hex(random_bytes(4)).'.sock';
+        $agent = <<<'PHP'
+            $server = stream_socket_server('unix://'.$argv[1]);
+            echo "ready\n";
+            $conn = stream_socket_accept($server, 10);
+            fgets($conn);
+            sleep(2);
+            fwrite($conn, "{\"done\":true}\n");
+            fclose($conn);
+            PHP;
+        $proc = proc_open([PHP_BINARY, '-r', $agent, $path], [1 => ['pipe', 'w']], $pipes);
+        $this->assertIsResource($proc);
+        $old = ini_set('default_socket_timeout', '1');
+
+        try {
+            $this->assertSame("ready\n", fgets($pipes[1]));
+            $socket = (new UnixSocketTransport($path))->send("{}\n", null);
+            $this->assertSame("{\"done\":true}\n", fgets($socket), 'the read gave up while the agent was still working');
+        } finally {
+            ini_set('default_socket_timeout', (string) $old);
+            proc_close($proc);
+            @unlink($path);
+        }
+    }
+
     /** @return array<string, mixed> */
     private static function jobStatus(string $status): array
     {

@@ -96,6 +96,8 @@ class Setup extends SimplePage
     public function save(): void
     {
         $data = $this->form->getState();
+        // Stored in lowercase, as sign-in compares it, so the case it was typed in never matters.
+        $data['email'] = Str::lower(trim($data['email']));
         $token = SetupToken::findUsable($this->token);
         abort_unless($token, 404);
 

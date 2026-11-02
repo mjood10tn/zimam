@@ -46,6 +46,17 @@ final class SetupPageTest extends TestCase
         $this->get('/admin')->assertRedirect(route('filament.admin.auth.multi-factor-authentication.set-up-required'));
     }
 
+    /** Stored in lowercase, so sign-in doesn't depend on how it was typed (M1 review, M13). */
+    public function testEmailIsStoredInLowercase(): void
+    {
+        Livewire::test(Setup::class, ['token' => $this->issue()])
+            ->fillForm(['email' => 'Admin@Example.COM', 'password' => self::PASSWORD, 'password_confirmation' => self::PASSWORD])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $this->assertSame('admin@example.com', User::sole()->email);
+    }
+
     public function testPasswordRules(): void
     {
         $page = Livewire::test(Setup::class, ['token' => $this->issue()]);
