@@ -28,6 +28,7 @@ var subcommands = map[string]subcommand{
 	"maintenance":        runMaintenance,
 	"job run":            jobRun,
 	"as-user":            runAsUser,
+	"version":            version,
 }
 
 func main() {

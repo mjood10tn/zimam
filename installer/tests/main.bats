@@ -38,12 +38,22 @@ cp "$T/release/${url##*/}" "$out"'
 	release 1.2.3 0
 }
 
-# release serves a signed release whose agent prints the link and exits
-# with $2.
+# release serves a signed release $1 whose agent prints the link and exits
+# with $2. Its version --at-least compares with sort -V, which is enough
+# for these versions; the real agent compares in Go.
 release() {
 	mkdir -p "$T/release"
-	printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >>"$T/agent.log"\necho "bootstrap progress" >&2\n[[ %s == 0 ]] && echo "$LINK"\nexit %s\n' "$2" "$2" \
-		>"$T/release/zimam-agent-linux-amd64"
+	cat >"$T/release/zimam-agent-linux-amd64" <<EOF
+#!/usr/bin/env bash
+printf "%s\n" "\$*" >>"\$T/agent.log"
+if [[ \$1 == version ]]; then
+	[[ \$(printf "%s\n" "\$3" "$1" | sort -V | head -1) == "\$3" ]]
+	exit
+fi
+echo "bootstrap progress" >&2
+[[ $2 == 0 ]] && echo "\$LINK"
+exit $2
+EOF
 	local sum
 	sum=$(sha256sum "$T/release/zimam-agent-linux-amd64" | cut -d' ' -f1)
 	printf '{"version": "%s", "protocol": 1, "min_agent_version": "%s", "panel_php_min": "8.3", "expires": "%s", "artifacts": {"zimam-agent-linux-amd64": "sha256:%s"}}\n' \
@@ -84,6 +94,51 @@ install_sh() {
 	[ "$status" -eq 1 ]
 	[[ $stderr == *"release 1.2.3, not 1.2.4"* ]]
 	[ ! -e "$T/zimam-agent" ]
+}
+
+# installed puts an agent on the server that reports version $1, or, with
+# no argument, an agent too old to have the version subcommand.
+installed() {
+	if [[ -n ${1:-} ]]; then
+		printf '#!/usr/bin/env bash\n[[ $1 == version ]] && echo %s\n' "$1" >"$T/zimam-agent"
+	else
+		printf '#!/usr/bin/env bash\nexit 2\n' >"$T/zimam-agent"
+	fi
+	chmod 0755 "$T/zimam-agent"
+}
+
+# A repair run never moves a server to an older release (M1 review, M5): the
+# verified new agent compares its version with the installed one's.
+@test "a repair run refuses a release older than the installed agent" {
+	installed 1.3.0
+	install_sh --panel-domain panel.example.com
+	[ "$status" -eq 1 ]
+	[[ $stderr == *"runs zimam-agent 1.3.0, which is newer than release 1.2.3"* ]]
+	[[ $stderr == *"--version 1.3.0"* ]]
+	grep -qx "version --at-least 1.3.0" "$T/agent.log"
+	run ! grep -q bootstrap "$T/agent.log"
+	[ "$("$T/zimam-agent" version)" = 1.3.0 ]
+}
+
+@test "a repair run with the same or a newer release goes ahead" {
+	for v in 1.2.3 1.0.0; do
+		installed "$v"
+		rm -f "$T/agent.log"
+		install_sh --panel-domain panel.example.com
+		[ "$status" -eq 0 ] || {
+			echo "installed $v: $stderr"
+			return 1
+		}
+		grep -qx "version --at-least $v" "$T/agent.log"
+		cmp "$T/zimam-agent" "$T/release/zimam-agent-linux-amd64"
+	done
+}
+
+@test "an installed agent without the version subcommand doesn't block a repair" {
+	installed
+	install_sh --panel-domain panel.example.com
+	[ "$status" -eq 0 ]
+	run ! grep -q "^version" "$T/agent.log"
 }
 
 @test "the steps run in order" {

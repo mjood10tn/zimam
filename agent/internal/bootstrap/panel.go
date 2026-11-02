@@ -79,6 +79,15 @@ func (r *run) releaseDone(ctx context.Context) (bool, error) {
 }
 
 func (r *run) releaseApply(ctx context.Context) error {
+	// Never to an older release: its code would run against the newer
+	// release's schema.
+	fi, err := r.Helper.Stat(ctx, r.Zimam, "panel/current")
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if cur, ok := strings.CutPrefix(fi.Target, "releases/"); err == nil && ok && release.CompareVersions(r.o.Version, cur) < 0 {
+		return fmt.Errorf("the panel runs release %s, and %s is older; bootstrap never moves the panel to an older release", cur, r.o.Version)
+	}
 	m, err := r.release(ctx)
 	if err != nil {
 		return err

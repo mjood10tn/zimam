@@ -60,6 +60,36 @@ setup() {
 	done
 }
 
+# The panel domain meets the agent's own rule (contract.Domain) before
+# anything is installed, so bootstrap can't refuse it after packages and the
+# firewall are set up (M1 review, M6).
+@test "the panel domain meets the agent's rule" {
+	label63=$(printf 'a%.0s' {1..63})
+	label64=$(printf 'a%.0s' {1..64})
+	long="$label63.$label63.$label63.$label63.com"
+	for domain in 1.2.3.4 panel.example.123 panel..example.com panel.example.com. "$label64.example.com" "$long" \
+		panel.-example.com panel.example-.com example; do
+		installer 'parse_args "$@"' --panel-domain "$domain"
+		[ "$status" -eq 2 ] || {
+			echo "accepted: $domain"
+			return 1
+		}
+	done
+	for domain in panel.example.com p.example.co.uk "$label63.example.com" panel.xn--mgbab2bd 0panel.example.com; do
+		installer 'parse_args "$@"' --panel-domain "$domain"
+		[ "$status" -eq 0 ] || {
+			echo "refused: $domain: $output $stderr"
+			return 1
+		}
+	done
+}
+
+@test "a panel domain in capitals is lowercased" {
+	installer 'parse_args "$@"; printf "%s" "$PANEL_DOMAIN"' --panel-domain Panel.Example.COM
+	[ "$status" -eq 0 ]
+	[ "$output" = panel.example.com ]
+}
+
 @test "bootstrap gets the flags and the verified release" {
 	installer 'parse_args "$@"; RELEASE_VERSION=1.2.3; bootstrap_args; printf "%s\n" "${BOOTSTRAP_ARGS[@]}"' \
 		--panel-domain panel.example.com --email admin@example.com --php 8.4 \

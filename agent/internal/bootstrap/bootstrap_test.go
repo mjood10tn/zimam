@@ -517,6 +517,26 @@ func TestManifestVersionMustMatch(t *testing.T) {
 	}
 }
 
+// A re-run never moves the panel to an older release (M1 review, M5): the
+// older panel's code would run against the newer schema.
+func TestRerunRefusesAnOlderRelease(t *testing.T) {
+	w := newWorld(t)
+	w.mustRun(opts())
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	w.b.PublicKey = priv.Public().(ed25519.PublicKey)
+	w.publish(priv, panelTarball(t), func(m *release.Manifest) { m.Version = "0.0.9"; m.MinAgentVersion = "0.0.9" })
+	o := opts()
+	o.Version = "0.0.9"
+	_, err := w.b.Run(context.Background(), o)
+	var se *StepError
+	if !errors.As(err, &se) || se.Step != "panel-release" || !strings.Contains(err.Error(), "older") {
+		t.Fatalf("got %v, want panel-release to refuse the older release", err)
+	}
+	if fi, _ := w.help.Stat(context.Background(), w.b.Zimam, "panel/current"); fi.Target != "releases/"+testVersion {
+		t.Errorf("current is %q, want releases/%s", fi.Target, testVersion)
+	}
+}
+
 func TestNginxDefaultSiteRestoredOnFailure(t *testing.T) {
 	w := newWorld(t)
 	w.sys.fail = func(c sysexec.Cmd) error {

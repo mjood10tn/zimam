@@ -15,6 +15,7 @@ var wantSubcommands = []string{
 	"maintenance",
 	"job run",
 	"as-user",
+	"version", // D25: the installer's repair check (M1 review, M5)
 }
 
 func runCapture(args []string) (code int, stdout, stderr string) {

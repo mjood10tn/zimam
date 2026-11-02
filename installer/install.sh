@@ -71,6 +71,23 @@ usage_error() {
 	exit 2
 }
 
+# valid_domain is the agent's own rule (contract.Domain), so bootstrap never
+# refuses a domain after packages and the firewall are set up: at most 253
+# characters, two or more labels of lowercase letters, digits and inner
+# hyphens, each at most 63, ending in a letters-only or xn-- label.
+valid_domain() {
+	local domain=$1 label
+	local -a labels
+	((${#domain} <= 253)) || return 1
+	[[ $domain != .* && $domain != *. && $domain != *..* ]] || return 1
+	IFS=. read -ra labels <<<"$domain"
+	((${#labels[@]} >= 2)) || return 1
+	for label in "${labels[@]}"; do
+		[[ $label =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || return 1
+	done
+	[[ ${labels[-1]} =~ ^[a-z]+$ || ${labels[-1]} == xn--* ]]
+}
+
 # parse_args reads §4's flags. The values reach bootstrap, which checks them
 # again; these checks catch typing mistakes before anything is installed.
 parse_args() {
@@ -104,8 +121,8 @@ parse_args() {
 		esac
 	done
 	[[ -n $PANEL_DOMAIN ]] || usage_error "--panel-domain is required"
-	[[ $PANEL_DOMAIN =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$ ]] ||
-		usage_error "--panel-domain $PANEL_DOMAIN isn't a domain name"
+	PANEL_DOMAIN=${PANEL_DOMAIN,,}
+	valid_domain "$PANEL_DOMAIN" || usage_error "--panel-domain $PANEL_DOMAIN isn't a domain name"
 	[[ -z $EMAIL || $EMAIL =~ ^[^[:space:]@]+@[^[:space:]@]+$ ]] || usage_error "--email $EMAIL isn't an email address"
 	[[ -z $PHP || $PHP =~ ^[0-9]+\.[0-9]+$ ]] || usage_error "--php $PHP isn't a PHP version such as 8.5"
 	[[ -z $VERSION || $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] ||
@@ -321,6 +338,16 @@ install_agent() {
 		die "The release manifest names the version $RELEASE_VERSION."
 	[[ -z $VERSION || $RELEASE_VERSION == "$VERSION" ]] ||
 		die "The manifest at $url is for release $RELEASE_VERSION, not $VERSION."
+	# A repair run never moves the server to an older release. The new
+	# agent, verified above, compares the versions in Go. An agent too old
+	# to report its version can't be compared, and is replaced.
+	local new=$WORK_DIR/zimam-agent-linux-$ARCH installed
+	chmod 0700 "$new"
+	if [[ -x $AGENT_BIN ]] && installed=$("$AGENT_BIN" version 2>/dev/null) &&
+		[[ $installed =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+		"$new" version --at-least "$installed" >/dev/null 2>&1 ||
+			die "This server runs zimam-agent $installed, which is newer than release $RELEASE_VERSION. Run the installer with --version $installed or newer to repair it."
+	fi
 	log "Installing zimam-agent $RELEASE_VERSION"
 	install -o root -g root -m 0755 "$WORK_DIR/zimam-agent-linux-$ARCH" "$AGENT_BIN.zimam-new"
 	mv -f "$AGENT_BIN.zimam-new" "$AGENT_BIN"
