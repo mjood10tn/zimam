@@ -11,20 +11,16 @@ import (
 	"strings"
 )
 
-const (
-	exitUsage          = 2
-	exitNotImplemented = 70
-)
+const exitUsage = 2
 
 // subcommand runs with the arguments that follow its name.
 type subcommand func(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 
-// subcommands maps each name, one or two words, to its handler. Later tasks
-// replace the placeholders.
+// subcommands maps each name, one or two words, to its handler.
 var subcommands = map[string]subcommand{
 	"serve":              serve,
-	"bootstrap":          notImplemented("bootstrap"),
-	"panel setup-link":   notImplemented("panel setup-link"),
+	"bootstrap":          runBootstrap,
+	"panel setup-link":   panelSetupLink,
 	"hook cert-deployed": hookCertDeployed,
 	"maintenance":        runMaintenance,
 	"job run":            jobRun,
@@ -68,12 +64,5 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, "subcommands:")
 	for _, name := range slices.Sorted(maps.Keys(subcommands)) {
 		fmt.Fprintf(w, "  %s\n", name)
-	}
-}
-
-func notImplemented(name string) subcommand {
-	return func(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-		fmt.Fprintf(stderr, "zimam-agent %s: not implemented yet\n", name)
-		return exitNotImplemented
 	}
 }

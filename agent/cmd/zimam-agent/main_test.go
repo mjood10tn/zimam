@@ -56,22 +56,3 @@ func TestUnknownSubcommand(t *testing.T) {
 		}
 	}
 }
-
-// implemented are the subcommands later tasks have filled in.
-var implemented = map[string]bool{"serve": true, "job run": true, "as-user": true, "hook cert-deployed": true, "maintenance": true}
-
-func TestSubcommandsNotImplementedYet(t *testing.T) {
-	for _, name := range wantSubcommands {
-		if implemented[name] {
-			continue
-		}
-		args := append(strings.Fields(name), "extra")
-		code, _, stderr := runCapture(args)
-		if code != 70 {
-			t.Errorf("run(%q) = %d, want 70", args, code)
-		}
-		if !strings.Contains(stderr, "not implemented yet") {
-			t.Errorf("run(%q) stderr = %q, want \"not implemented yet\"", args, stderr)
-		}
-	}
-}

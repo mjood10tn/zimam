@@ -123,6 +123,19 @@ func (p Paths) NginxSiteEnabled(name contract.SiteName) string {
 	return p.at("etc/nginx/sites-enabled", "zimam-"+string(name)+".conf")
 }
 
+// NginxTLSConf is the TLS snippet every HTTPS vhost includes (§9.3).
+func (p Paths) NginxTLSConf() string { return p.at("etc/nginx/zimam/tls.conf") }
+
+// The default server (§9.3), which answers names no site serves, and the
+// stock default site's link that bootstrap removes (§4 step 5).
+func (p Paths) NginxDefaultAvailable() string {
+	return p.at("etc/nginx/sites-available/zimam-default.conf")
+}
+func (p Paths) NginxDefaultEnabled() string {
+	return p.at("etc/nginx/sites-enabled/zimam-default.conf")
+}
+func (p Paths) NginxDistDefault() string { return p.at("etc/nginx/sites-enabled/default") }
+
 // The panel's vhost (§9.3). "panel" is a reserved site name, so no site's
 // files can collide with the panel's.
 func (p Paths) NginxPanelAvailable() string {
@@ -146,6 +159,10 @@ func (p Paths) PHPSocket(name contract.SiteName, v contract.PHPVersion) string {
 func (p Paths) PHPFPMBinary(v contract.PHPVersion) string {
 	return p.at("usr/sbin", "php-fpm"+string(v))
 }
+
+// Alternative is the link update-alternatives keeps for name, such as php,
+// which points at the default version's binary (§8.5).
+func (p Paths) Alternative(name string) string { return p.at("etc/alternatives", name) }
 
 func (p Paths) PHPPoolDir(v contract.PHPVersion) string {
 	return p.at("etc/php", string(v), "fpm/pool.d")
