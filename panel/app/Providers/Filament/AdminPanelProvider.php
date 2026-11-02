@@ -4,6 +4,7 @@ namespace App\Providers\Filament;
 
 use App\Agent\AgentHealth;
 use App\Filament\Auth\LongSecretAppAuthentication;
+use App\Filament\AvatarProviders\InitialAvatarProvider;
 use App\Filament\Pages\Auth\Login;
 use App\Filament\Palette;
 use Filament\Auth\MultiFactor\Http\Middleware\EnsureMultiFactorAuthenticationIsEnabled;
@@ -34,6 +35,8 @@ class AdminPanelProvider extends PanelProvider
             ->viteTheme('resources/css/filament/admin/theme.css')
             ->login(Login::class)
             ->brandName(fn (): string => __('zimam.brand'))
+            // Drawn here rather than fetched from ui-avatars.com, so no page loads anything from another host.
+            ->defaultAvatarProvider(InitialAvatarProvider::class)
             // Required 2FA with authenticator apps and recovery codes (§7.2).
             ->multiFactorAuthentication([
                 LongSecretAppAuthentication::make()->recoverable(),
