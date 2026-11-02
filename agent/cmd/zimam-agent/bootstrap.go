@@ -19,7 +19,6 @@ import (
 	"zimam/agent/internal/audit"
 	"zimam/agent/internal/bootstrap"
 	"zimam/agent/internal/helper"
-	"zimam/agent/internal/paths"
 	"zimam/agent/internal/release"
 	"zimam/agent/internal/sysexec"
 )
@@ -56,7 +55,7 @@ func runBootstrap(args []string, stdin io.Reader, stdout, stderr io.Writer) int 
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
-	p := paths.Paths{}
+	p := systemPaths()
 	b := &bootstrap.Bootstrap{
 		Deps: sysexec.Deps{
 			Paths: p,

@@ -28,7 +28,7 @@ func hookCertDeployed(args []string, stdin io.Reader, stdout, stderr io.Writer) 
 		fmt.Fprintln(stderr, "usage: zimam-agent hook cert-deployed (run by certbot, with RENEWED_LINEAGE set)")
 		return exitUsage
 	}
-	p := paths.Paths{}
+	p := systemPaths()
 	d := sysexec.Deps{
 		Paths: p,
 		Run:   sysexec.ExecRunner{},

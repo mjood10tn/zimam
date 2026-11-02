@@ -5,3 +5,6 @@ Description=Zimam maintenance: log rotation and caps, job cleanup
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/zimam-agent maintenance
+# Longer than a keyring refresh and apt's lock wait together; a hung run
+# would otherwise block every later one.
+TimeoutStartSec=20min

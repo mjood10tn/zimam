@@ -252,6 +252,42 @@ func TestMaintenanceReconciles(t *testing.T) {
 	}
 }
 
+// A config change whose process died before its test leaves a record that
+// no process holds (M1 review, M4). Maintenance puts the previous file back
+// and audits what it restored.
+func TestMaintenanceRestoresAnAbandonedConfigChange(t *testing.T) {
+	e := newEnv(t)
+	p := e.d.Paths
+	conf := filepath.Join(p.ConfigDir(), "pool.conf")
+	if err := os.WriteFile(conf, []byte("new, untested"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(conf+".zimam-prev", []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(p.ConfigTxDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	rec := `{"changes":[{"path":"` + conf + `","had_prev":true}]}`
+	if err := os.WriteFile(filepath.Join(p.ConfigTxDir(), "0123456789abcdef.json"), []byte(rec), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.maintain(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if b, _ := os.ReadFile(conf); string(b) != "old" {
+		t.Errorf("pool.conf = %q, want the previous content", b)
+	}
+	entries := auditEntries(t, p)
+	if len(entries) != 1 {
+		t.Fatalf("audit entries %v, want one", entries)
+	}
+	params, _ := entries[0]["params"].(map[string]any)
+	if got, _ := params["restored_configs"].([]any); len(got) != 1 || got[0] != conf {
+		t.Errorf("params %v, want restored_configs [%s]", params, conf)
+	}
+}
+
 // Zimam's own rules rotate with Zimam's own state file, never Ubuntu's
 // (§11.3).
 func TestMaintenanceRunsLogrotateWithZimamState(t *testing.T) {

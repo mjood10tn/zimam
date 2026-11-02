@@ -42,8 +42,9 @@ const keyringRefreshEvery = 7 * 24 * time.Hour
 // updates and rotating logs aren't changes: a run that did only those
 // isn't audited (D18).
 type changes struct {
-	ReconciledJobs   int  `json:"reconciled_jobs"`
-	KeyringRefreshed bool `json:"keyring_refreshed"` // the repository's files changed
+	RestoredConfigs  []string `json:"restored_configs,omitempty"` // undone after their process died
+	ReconciledJobs   int      `json:"reconciled_jobs"`
+	KeyringRefreshed bool     `json:"keyring_refreshed"` // the repository's files changed
 }
 
 // Run is one maintenance run, which never overlaps another. Its steps don't
@@ -63,6 +64,14 @@ func Run(ctx context.Context, d sysexec.Deps, j Jobs, w interface{ Write(audit.E
 
 	var c changes
 	var errs []error
+	// First, so nothing below runs or reloads against an untested file.
+	c.RestoredConfigs, err = configtx.Recover(d.Paths.ConfigTxDir())
+	if err != nil {
+		errs = append(errs, fmt.Errorf("restoring abandoned config changes: %w", err))
+	}
+	for _, path := range c.RestoredConfigs {
+		d.Logf("Restored %s, left untested by a change whose process died", path)
+	}
 	c.ReconciledJobs, err = j.Reconcile(ctx)
 	if err != nil {
 		errs = append(errs, fmt.Errorf("reconciling jobs: %w", err))
@@ -81,7 +90,7 @@ func Run(ctx context.Context, d sysexec.Deps, j Jobs, w interface{ Write(audit.E
 		errs = append(errs, err)
 	}
 	err = errors.Join(errs...)
-	if c.ReconciledJobs == 0 && !c.KeyringRefreshed {
+	if len(c.RestoredConfigs) == 0 && c.ReconciledJobs == 0 && !c.KeyringRefreshed {
 		return err
 	}
 	outcome := "ok"

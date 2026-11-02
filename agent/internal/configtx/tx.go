@@ -53,6 +53,10 @@ func Apply(ctx context.Context, changes []Change, test func(context.Context) err
 		}
 		seen[p] = true
 	}
+	rec, err := begin(changes)
+	if err != nil {
+		return err
+	}
 	var staged []*staging
 	undo := func(cause error) error {
 		for i := len(staged) - 1; i >= 0; i-- {
@@ -63,6 +67,7 @@ func Apply(ctx context.Context, changes []Change, test func(context.Context) err
 		if err := test(ctx); err != nil {
 			cause = fmt.Errorf("%w; the restored configuration also fails its test: %v", cause, err)
 		}
+		rec.done()
 		return cause
 	}
 	for _, c := range changes {
@@ -77,6 +82,9 @@ func Apply(ctx context.Context, changes []Change, test func(context.Context) err
 	if err := test(ctx); err != nil {
 		return undo(err)
 	}
+	// The record goes first: from here the change is kept, and a stray
+	// .zimam-prev left by a crash is replaced by the next change's stage.
+	rec.done()
 	for _, s := range staged {
 		s.commit()
 	}

@@ -61,6 +61,36 @@ func TestRunnerNonZeroExit(t *testing.T) {
 	}
 }
 
+// A command's output is capped: stdout, which callers parse, fails the run
+// when it passes the cap; stderr keeps its last bytes, where the reason is.
+func TestRunnerCapsOutput(t *testing.T) {
+	oldOut, oldErr := maxStdout, maxStderr
+	maxStdout, maxStderr = 1000, 100
+	t.Cleanup(func() { maxStdout, maxStderr = oldOut, oldErr })
+
+	res, err := ExecRunner{}.Run(context.Background(), Cmd{Path: "/usr/bin/head", Args: []string{"-c", "1000", "/dev/zero"}})
+	if err != nil || len(res.Stdout) != 1000 {
+		t.Fatalf("1000 bytes at a cap of 1000: %d bytes, %v", len(res.Stdout), err)
+	}
+	res, err = ExecRunner{}.Run(context.Background(), Cmd{Path: "/usr/bin/head", Args: []string{"-c", "5000000", "/dev/zero"}})
+	if !errors.Is(err, ErrOutputTooLarge) || !strings.Contains(err.Error(), "/usr/bin/head") {
+		t.Errorf("5 MB at a cap of 1000: err = %v, want ErrOutputTooLarge naming the program", err)
+	}
+	if len(res.Stdout) > 1000 {
+		t.Errorf("kept %d bytes of stdout, want at most 1000", len(res.Stdout))
+	}
+
+	script := `i=0; while [ $i -lt 200 ]; do echo "line $i" >&2; i=$((i+1)); done; echo "the reason" >&2; exit 3`
+	res, err = ExecRunner{}.Run(context.Background(), Cmd{Path: "/bin/sh", Args: []string{"-c", script}})
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 3 {
+		t.Fatalf("err = %v, want an ExitError with code 3", err)
+	}
+	if len(res.Stderr) > 100 || !strings.HasSuffix(string(res.Stderr), "the reason\n") {
+		t.Errorf("stderr = %q, want at most 100 bytes ending with the reason", res.Stderr)
+	}
+}
+
 func TestRunnerContextCancel(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()

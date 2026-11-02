@@ -146,3 +146,20 @@ func TestZimamUnits(t *testing.T) {
 		t.Error("ZimamUnits accepted PHP 8.1")
 	}
 }
+
+// A oneshot that hangs stays "activating", and its timer skips every later
+// run, so maintenance or the scheduler would stop without a sign (M1
+// review, M9). RuntimeMaxSec= doesn't apply to oneshots; TimeoutStartSec=
+// does.
+func TestOneshotUnitsHaveATimeLimit(t *testing.T) {
+	units, err := ZimamUnits("8.5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range units {
+		content := string(u.Content)
+		if strings.Contains(content, "Type=oneshot") && !strings.Contains(content, "\nTimeoutStartSec=") {
+			t.Errorf("%s is a oneshot without TimeoutStartSec=:\n%s", u.Name, content)
+		}
+	}
+}

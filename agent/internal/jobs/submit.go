@@ -23,26 +23,33 @@ const maxActive = 2
 
 // Submit starts a job for d (§5.7). Under submit.lock it refuses with busy
 // while the job's subject has a queued or running job or 2 jobs are, runs
-// the precheck, writes spec.json and state.json, and starts the job's unit.
-// The caller comes from ctx; every outcome is audited.
+// the precheck, writes the accepted audit entry, writes spec.json and
+// state.json, and starts the job's unit. The caller comes from ctx; every
+// outcome is audited, and a job whose accepted entry can't be written is
+// refused before it exists (§5.8: a change that can't be audited doesn't
+// happen).
 func (m *Manager) Submit(ctx context.Context, d contract.Descriptor, p contract.Params) (contract.JobID, error) {
 	start := m.now()
-	id, err := m.submit(ctx, d, p, start)
 	c := audit.CallerFrom(ctx)
-	e := audit.Entry{
-		TS: start, PeerUID: c.PeerUID, Actor: c.Actor, RequestID: c.RequestID,
-		Command: d.Name, Params: audit.Redact(p), Outcome: "accepted", Job: id,
-		DurationMS: m.now().Sub(start).Milliseconds(),
+	entry := func(id contract.JobID, outcome string) audit.Entry {
+		return audit.Entry{
+			TS: start, PeerUID: c.PeerUID, Actor: c.Actor, RequestID: c.RequestID,
+			Command: d.Name, Params: audit.Redact(p), Outcome: outcome, Job: id,
+			DurationMS: m.now().Sub(start).Milliseconds(),
+		}
 	}
+	accepted := func(id contract.JobID) error {
+		return m.Audit.Write(entry(id, "accepted"))
+	}
+	id, err := m.submit(ctx, d, p, start, accepted)
 	if err != nil {
 		code, _ := codeOf(err)
-		e.Outcome = "error:" + string(code)
+		m.writeAudit(entry(id, "error:"+string(code)))
 	}
-	m.writeAudit(e)
 	return id, err
 }
 
-func (m *Manager) submit(ctx context.Context, d contract.Descriptor, p contract.Params, now time.Time) (contract.JobID, error) {
+func (m *Manager) submit(ctx context.Context, d contract.Descriptor, p contract.Params, now time.Time, accepted func(contract.JobID) error) (contract.JobID, error) {
 	lim, ok := LimitsFor(d.Name)
 	if !ok || d.Kind != contract.KindJob || d.Subject == nil || m.Handlers[d.Name] == nil {
 		return "", fmt.Errorf("jobs: %s isn't a job command with limits and a handler", d.Name)
@@ -75,6 +82,11 @@ func (m *Manager) submit(ctx context.Context, d contract.Descriptor, p contract.
 		}
 	}
 	id := newJobID(now)
+	if err := accepted(id); err != nil {
+		log.Printf("audit: %v", err)
+		return "", &contract.AgentError{Code: contract.ErrInternal,
+			Message: "The audit log can't be written, so the job wasn't started. Check that /var/log/zimam is writable and has free space."}
+	}
 	sp := spec{Command: d.Name, Subject: subject, Params: params, Caller: audit.CallerFrom(ctx)}
 	if err := m.create(id, sp, now); err != nil {
 		return "", err

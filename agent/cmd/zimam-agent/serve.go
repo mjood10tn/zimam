@@ -16,7 +16,6 @@ import (
 	"zimam/agent/internal/audit"
 	"zimam/agent/internal/commands"
 	"zimam/agent/internal/config"
-	"zimam/agent/internal/paths"
 	"zimam/agent/internal/server"
 	"zimam/agent/internal/sysexec"
 )
@@ -38,7 +37,7 @@ func serve(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(err)
 	}
-	p := paths.Paths{}
+	p := systemPaths()
 	cfg, err := config.Load(p)
 	if err != nil {
 		return fail(err)

@@ -28,6 +28,24 @@ func TestRedactTopLevelSecret(t *testing.T) {
 	}
 }
 
+// An entry's params read like the JSON they stand for: an omitempty field
+// that is empty is left out, as encoding/json leaves it out.
+func TestRedactHonoursOmitempty(t *testing.T) {
+	type params struct {
+		Paths []string `json:"paths,omitempty"`
+		Note  string   `json:"note,omitempty"`
+		Count int      `json:"count"`
+	}
+	if got, want := Redact(params{}), map[string]any{"count": 0}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Redact(empty) = %#v, want %#v", got, want)
+	}
+	got := Redact(params{Paths: []string{"/etc/x"}, Note: "n", Count: 1})
+	want := map[string]any{"paths": []any{"/etc/x"}, "note": "n", "count": 1}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Redact(full) = %#v, want %#v", got, want)
+	}
+}
+
 func TestRedactNestedSliceSecret(t *testing.T) {
 	type basicAuthParams struct {
 		Site  contract.SiteName       `json:"site"`

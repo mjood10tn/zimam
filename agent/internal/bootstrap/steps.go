@@ -461,8 +461,11 @@ func (r *run) unitsDone(ctx context.Context) (bool, error) {
 			return false, nil
 		}
 	}
+	// Enabled units are the queue worker and the timers, which run all the
+	// time: enabled but dead (stopped, or past its start limit) isn't done,
+	// and unitsApply's enable --now starts it again.
 	for _, u := range units {
-		if u.Enable && !r.systemctlOK(ctx, "is-enabled", "--quiet", u.Name) {
+		if u.Enable && (!r.systemctlOK(ctx, "is-enabled", "--quiet", u.Name) || !r.systemctlOK(ctx, "is-active", "--quiet", u.Name)) {
 			return false, nil
 		}
 	}

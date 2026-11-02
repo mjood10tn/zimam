@@ -9,6 +9,9 @@ import (
 	"os"
 	"slices"
 	"strings"
+
+	"zimam/agent/internal/configtx"
+	"zimam/agent/internal/paths"
 )
 
 const exitUsage = 2
@@ -65,4 +68,13 @@ func usage(w io.Writer) {
 	for _, name := range slices.Sorted(maps.Keys(subcommands)) {
 		fmt.Fprintf(w, "  %s\n", name)
 	}
+}
+
+// systemPaths returns the server's own paths, and points config
+// transactions at their records there, so a change whose process dies is
+// put back by the next maintenance run.
+func systemPaths() paths.Paths {
+	p := paths.Paths{}
+	configtx.Journal = p.ConfigTxDir()
+	return p
 }

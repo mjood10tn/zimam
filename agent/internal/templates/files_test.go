@@ -46,6 +46,27 @@ func TestPanelVhostHTTPOnly(t *testing.T) {
 	lacks(t, "the HTTP-only vhost", out, "443", "ssl_certificate", "return 301")
 }
 
+// The panel over HTTPS sends HSTS and §9.6's header preset (M1 review, M7).
+// HSTS leaves out includeSubDomains, which would bind the owner's other
+// subdomains, and there's no CSP, which would break Livewire's inline
+// scripts.
+func TestPanelVhostHTTPSHeaders(t *testing.T) {
+	out := mustRender(t, "nginx/panel.conf", PanelVhost{Domain: "panel.example.com", HTTPS: true})
+	httpsServer := strings.Split(out, "server {")[2]
+	contains(t, "the HTTPS server", httpsServer,
+		"    add_header Strict-Transport-Security \"max-age=31536000\" always;\n",
+		"    add_header X-Content-Type-Options \"nosniff\" always;\n",
+		"    add_header X-Frame-Options \"SAMEORIGIN\" always;\n",
+		"    add_header Referrer-Policy \"strict-origin-when-cross-origin\" always;\n",
+		"    add_header Permissions-Policy \"camera=(), microphone=(), geolocation=()\" always;\n")
+	lacks(t, "the HTTPS server", httpsServer, "includeSubDomains", "Content-Security-Policy")
+	// No location sets its own add_header, which would drop the server's.
+	if n := strings.Count(httpsServer, "add_header"); n != 5 {
+		t.Errorf("%d add_header lines, want the 5 at server level", n)
+	}
+	lacks(t, "the HTTP-only vhost", mustRender(t, "nginx/panel.conf", PanelVhost{Domain: "panel.example.com"}), "Strict-Transport-Security")
+}
+
 func TestPanelVhostHTTPSRedirects(t *testing.T) {
 	out := mustRender(t, "nginx/panel.conf", PanelVhost{Domain: "panel.example.com", HTTPS: true})
 	servers := strings.Split(out, "server {")[1:]

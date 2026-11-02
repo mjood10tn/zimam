@@ -54,6 +54,9 @@ func (p Paths) SubjectLock(subject string) string {
 
 func (p Paths) StateDir() string { return p.at("var/lib/zimam") }
 func (p Paths) JobsDir() string  { return p.at("var/lib/zimam/jobs") }
+
+// ConfigTxDir holds the record of each config change in flight (configtx).
+func (p Paths) ConfigTxDir() string { return p.at("var/lib/zimam/configtx") }
 func (p Paths) JobDir(id contract.JobID) string {
 	return p.at("var/lib/zimam/jobs", string(id))
 }

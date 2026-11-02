@@ -12,7 +12,6 @@ import (
 	"zimam/agent/internal/audit"
 	"zimam/agent/internal/config"
 	"zimam/agent/internal/maintenance"
-	"zimam/agent/internal/paths"
 	"zimam/agent/internal/sysexec"
 )
 
@@ -28,7 +27,7 @@ func runMaintenance(args []string, stdin io.Reader, stdout, stderr io.Writer) in
 		fmt.Fprintf(stderr, "zimam-agent maintenance: %v\n", err)
 		return 1
 	}
-	p := paths.Paths{}
+	p := systemPaths()
 	cfg, err := config.Load(p)
 	if err != nil {
 		return fail(err)

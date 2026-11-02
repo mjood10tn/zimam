@@ -32,7 +32,7 @@ func jobRun(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "zimam-agent job run: %v\n", err)
 		return 1
 	}
-	p := paths.Paths{}
+	p := systemPaths()
 	cfg, err := config.Load(p)
 	if err != nil {
 		return fail(err)

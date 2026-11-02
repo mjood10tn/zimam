@@ -14,7 +14,6 @@ import (
 	"zimam/agent/internal/audit"
 	"zimam/agent/internal/bootstrap"
 	"zimam/agent/internal/config"
-	"zimam/agent/internal/paths"
 	"zimam/agent/internal/sysexec"
 )
 
@@ -22,7 +21,7 @@ import (
 // recovery path over SSH. It prints a new setup link and the panel IP
 // allowlist.
 func panelSetupLink(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	p := paths.Paths{}
+	p := systemPaths()
 	cfg, err := config.Load(p)
 	if err != nil {
 		fmt.Fprintf(stderr, "zimam-agent panel setup-link: %v\n", err)

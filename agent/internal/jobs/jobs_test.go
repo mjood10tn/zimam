@@ -128,11 +128,15 @@ func (f *fakeSystemd) setUnit(unit string, u UnitState) {
 type recordAudit struct {
 	mu      sync.Mutex
 	entries []audit.Entry
+	err     error // when set, Write records nothing and fails
 }
 
 func (r *recordAudit) Write(e audit.Entry) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.err != nil {
+		return r.err
+	}
 	r.entries = append(r.entries, e)
 	return nil
 }
@@ -377,6 +381,27 @@ func TestSubmitPrecheck(t *testing.T) {
 		t.Errorf("entry = %+v, want site.provision error:conflict", e)
 	}
 	f.submit(t, "site.provision", &testParams{Name: "shop"}) // the precheck lets others through
+}
+
+// §5.8: a change that can't be audited doesn't happen. When the accepted
+// entry can't be written, no job is created and no unit starts.
+func TestSubmitRefusedWhenAuditFails(t *testing.T) {
+	f := newFixture(t)
+	f.audit.err = errors.New("no space left on device")
+	_, err := f.m.Submit(callerCtx, testCommands["php.default"], &testParams{})
+	expectCode(t, err, contract.ErrInternal)
+	if len(f.sd.started) != 0 {
+		t.Errorf("started %d units, want none", len(f.sd.started))
+	}
+	if ids, _ := f.m.jobIDs(); len(ids) != 0 {
+		t.Errorf("created jobs %v, want none", ids)
+	}
+	// Once the log can be written again, jobs run as before.
+	f.audit.err = nil
+	id := f.submit(t, "php.default", &testParams{})
+	if e := f.audit.last(t); e.Outcome != "accepted" || e.Job != id {
+		t.Errorf("entry = %+v, want accepted", e)
+	}
 }
 
 func TestSubmitStartFailure(t *testing.T) {

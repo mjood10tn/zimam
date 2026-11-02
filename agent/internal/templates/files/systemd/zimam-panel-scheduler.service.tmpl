@@ -8,3 +8,5 @@ User=zimam
 Group=zimam
 WorkingDirectory=/home/zimam/panel/current
 ExecStart=/usr/bin/php{{safe .PanelPHP}} artisan schedule:run
+# A hung run would otherwise block every later one.
+TimeoutStartSec=10min

@@ -357,6 +357,28 @@ func TestTimersEnabled(t *testing.T) {
 	}
 }
 
+// A repair run starts a queue worker that is enabled but dead (M1 review,
+// M12): running the installer again has to bring job tracking back.
+func TestRerunStartsADeadQueueWorker(t *testing.T) {
+	w := newWorld(t)
+	w.mustRun(opts())
+	before := len(w.sys.commands())
+	w.sys.fail = func(c sysexec.Cmd) error {
+		if c.Path == "/usr/bin/systemctl" && slices.Equal(c.Args, []string{"is-active", "--quiet", "zimam-panel-queue.service"}) {
+			return &sysexec.ExitError{Path: c.Path, Code: 3}
+		}
+		return nil
+	}
+	w.mustRun(opts())
+	var started bool
+	for _, c := range w.sys.commands()[before:] {
+		started = started || argv(c) == "/usr/bin/systemctl enable --now zimam-panel-queue.service"
+	}
+	if !started {
+		t.Error("the re-run didn't start the dead queue worker")
+	}
+}
+
 func TestDefaultLogPolicyApplied(t *testing.T) {
 	w := newWorld(t)
 	w.mustRun(opts())

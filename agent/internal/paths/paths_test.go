@@ -29,6 +29,7 @@ var production = map[string]string{
 	"AptRepoLock":           "/run/zimam/locks/apt-repo.lock",
 	"SubjectLock":           "/run/zimam/locks/site:shop.lock",
 	"StateDir":              "/var/lib/zimam",
+	"ConfigTxDir":           "/var/lib/zimam/configtx",
 	"JobsDir":               "/var/lib/zimam/jobs",
 	"JobDir":                "/var/lib/zimam/jobs/" + testJob,
 	"JobSpec":               "/var/lib/zimam/jobs/" + testJob + "/spec.json",

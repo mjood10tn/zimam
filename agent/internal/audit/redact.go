@@ -2,6 +2,7 @@ package audit
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 )
 
@@ -29,8 +30,11 @@ func redactValue(v reflect.Value) any {
 			if !f.IsExported() {
 				continue
 			}
-			name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+			name, opts, _ := strings.Cut(f.Tag.Get("json"), ",")
 			if name == "-" {
+				continue
+			}
+			if slices.Contains(strings.Split(opts, ","), "omitempty") && isEmpty(v.Field(i)) {
 				continue
 			}
 			if name == "" {
@@ -59,4 +63,17 @@ func redactValue(v reflect.Value) any {
 	default:
 		return v.Interface()
 	}
+}
+
+// isEmpty is encoding/json's test for omitempty.
+func isEmpty(v reflect.Value) bool {
+	switch v.Kind() {
+	case reflect.Array, reflect.Map, reflect.Slice, reflect.String:
+		return v.Len() == 0
+	case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+		reflect.Float32, reflect.Float64, reflect.Interface, reflect.Pointer:
+		return v.IsZero()
+	}
+	return false
 }
