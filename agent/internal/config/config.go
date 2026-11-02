@@ -21,33 +21,37 @@ const (
 	DefaultACMEDirectory    = "https://acme-v02.api.letsencrypt.org/directory"
 	DefaultPHPRepoURL       = "https://packages.sury.org/php/"
 	DefaultLogRetentionDays = 14
-	DefaultSiteLogCapBytes  = 5 * contract.GiB
+	// DefaultAuditRetentionDays keeps the audit log a year (D24).
+	DefaultAuditRetentionDays = 365
+	DefaultSiteLogCapBytes    = 5 * contract.GiB
 )
 
 // Agent is /etc/zimam/agent.json (§5.9).
 type Agent struct {
-	PanelDomain      contract.Domain        `json:"panel_domain"`
-	ACMEDirectory    string                 `json:"acme_directory"`
-	ACMECABundle     string                 `json:"acme_ca_bundle,omitempty"`
-	ACMEEmail        string                 `json:"acme_email,omitempty"`
-	PHPRepoURL       string                 `json:"php_repo_url"`
-	DefaultPHP       contract.PHPVersion    `json:"default_php"`
-	PanelPHP         contract.PHPVersion    `json:"panel_php"`
-	LogRetentionDays contract.RetentionDays `json:"log_retention_days"`
-	SiteLogCapBytes  contract.SiteCapBytes  `json:"site_log_cap_bytes"`
+	PanelDomain        contract.Domain             `json:"panel_domain"`
+	ACMEDirectory      string                      `json:"acme_directory"`
+	ACMECABundle       string                      `json:"acme_ca_bundle,omitempty"`
+	ACMEEmail          string                      `json:"acme_email,omitempty"`
+	PHPRepoURL         string                      `json:"php_repo_url"`
+	DefaultPHP         contract.PHPVersion         `json:"default_php"`
+	PanelPHP           contract.PHPVersion         `json:"panel_php"`
+	LogRetentionDays   contract.RetentionDays      `json:"log_retention_days"`
+	AuditRetentionDays contract.AuditRetentionDays `json:"audit_retention_days"`
+	SiteLogCapBytes    contract.SiteCapBytes       `json:"site_log_cap_bytes"`
 }
 
 // New returns the config bootstrap writes, with the §5.9 defaults. Bootstrap
 // then sets the ACME fields from the installer's flags.
 func New(panelDomain contract.Domain, defaultPHP, panelPHP contract.PHPVersion) Agent {
 	return Agent{
-		PanelDomain:      panelDomain,
-		ACMEDirectory:    DefaultACMEDirectory,
-		PHPRepoURL:       DefaultPHPRepoURL,
-		DefaultPHP:       defaultPHP,
-		PanelPHP:         panelPHP,
-		LogRetentionDays: DefaultLogRetentionDays,
-		SiteLogCapBytes:  contract.SiteCapBytes(DefaultSiteLogCapBytes),
+		PanelDomain:        panelDomain,
+		ACMEDirectory:      DefaultACMEDirectory,
+		PHPRepoURL:         DefaultPHPRepoURL,
+		DefaultPHP:         defaultPHP,
+		PanelPHP:           panelPHP,
+		LogRetentionDays:   DefaultLogRetentionDays,
+		AuditRetentionDays: DefaultAuditRetentionDays,
+		SiteLogCapBytes:    contract.SiteCapBytes(DefaultSiteLogCapBytes),
 	}
 }
 
@@ -67,6 +71,7 @@ func (a Agent) Validate() error {
 	f.Check("default_php", a.DefaultPHP)
 	f.Check("panel_php", a.PanelPHP)
 	f.Check("log_retention_days", a.LogRetentionDays)
+	f.Check("audit_retention_days", a.AuditRetentionDays)
 	f.Check("site_log_cap_bytes", a.SiteLogCapBytes)
 	return f.Err()
 }
@@ -80,6 +85,10 @@ func Load(p paths.Paths) (Agent, error) {
 	var a Agent
 	if err := contract.DecodeStrict(data, &a); err != nil {
 		return Agent{}, fmt.Errorf("%s: %w", p.AgentConfig(), err)
+	}
+	// agent.json written before D24 has no audit_retention_days.
+	if a.AuditRetentionDays == 0 {
+		a.AuditRetentionDays = DefaultAuditRetentionDays
 	}
 	if err := a.Validate(); err != nil {
 		return Agent{}, fmt.Errorf("%s: %w", p.AgentConfig(), err)

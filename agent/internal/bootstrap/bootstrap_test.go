@@ -386,6 +386,9 @@ func TestDefaultLogPolicyApplied(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if cfg.AuditRetentionDays != 365 {
+		t.Errorf("agent.json: audit retention %d days, want 365 (D24)", cfg.AuditRetentionDays)
+	}
 	if cfg.LogRetentionDays != 14 || int64(cfg.SiteLogCapBytes) != 5*contract.GiB {
 		t.Fatalf("agent.json: %d days, %d bytes; want 14 and 5 GiB", cfg.LogRetentionDays, cfg.SiteLogCapBytes)
 	}

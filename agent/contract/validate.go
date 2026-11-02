@@ -288,6 +288,26 @@ func (RetentionDays) JSONSchema() Schema {
 	return Schema{"type": "integer", "minimum": minRetentionDays, "maximum": maxRetentionDays}
 }
 
+// AuditRetentionDays is how long the audit log is kept, separately from the
+// other logs, up to ten years (D24).
+type AuditRetentionDays int
+
+const (
+	minAuditRetentionDays = 1
+	maxAuditRetentionDays = 3650
+)
+
+func (d AuditRetentionDays) Validate() error {
+	if d < minAuditRetentionDays || d > maxAuditRetentionDays {
+		return errors.New("must be 1–3650 days")
+	}
+	return nil
+}
+
+func (AuditRetentionDays) JSONSchema() Schema {
+	return Schema{"type": "integer", "minimum": minAuditRetentionDays, "maximum": maxAuditRetentionDays}
+}
+
 type SiteCapBytes int64
 
 const maxSiteCapBytes = 100 * GiB

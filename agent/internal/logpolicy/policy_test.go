@@ -41,7 +41,7 @@ var restartJournald = sysexec.Script{Path: "/usr/bin/systemctl", Args: []string{
 
 func line(s sysexec.Script) string { return strings.Join(append([]string{s.Path}, s.Args...), " ") }
 
-var policy = Policy{RetentionDays: 30, SiteCapBytes: contract.SiteCapBytes(5 * contract.GiB)}
+var policy = Policy{RetentionDays: 30, AuditRetentionDays: 365, SiteCapBytes: contract.SiteCapBytes(5 * contract.GiB)}
 
 func files(p paths.Paths, sites ...contract.SiteName) []string {
 	all := []string{p.LogrotateConf(), p.OwnLogrotateConf(), p.JournaldDropIn()}
@@ -115,9 +115,10 @@ func TestPolicyRefusesInvalidValues(t *testing.T) {
 		p     Policy
 		sites []contract.SiteName
 	}{
-		"no retention": {Policy{RetentionDays: 0, SiteCapBytes: policy.SiteCapBytes}, nil},
-		"no cap":       {Policy{RetentionDays: 14}, nil},
-		"bad site":     {policy, []contract.SiteName{"../shop"}},
+		"no retention":       {Policy{RetentionDays: 0, AuditRetentionDays: 365, SiteCapBytes: policy.SiteCapBytes}, nil},
+		"no audit retention": {Policy{RetentionDays: 14, SiteCapBytes: policy.SiteCapBytes}, nil},
+		"no cap":             {Policy{RetentionDays: 14, AuditRetentionDays: 365}, nil},
+		"bad site":           {policy, []contract.SiteName{"../shop"}},
 	} {
 		d, run := newDeps(t)
 		if err := Apply(context.Background(), d, c.p, c.sites); err == nil {

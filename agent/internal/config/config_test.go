@@ -1,9 +1,11 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -15,8 +17,35 @@ func testAgent() Agent {
 	return New("panel.example.com", "8.5", "8.4")
 }
 
+// An agent.json written before D24 has no audit_retention_days. It loads
+// with the default, so an upgraded agent keeps working.
+func TestLoadDefaultsAuditRetention(t *testing.T) {
+	p := paths.Paths{Root: t.TempDir()}
+	if err := Save(p, testAgent()); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(p.AgentConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := regexp.MustCompile(`\s*"audit_retention_days": \d+,`).ReplaceAll(data, nil)
+	if bytes.Equal(old, data) {
+		t.Fatalf("agent.json has no audit_retention_days line:\n%s", data)
+	}
+	if err := os.WriteFile(p.AgentConfig(), old, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a, err := Load(p)
+	if err != nil || a.AuditRetentionDays != DefaultAuditRetentionDays {
+		t.Errorf("Load = %d, %v; want %d", a.AuditRetentionDays, err, DefaultAuditRetentionDays)
+	}
+}
+
 func TestConfigDefaults(t *testing.T) {
 	a := testAgent()
+	if a.AuditRetentionDays != 365 {
+		t.Errorf("AuditRetentionDays = %d, want 365 (D24)", a.AuditRetentionDays)
+	}
 	if a.LogRetentionDays != 14 {
 		t.Errorf("LogRetentionDays = %d, want 14", a.LogRetentionDays)
 	}

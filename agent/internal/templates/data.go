@@ -13,7 +13,10 @@ type PanelUnits struct{ PanelPHP contract.PHPVersion }
 
 // LogPolicy fills logrotate/zimam-own.conf and journald/50-zimam.conf
 // (§11.3).
-type LogPolicy struct{ RetentionDays contract.RetentionDays }
+type LogPolicy struct {
+	RetentionDays      contract.RetentionDays
+	AuditRetentionDays contract.AuditRetentionDays // the audit log's own (D24)
+}
 
 // SiteLogs fills logrotate/site.conf (§11.3).
 type SiteLogs struct {

@@ -391,6 +391,11 @@ func TestLogSearchMatch(t *testing.T) {
 	}
 }
 
+// D24: the audit log keeps its own retention, up to ten years.
+func TestAuditRetentionDays(t *testing.T) {
+	checkValues(t, []AuditRetentionDays{1, 365, 3650}, []AuditRetentionDays{0, -1, 3651})
+}
+
 func TestRetentionDays(t *testing.T) {
 	checkValues(t, []RetentionDays{1, 14, 365}, []RetentionDays{0, -1, 366})
 }

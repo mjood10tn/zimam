@@ -84,7 +84,7 @@ func units() []goldenFile {
 
 func logPolicy() []goldenFile {
 	var p paths.Paths
-	policy := func() any { return LogPolicy{RetentionDays: 14} }
+	policy := func() any { return LogPolicy{RetentionDays: 14, AuditRetentionDays: 365} }
 	return []goldenFile{
 		{path: p.LogrotateConf(), tmpl: "logrotate/zimam.conf"},
 		{path: p.OwnLogrotateConf(), tmpl: "logrotate/zimam-own.conf", data: policy},

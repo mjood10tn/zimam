@@ -22,8 +22,9 @@ const (
 // Policy is the log policy (§11.4). The rules rotate by RetentionDays;
 // zimam-agent maintenance enforces SiteCapBytes.
 type Policy struct {
-	RetentionDays contract.RetentionDays
-	SiteCapBytes  contract.SiteCapBytes
+	RetentionDays      contract.RetentionDays
+	AuditRetentionDays contract.AuditRetentionDays // the audit log's own (D24)
+	SiteCapBytes       contract.SiteCapBytes
 }
 
 // Apply renders /etc/zimam/logrotate.conf, Zimam's own rules, one rules file
@@ -32,6 +33,9 @@ type Policy struct {
 func Apply(ctx context.Context, d sysexec.Deps, p Policy, sites []contract.SiteName) error {
 	if err := p.RetentionDays.Validate(); err != nil {
 		return fmt.Errorf("log retention %v", err)
+	}
+	if err := p.AuditRetentionDays.Validate(); err != nil {
+		return fmt.Errorf("audit log retention %v", err)
 	}
 	if err := p.SiteCapBytes.Validate(); err != nil {
 		return fmt.Errorf("site log cap %v", err)
@@ -45,7 +49,7 @@ func Apply(ctx context.Context, d sysexec.Deps, p Policy, sites []contract.SiteN
 		path, tmpl string
 		data       any
 	}
-	policy := templates.LogPolicy{RetentionDays: p.RetentionDays}
+	policy := templates.LogPolicy{RetentionDays: p.RetentionDays, AuditRetentionDays: p.AuditRetentionDays}
 	files := []file{
 		{d.Paths.LogrotateConf(), "logrotate/zimam.conf", nil},
 		{d.Paths.OwnLogrotateConf(), "logrotate/zimam-own.conf", policy},

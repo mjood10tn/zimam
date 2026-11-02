@@ -484,14 +484,14 @@ func (r *run) unitsApply(ctx context.Context) error {
 
 func (r *run) logsDone(ctx context.Context) (bool, error) {
 	p := r.Deps.Paths
-	policy := templates.LogPolicy{RetentionDays: r.cfg.LogRetentionDays}
+	policy := templates.LogPolicy{RetentionDays: r.cfg.LogRetentionDays, AuditRetentionDays: r.cfg.AuditRetentionDays}
 	return rendered(p.LogrotateConf(), "logrotate/zimam.conf", nil) &&
 		rendered(p.OwnLogrotateConf(), "logrotate/zimam-own.conf", policy) &&
 		rendered(p.JournaldDropIn(), "journald/50-zimam.conf", policy), nil
 }
 
 func (r *run) logsApply(ctx context.Context) error {
-	return logpolicy.Apply(ctx, r.deps(), logpolicy.Policy{RetentionDays: r.cfg.LogRetentionDays, SiteCapBytes: r.cfg.SiteLogCapBytes}, nil)
+	return logpolicy.Apply(ctx, r.deps(), logpolicy.Policy{RetentionDays: r.cfg.LogRetentionDays, AuditRetentionDays: r.cfg.AuditRetentionDays, SiteCapBytes: r.cfg.SiteLogCapBytes}, nil)
 }
 
 // Step 11: the setup link.

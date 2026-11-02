@@ -155,12 +155,13 @@ func TestSiteLogrotateGolden(t *testing.T) {
 }
 
 func TestOwnLogrotateUsesSuZimam(t *testing.T) {
-	out := mustRender(t, "logrotate/zimam-own.conf", LogPolicy{RetentionDays: 7})
+	out := mustRender(t, "logrotate/zimam-own.conf", LogPolicy{RetentionDays: 7, AuditRetentionDays: 400})
 	audit, panelLogs, found := strings.Cut(out, "/home/zimam/panel/shared/storage/logs/*.log {")
 	if !found {
 		t.Fatalf("no rule for the panel's Laravel logs:\n%s", out)
 	}
-	contains(t, "the audit log's rule", audit, "/var/log/zimam/audit.log {\n", "    maxage 7\n", "    compress\n")
+	// D24: the audit log keeps its own retention.
+	contains(t, "the audit log's rule", audit, "/var/log/zimam/audit.log {\n", "    maxage 400\n", "    compress\n")
 	lacks(t, "the audit log's rule", audit, "su ")
 	contains(t, "the panel logs' rule", panelLogs, "\n    su zimam zimam\n", "    maxage 7\n", "    compress\n")
 }
