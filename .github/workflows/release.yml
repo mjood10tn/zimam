@@ -1,0 +1,105 @@
+name: release
+
+# A vX.Y.Z tag releases everything together (design §3). The build job holds
+# the signing key and runs every gate. Only when all of them pass does the
+# publish job, the one job with write access, create the GitHub release.
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: check the tag and the release key
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! [[ $TAG =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::tag $TAG isn't v<major>.<minor>.<patch>[-<pre-release>]"
+            exit 1
+          fi
+          if [ ! -s release/release-key.pub ]; then
+            echo "::error::release/release-key.pub isn't committed"
+            exit 1
+          fi
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+          # A release never ships a root binary built with an older Go patch
+          # than the newest 1.27.x; setup-go otherwise prefers the runner's.
+          check-latest: true
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: intl, mbstring, pdo_sqlite, sqlite3, zip
+          coverage: none
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: panel/package-lock.json
+      - name: build
+        env:
+          TAG: ${{ github.ref_name }}
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          key="$RUNNER_TEMP/release-signing-key"
+          trap 'rm -f "$key"' EXIT
+          (umask 077 && printf '%s\n' "$RELEASE_SIGNING_KEY" >"$key")
+          bash .github/scripts/build-release.sh "${TAG#v}" "https://github.com/$GITHUB_REPOSITORY/releases" "$key"
+      - name: gates
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(jq -r .version dist/manifest.json)"
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::tag $TAG isn't v$version from manifest.json"
+            exit 1
+          fi
+          # No e2e build, and each agent carries the committed release key.
+          # verify then proves that the secret signed for that same key.
+          go -C agent run ./tools/release check-binary -key ../release/release-key.pub \
+            ../dist/zimam-agent-linux-amd64 ../dist/zimam-agent-linux-arm64
+          go -C agent run ./tools/release verify -key ../release/release-key.pub -agent-version "$version" ../dist
+          # D7: panel_php_min is Composer's config.platform.php.
+          platform="$(jq -r .config.platform.php panel/composer.json)"
+          panel_php_min="$(jq -r .panel_php_min dist/manifest.json)"
+          if [ "$platform" != "$panel_php_min" ]; then
+            echo "::error::config.platform.php is $platform but panel_php_min is $panel_php_min"
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+      - name: publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          prerelease=()
+          if [[ $TAG == *-* ]]; then
+            prerelease=(--prerelease)
+          fi
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" \
+            --generate-notes "${prerelease[@]}" dist/*

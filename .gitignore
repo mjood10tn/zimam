@@ -7,3 +7,6 @@
 # Operating system files
 .DS_Store
 Thumbs.db
+
+# Release builds (.github/scripts/build-release.sh)
+/dist/
