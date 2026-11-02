@@ -1,0 +1,3 @@
+# Each script finds the files it sources relative to itself.
+source-path=SCRIPTDIR
+external-sources=true

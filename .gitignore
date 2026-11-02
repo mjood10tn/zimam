@@ -10,3 +10,7 @@ Thumbs.db
 
 # Release builds (.github/scripts/build-release.sh)
 /dist/
+
+# End-to-end browser tests (e2e/browser); their results go to $E2E_WORK
+/e2e/browser/node_modules/
+/e2e/browser/test-results/

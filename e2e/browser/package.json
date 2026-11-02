@@ -1,0 +1,13 @@
+{
+  "name": "zimam-e2e-browser",
+  "private": true,
+  "description": "Playwright drives the setup link, login and 2FA through the real panel (design §14.2, D12). Node runs only on the CI host.",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "otplib": "13.5.0"
+  }
+}

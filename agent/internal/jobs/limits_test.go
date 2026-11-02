@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"zimam/agent/contract"
@@ -27,8 +28,11 @@ func TestLimitsMatchDesign(t *testing.T) {
 			t.Errorf("LimitsFor(%s) = %+v, %t; want %+v", name, got, ok, w)
 		}
 	}
-	if len(limits) != len(want) {
-		t.Errorf("%d commands have limits, want %d", len(limits), len(want))
+	for name := range limits {
+		// e2e builds add their test-only commands (D22).
+		if _, ok := want[name]; !ok && !strings.HasPrefix(name, "e2e.") {
+			t.Errorf("%s has limits but isn't in §5.7", name)
+		}
 	}
 }
 

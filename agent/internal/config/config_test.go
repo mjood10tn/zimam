@@ -141,7 +141,7 @@ func TestConfigLoadRejects(t *testing.T) {
 		"repo URL with userinfo": strings.Replace(validJSON, `https://packages`, `https://u:p@packages`, 1),
 		"PHP not on allowlist":   strings.Replace(validJSON, `"default_php":"8.5"`, `"default_php":"8.1"`, 1),
 		"retention 0":            strings.Replace(validJSON, `"log_retention_days":14`, `"log_retention_days":0`, 1),
-		"cap below 1 GiB":        strings.Replace(validJSON, `5368709120`, `1024`, 1),
+		"cap below the minimum":  strings.Replace(validJSON, `5368709120`, `1000`, 1), // e2e builds allow 1 KiB
 		"relative CA bundle":     strings.Replace(validJSON, `{`, `{"acme_ca_bundle":"pebble.pem",`, 1),
 		"email with a name":      strings.Replace(validJSON, `{`, `{"acme_email":"Admin <admin@example.com>",`, 1),
 		"email with a newline":   strings.Replace(validJSON, `{`, `{"acme_email":"admin@example.com\nx",`, 1),

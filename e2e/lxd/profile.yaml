@@ -1,0 +1,8 @@
+description: Zimam end-to-end server, on top of LXD's default profile (root disk, lxdbr0)
+config:
+  # Ubuntu's apt timers would hold the dpkg lock while the installer runs.
+  cloud-init.user-data: |
+    #cloud-config
+    runcmd:
+      - [systemctl, disable, --now, apt-daily.timer, apt-daily-upgrade.timer, unattended-upgrades.service]
+devices: {}

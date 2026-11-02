@@ -5,6 +5,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"zimam/agent/contract"
 	"zimam/agent/internal/jobs"
@@ -46,10 +47,14 @@ func New(d sysexec.Deps, m *jobs.Manager) Handlers {
 	return h
 }
 
+// jobHandlers are the job commands' handlers. Each job command's file adds
+// its own from init; e2e.sleep's exists only in e2e builds.
+var jobHandlers = map[string]jobs.Handler{}
+
 // JobHandlers returns the job commands' handlers, which run inside each
 // job's unit.
 func JobHandlers() map[string]jobs.Handler {
-	return map[string]jobs.Handler{}
+	return maps.Clone(jobHandlers)
 }
 
 // submitJob is a job command's handler: it submits the job and answers
