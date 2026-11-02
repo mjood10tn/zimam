@@ -73,7 +73,9 @@ git -C "$root" archive --format=tar HEAD:panel | tar -x -C "$panel"
 (
 	cd "$panel"
 	composer install --no-dev --classmap-authoritative --no-interaction --no-progress --prefer-dist
-	npm ci --no-audit --no-fund
+	# No package install scripts run where a signing key is on disk; the
+	# asset build needs none (composer.json's setup script does the same).
+	npm ci --ignore-scripts --no-audit --no-fund
 	npm run build
 	# storage/ is linked in from the server's shared/ (design §4 step 6), and
 	# symlink-swap can't replace a directory, so the release has none.

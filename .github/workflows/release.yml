@@ -51,9 +51,12 @@ jobs:
           TAG: ${{ github.ref_name }}
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
         run: |
-          key="$RUNNER_TEMP/release-signing-key"
+          key="$(mktemp "$RUNNER_TEMP/signing-key.XXXXXX")"
           trap 'rm -f "$key"' EXIT
-          (umask 077 && printf '%s\n' "$RELEASE_SIGNING_KEY" >"$key")
+          printf '%s\n' "$RELEASE_SIGNING_KEY" >"$key"
+          # composer, npm and the scripts they run never get the key in
+          # their environment.
+          unset RELEASE_SIGNING_KEY
           bash .github/scripts/build-release.sh "${TAG#v}" "https://github.com/$GITHUB_REPOSITORY/releases" "$key"
       - name: gates
         env:
