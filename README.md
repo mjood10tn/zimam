@@ -40,10 +40,10 @@ cd agent && docker build -t zimam-configcheck scripts/configcheck && bash script
 Panel work happens on Windows under Herd, with the fake agent client (`ZIMAM_AGENT=fake`, design §14.6):
 
 ```bash
-cd panel && composer install && cp .env.example .env && php artisan key:generate && php artisan migrate
+cd panel && composer install && cp .env.example .env && php artisan key:generate && php artisan migrate && npm ci && npm run build
 ```
 
-Then `herd link zimam-panel`, run in `panel/`, serves it at `http://zimam-panel.test`. The tests:
+Then `herd link zimam-panel`, run in `panel/`, serves it at `http://zimam-panel.test`. Every page loads the panel's Filament theme (`resources/css/filament/admin/theme.css`, the tokens from the design system) through Vite, so run `npm run build` again after changing it, or keep `npm run dev` running. The tests don't need the build:
 
 ```bash
 cd panel && php artisan test

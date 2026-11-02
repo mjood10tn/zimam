@@ -41,7 +41,8 @@ return [
         'banner' => [
             'heading' => 'The panel can’t reach the agent.',
             'since' => 'Its last answer came at :time.',
-            'body' => 'Your sites keep running. Values shown are what the agent last reported, and actions are paused until it answers. Over SSH, check it with sudo systemctl status zimam-agent.socket.',
+            'body' => 'Your sites keep running. Values shown are what the agent last reported, and actions are paused until it answers. Over SSH, check it with :command.',
+            'command' => 'sudo systemctl status zimam-agent.socket',
         ],
         'paused' => 'Paused until the agent answers.',
     ],
