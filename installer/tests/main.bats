@@ -40,13 +40,15 @@ cp "$T/release/${url##*/}" "$out"'
 
 # release serves a signed release $1 whose agent prints the link and exits
 # with $2. Its version --at-least compares with sort -V, which is enough
-# for these versions; the real agent compares in Go.
+# for these versions; the real agent compares in Go. VERSION_EXIT makes it
+# fail the way a binary that can't run does.
 release() {
 	mkdir -p "$T/release"
 	cat >"$T/release/zimam-agent-linux-amd64" <<EOF
 #!/usr/bin/env bash
 printf "%s\n" "\$*" >>"\$T/agent.log"
 if [[ \$1 == version ]]; then
+	[[ -z \${VERSION_EXIT:-} ]] || exit "\$VERSION_EXIT"
 	[[ \$(printf "%s\n" "\$3" "$1" | sort -V | head -1) == "\$3" ]]
 	exit
 fi
@@ -118,6 +120,21 @@ installed() {
 	grep -qx "version --at-least 1.3.0" "$T/agent.log"
 	run ! grep -q bootstrap "$T/agent.log"
 	[ "$("$T/zimam-agent" version)" = 1.3.0 ]
+	[ ! -e "$T/zimam-agent.zimam-new" ]
+}
+
+# The check runs the new agent from where it's installed, not from the
+# download directory, which a hardened /tmp may mount noexec. An agent that
+# can't run is reported as that, not as an older release.
+@test "a downloaded agent that can't run says so, and changes nothing" {
+	installed 1.2.3
+	export VERSION_EXIT=126
+	install_sh --panel-domain panel.example.com
+	[ "$status" -eq 1 ]
+	[[ $stderr == *"couldn't run the downloaded agent to compare versions (exit 126)"* ]]
+	[[ $stderr != *"newer than release"* ]]
+	[ "$("$T/zimam-agent" version)" = 1.2.3 ]
+	[ ! -e "$T/zimam-agent.zimam-new" ]
 }
 
 @test "a repair run with the same or a newer release goes ahead" {

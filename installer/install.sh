@@ -338,18 +338,23 @@ install_agent() {
 		die "The release manifest names the version $RELEASE_VERSION."
 	[[ -z $VERSION || $RELEASE_VERSION == "$VERSION" ]] ||
 		die "The manifest at $url is for release $RELEASE_VERSION, not $VERSION."
-	# A repair run never moves the server to an older release. The new
-	# agent, verified above, compares the versions in Go. An agent too old
-	# to report its version can't be compared, and is replaced.
-	local new=$WORK_DIR/zimam-agent-linux-$ARCH installed
-	chmod 0700 "$new"
-	if [[ -x $AGENT_BIN ]] && installed=$("$AGENT_BIN" version 2>/dev/null) &&
-		[[ $installed =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-		"$new" version --at-least "$installed" >/dev/null 2>&1 ||
-			die "This server runs zimam-agent $installed, which is newer than release $RELEASE_VERSION. Run the installer with --version $installed or newer to repair it."
-	fi
 	log "Installing zimam-agent $RELEASE_VERSION"
 	install -o root -g root -m 0755 "$WORK_DIR/zimam-agent-linux-$ARCH" "$AGENT_BIN.zimam-new"
+	# A repair run never moves the server to an older release. The new
+	# agent, verified above, compares the versions in Go, run from where
+	# it's installed: a hardened /tmp may be mounted noexec. An agent too
+	# old to report its version can't be compared, and is replaced.
+	local installed code=0
+	if [[ -x $AGENT_BIN ]] && installed=$("$AGENT_BIN" version 2>/dev/null) &&
+		[[ $installed =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+		"$AGENT_BIN.zimam-new" version --at-least "$installed" >/dev/null 2>&1 || code=$?
+		if ((code != 0)); then
+			rm -f "$AGENT_BIN.zimam-new"
+			((code == 1)) ||
+				die "The installer couldn't run the downloaded agent to compare versions (exit $code). Nothing was changed."
+			die "This server runs zimam-agent $installed, which is newer than release $RELEASE_VERSION. Run the installer with --version $installed or newer to repair it."
+		fi
+	fi
 	mv -f "$AGENT_BIN.zimam-new" "$AGENT_BIN"
 }
 

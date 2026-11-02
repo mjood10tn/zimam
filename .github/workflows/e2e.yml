@@ -64,6 +64,8 @@ jobs:
         run: bash e2e/probes/run.sh
       - name: done-when 11, the audit log
         run: bash e2e/scenarios/m1-audit.sh
+      - name: running the installer again repairs, after the version check
+        run: bash e2e/scenarios/m1-repair.sh
       - name: collect logs
         if: failure()
         run: bash e2e/scripts/collect-logs.sh

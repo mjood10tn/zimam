@@ -16,6 +16,7 @@ The end-to-end harness (design §14.2): a release built with the `e2e` tag and a
 | The root-only Go tests | `scenarios/m1-roottests.sh` | container |
 | The caller and protocol probes between two file snapshots | `probes/run.sh` | container |
 | Done-when 11: the audit log | `scenarios/m1-audit.sh` | host |
+| Running the installer again repairs, after `zimam-agent version --at-least` (D25) | `scenarios/m1-repair.sh` | host |
 | Logs for a failed run, then tear down | `scripts/collect-logs.sh`, `scripts/down.sh` | host |
 
 `up.sh` writes `$E2E_WORK/state.env` (the bridge and container addresses), and every later step reads it. `E2E_WORK` defaults to `/tmp/zimam-e2e`; `E2E_CONTAINER`, `E2E_IMAGE` and `E2E_VERSION` can be set too (`scripts/common.sh`).
