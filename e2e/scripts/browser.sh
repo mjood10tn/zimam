@@ -2,6 +2,8 @@
 # Runs the browser tests (e2e/browser) on this host: Playwright's Chromium,
 # trusting Pebble's issuing root through the NSS database Chromium reads.
 # The root changes every time Pebble starts, so it is fetched each run.
+# Arguments go to playwright test: --project recovery for milestone 1,
+# --project m2-default for milestone 2.
 # shellcheck source=common.sh
 source "$(dirname "$0")/common.sh"
 load_state
@@ -23,4 +25,4 @@ certutil -d "sql:$nssdb" -A -t "C,," -n "Zimam e2e Pebble root" -i "$root"
 cd "$E2E_ROOT/e2e/browser" || exit
 npm ci --no-audit --no-fund
 npx playwright install --with-deps chromium
-E2E_WORK=$E2E_WORK npx playwright test
+E2E_WORK=$E2E_WORK npx playwright test "$@"

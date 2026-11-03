@@ -2,7 +2,7 @@
 // link and invalidates the old one. With an admin, the link resets its
 // email, password and 2FA, and the next sign-in must set up 2FA again.
 import { expect, test } from '@playwright/test';
-import { enrol, expectDashboard, loadAdmin, newSetupLink, password, signIn, signOut } from './support.ts';
+import { enrol, expectDashboard, loadAdmin, newSetupLink, password, saveAdmin, signIn, signOut } from './support.ts';
 
 test('a new setup link from SSH resets access and 2FA', async ({ page }) => {
   const admin = loadAdmin();
@@ -32,6 +32,8 @@ test('a new setup link from SSH resets access and 2FA', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Set up', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Verify your identity' })).toHaveCount(0);
 
-  await enrol(page, pass);
+  const { secret, recoveryCodes } = await enrol(page, pass);
   await expectDashboard(page);
+  // The milestone 2 specs sign in as this admin.
+  saveAdmin({ email, password: pass, secret, recoveryCodes });
 });

@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Done-when 11 for milestone 1 (design §2, §5.8): after the run, the audit
-# log holds a cli:root entry for every bootstrap step and for each
-# `panel setup-link`, the probes' rejections, and the contract suite's
-# site.provision submissions, outcomes and refusals, and its e2e.sleep
-# submission and cancel. It holds no successful routine read, and never a
-# setup link.
+# Done-when 11 (design §2, §5.8), for every command so far: after the run,
+# the audit log holds a cli:root entry for every bootstrap step and for
+# each `panel setup-link`, the probes' rejections, the contract suite's
+# site.provision submissions, outcomes and refusals and its e2e.sleep
+# submission and cancel, and milestone 2's php.install, php.default,
+# site.provision, cert.issue, site.php and site.destroy submissions and
+# outcomes, from the browser scenarios and the symlink probe. It holds no
+# successful routine read, and never a setup link.
 # shellcheck source=../scripts/common.sh
 source "$(dirname "$0")/../scripts/common.sh"
 
@@ -44,10 +46,21 @@ for code, least in [("invalid_request", 5), ("unsupported_protocol", 1), ("unkno
     n = count(outcome="error:" + code)
     check(n >= least, f"the protocol probes' rejections: {n} error:{code}, want at least {least}")
 
-check(count(command="site.provision", outcome="accepted") >= 2, "site.provision submissions accepted")
-check(count(command="site.provision", outcome="ok") >= 2, "the site.provision jobs' outcomes")
 check(count(command="site.provision", outcome="error:busy") >= 1, "site.provision refused as busy")
-check(count(command="site.provision", outcome="error:validation_failed") >= 1, "site.provision refused for a bad site name")
+
+# Submissions and the jobs' outcomes: the contract suite's two sites, the
+# three browser sites and probe-static; PHP 8.4 and its default; three
+# certificates; php84 to 8.5 and back; probe-static's destroy.
+for command, least in [("site.provision", 6), ("php.install", 1), ("php.default", 1), ("cert.issue", 3),
+                       ("site.php", 2), ("site.destroy", 1)]:
+    for outcome in ("accepted", "ok"):
+        n = count(command=command, outcome=outcome)
+        check(n >= least, f"{command} {outcome}: {n}, want at least {least}")
+
+# The validation probes, and the contract suite's bad site name.
+for command, least in [("site.provision", 23), ("php.install", 3), ("site.php", 3), ("site.destroy", 3), ("cert.issue", 3)]:
+    n = count(command=command, outcome="error:validation_failed")
+    check(n >= least, f"{command} refused as validation_failed: {n}, want at least {least}")
 check(count(command="e2e.sleep", outcome="accepted") >= 1, "the e2e.sleep submission accepted")
 check(count(command="job.cancel", outcome="ok") >= 1, "job.cancel audited")
 

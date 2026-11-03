@@ -29,3 +29,27 @@ audit_since() {
 field() {
 	python3 -I -c 'import json, sys; v = json.load(sys.stdin).get(sys.argv[1]); print("" if v is None else v)' "$1"
 }
+
+# The envelope fields every probe request shares.
+env_ok="\"v\":1,\"id\":\"$ULID\",\"actor\":\"probe\""
+
+# probe <name> <code> <request> sends the request as one line.
+probe() {
+	local name=$1 code=$2 req=$3 before reply entries
+	before=$(audit_lines)
+	reply=$(printf '%s\n' "$req" | bash "$E2E_ROOT/e2e/scripts/as.sh" zimam "$PROBECLIENT" "$SOCKET") || {
+		fail "$name: probeclient failed"
+		return
+	}
+	if [[ $(wc -l <<<"$reply") == 1 && $(field type <<<"$reply") == error && $(field code <<<"$reply") == "$code" ]]; then
+		pass "$name answers $code"
+	else
+		fail "$name answers ${reply:0:300}"
+	fi
+	entries=$(audit_since "$before")
+	if [[ $(wc -l <<<"$entries") == 1 && $(field outcome <<<"$entries") == "error:$code" ]]; then
+		pass "$name leaves one error:$code entry"
+	else
+		fail "$name leaves: ${entries:0:500}"
+	fi
+}

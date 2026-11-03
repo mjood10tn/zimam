@@ -11,11 +11,12 @@ The end-to-end harness (design §14.2): a release built with the `e2e` tag and a
 | Serve the release on the bridge, port 8080 | `scripts/serve-release.sh` | host |
 | `curl … install.sh \| bash` in the container | `scripts/install.sh` | container |
 | Done-when 1: the installer's last line is the setup link | `scenarios/m1-install.sh` | host |
-| Done-when 2 and recovery, in Chromium | `scripts/browser.sh` (`browser/`) | host |
+| Done-when 2 and recovery, in Chromium | `scripts/browser.sh --project recovery` (`browser/`) | host |
 | The contract suite against the real agent, as `zimam` | `scenarios/m1-contract.sh` | container |
 | The root-only Go tests | `scenarios/m1-roottests.sh` | container |
-| The caller and protocol probes between two file snapshots | `probes/run.sh` | container |
-| Done-when 11: the audit log | `scenarios/m1-audit.sh` | host |
+| Done-when 3 to 7 in Chromium: install PHP 8.4, create `static`, `php84` and `php85`, issue their certificates, switch `php84` to 8.5 and back under a request loop, make 8.4 the default. The specs call `scenarios/m2-*.sh` for the checks from outside the browser | `scripts/browser.sh --project m2-default` | host |
+| The caller (`nobody`, `s_php84`), protocol and validation probes between two file snapshots, then the `site.destroy` symlink probe with its own | `probes/run.sh` | container |
+| Done-when 11: the audit log, for every command so far | `scenarios/audit.sh` | host |
 | Running the installer again repairs, after `zimam-agent version --at-least` (D25) | `scenarios/m1-repair.sh` | host |
 | Logs for a failed run, then tear down | `scripts/collect-logs.sh`, `scripts/down.sh` | host |
 

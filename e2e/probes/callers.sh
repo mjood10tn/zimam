@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# Caller probes (design §14.4): nobody and a site user, s_probe, connect to
-# the agent. The socket's mode (0660 root:zimam-agent) stops them first, so
+# Caller probes (design §14.4): nobody and a real site user, s_php84 (the
+# milestone 2 scenarios made it), connect to the agent. The socket's mode
+# (0660 root:zimam-agent) stops them first, so
 # each also gets the zimam-agent group, to reach the agent's own check
 # (SO_PEERCRED): that must send no reply and leave exactly one
-# error:forbidden entry with the caller's uid. run.sh creates s_probe.
+# error:forbidden entry with the caller's uid.
 # shellcheck source=lib.sh
 source "$(dirname "$0")/lib.sh"
 
 req="{\"v\":1,\"id\":\"$ULID\",\"command\":\"agent.version\",\"actor\":\"probe\",\"params\":{}}"
-for user in nobody s_probe; do
+for user in nobody s_php84; do
 	uid=$(in_c id -u "$user")
 	gid=$(in_c id -g "$user")
 

@@ -3,7 +3,7 @@
 // enrolment. The selectors are Filament's English strings (Task 3 spike,
 // step 6) and Zimam's own, from lang/en/zimam.php.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, type Page } from '@playwright/test';
 import { generate } from 'otplib';
@@ -38,15 +38,18 @@ export function newSetupLink(): string {
 }
 
 // code waits for a 30-second period no earlier code came from, so the panel
-// never sees one code twice, then returns that period's code.
-let lastPeriod = 0;
+// never sees one code twice, then returns that period's code. The last
+// period is kept in the work directory, since each browser.sh run is a new
+// process and the specs sign in again.
+const periodFile = `${work}/totp-period`;
 export async function code(secret: string): Promise<string> {
+  const lastPeriod = existsSync(periodFile) ? Number(readFileSync(periodFile, 'utf8')) : 0;
   let period = Math.floor(Date.now() / 30_000);
   if (period <= lastPeriod) {
     await new Promise((resolve) => setTimeout(resolve, (lastPeriod + 1) * 30_000 - Date.now() + 1_000));
     period = Math.floor(Date.now() / 30_000);
   }
-  lastPeriod = period;
+  writeFileSync(periodFile, String(period));
   return generate({ secret, epoch: period * 30 });
 }
 
@@ -91,6 +94,44 @@ export async function signOut(page: Page): Promise<void> {
 export async function expectDashboard(page: Page): Promise<void> {
   await expect(page).toHaveURL(`${panel}/admin`);
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+}
+
+// signInAsAdmin signs in as the admin the setup and recovery specs left,
+// with a TOTP code, and lands on the dashboard.
+export async function signInAsAdmin(page: Page): Promise<void> {
+  const admin = loadAdmin();
+  await signIn(page, admin.email, admin.password);
+  await expect(page.getByRole('heading', { name: 'Verify your identity' })).toBeVisible();
+  await page.locator('input[autocomplete="one-time-code"]').first().click();
+  await page.keyboard.type(await code(admin.secret));
+  await expectDashboard(page);
+}
+
+// scenario runs one of e2e/scenarios/*.sh on this host, its output shown
+// with the test's. A non-zero exit fails the test.
+export function scenario(name: string, ...args: string[]): void {
+  const path = fileURLToPath(new URL(`../scenarios/${name}`, import.meta.url));
+  execFileSync('bash', [path, ...args], { stdio: 'inherit' });
+}
+
+// untilText reloads the page until its main content matches want, and
+// fails at once if it matches failed, with that content.
+export async function untilText(page: Page, want: RegExp, failed: RegExp | null, timeout: number): Promise<void> {
+  const end = Date.now() + timeout;
+  for (;;) {
+    const text = await page.locator('main').innerText();
+    if (want.test(text)) {
+      return;
+    }
+    if (failed?.test(text)) {
+      throw new Error(`the page shows ${failed}:\n${text}`);
+    }
+    if (Date.now() > end) {
+      throw new Error(`no ${want} within ${timeout / 1000} s:\n${text}`);
+    }
+    await page.waitForTimeout(3_000);
+    await page.reload();
+  }
 }
 
 export function password(): string {

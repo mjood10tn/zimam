@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   e2e:
-    # The end-to-end run (design §14.2) and milestone 1's gate: an e2e
+    # The end-to-end run (design §14.2) and the milestone gates: an e2e
     # release, signed with a throwaway key, installed by install.sh in a
     # fresh Ubuntu 26.04 LXD container, with Pebble as the ACME server.
     runs-on: ubuntu-26.04
@@ -55,15 +55,17 @@ jobs:
       - name: done-when 1, the setup link
         run: bash e2e/scenarios/m1-install.sh
       - name: done-when 2 and recovery, in the browser
-        run: bash e2e/scripts/browser.sh
+        run: bash e2e/scripts/browser.sh --project recovery
       - name: the contract suite against the real agent
         run: bash e2e/scenarios/m1-contract.sh
       - name: the root-only Go tests
         run: bash e2e/scenarios/m1-roottests.sh
-      - name: the caller and protocol probes, and the files they must not change
+      - name: done-when 3 to 7, PHP versions, sites, certificates and the switch, in the browser
+        run: bash e2e/scripts/browser.sh --project m2-default
+      - name: the caller, protocol, validation and symlink probes, and the files they must not change
         run: bash e2e/probes/run.sh
       - name: done-when 11, the audit log
-        run: bash e2e/scenarios/m1-audit.sh
+        run: bash e2e/scenarios/audit.sh
       - name: running the installer again repairs, after the version check
         run: bash e2e/scenarios/m1-repair.sh
       - name: collect logs
