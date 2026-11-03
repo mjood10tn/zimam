@@ -62,15 +62,26 @@ class Site extends Model
         return new SiteProvision($this->name, $this->primaryDomain->hostname, $this->type, $this->type === self::PHP ? $this->php_version : null);
     }
 
-    /** Whether a job on this site has yet to end: the agent runs one per site at a time. */
-    public function hasUnfinishedJob(): bool
+    public function certificate(): HasOne
     {
-        return $this->jobs()->whereNotIn('status', AgentJob::FINISHED)->exists();
+        return $this->hasOne(Certificate::class);
     }
 
-    /** The address the site answers on until it has a certificate. */
+    /**
+     * Whether a job on this site, or on its certificate, has yet to end:
+     * the agent runs one per site at a time.
+     */
+    public function hasUnfinishedJob(): bool
+    {
+        return $this->jobs()->whereNotIn('status', AgentJob::FINISHED)->exists()
+            || ($this->certificate?->jobs()->whereNotIn('status', AgentJob::FINISHED)->exists() ?? false);
+    }
+
+    /** The address the site answers on: HTTPS once its certificate is issued. */
     public function url(): string
     {
-        return 'http://'.$this->primaryDomain?->hostname;
+        $scheme = $this->certificate?->status === Certificate::ISSUED ? 'https' : 'http';
+
+        return $scheme.'://'.$this->primaryDomain?->hostname;
     }
 }

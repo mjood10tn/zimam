@@ -5,6 +5,7 @@ namespace Tests\Unit\Agent;
 use App\Agent\AgentCommand;
 use App\Agent\AgentCommandKind;
 use App\Agent\Commands\AgentVersion;
+use App\Agent\Commands\CertIssue;
 use App\Agent\Commands\E2eSleep;
 use App\Agent\Commands\JobCancel;
 use App\Agent\Commands\JobFollow;
@@ -65,6 +66,7 @@ final class SchemaTest extends TestCase
             new SiteProvision('shop', 'shop.example.com', 'php', '8.4'),
             new SitePhp('shop', '8.5'),
             new SiteDestroy('shop'),
+            new CertIssue('shop'),
         ];
 
         return array_combine(

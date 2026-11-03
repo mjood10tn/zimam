@@ -151,6 +151,18 @@ func (r hookRunner) Run(ctx context.Context, c sysexec.Cmd) (sysexec.Result, err
 		r.FakeRunner.Run(ctx, c) // recorded like any call
 		return sysexec.Result{Stdout: []byte("4242\n")}, nil
 	}
+	// certbot certonly saves the lineage, or fails as env.certbotFails says.
+	// Like the real one, it keeps a certificate it already has.
+	if c.Path == "/usr/bin/certbot" && len(c.Args) > 0 && c.Args[0] == "certonly" {
+		r.FakeRunner.Run(ctx, c) // recorded like any call
+		if out := r.env.certbotFails; out != "" {
+			return sysexec.Result{ExitCode: 1, Stderr: []byte(out)}, &sysexec.ExitError{Path: c.Path, Code: 1, Stderr: []byte(out)}
+		}
+		if cert := r.env.p.LetsEncryptCert("zimam-shop"); !exists(cert) {
+			writeCert(r.env.t, cert)
+		}
+		return sysexec.Result{}, nil
+	}
 	res, err := r.FakeRunner.Run(ctx, c)
 	if err != nil {
 		return res, err
@@ -225,6 +237,8 @@ type env struct {
 	// procs is how many more times pgrep finds the site user's processes;
 	// -1 is for ever.
 	procs int
+	// certbotFails, when set, is what a failing certbot certonly prints.
+	certbotFails string
 }
 
 var testNow = time.Date(2026, 11, 3, 9, 0, 0, 0, time.UTC)

@@ -224,6 +224,8 @@ final class FakeAgentClient implements AgentClient
             'site.provision' => ['name' => $params['name'], 'template_version' => 1],
             'site.php' => ['name' => $params['name'], 'php_version' => $params['php_version']],
             'site.destroy' => ['name' => $params['name']],
+            // Let's Encrypt's certificates last 90 days.
+            'cert.issue' => ['expires_at' => self::goTime(CarbonImmutable::now('UTC')->addDays(90))],
             default => [],
         };
     }

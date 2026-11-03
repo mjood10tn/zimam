@@ -4,6 +4,7 @@ namespace App\Filament\Resources\SiteResource\Pages;
 
 use App\Actions\SubmitAgentCommand;
 use App\Agent\AgentHealth;
+use App\Agent\Commands\CertIssue;
 use App\Agent\Commands\SiteDestroy;
 use App\Agent\Commands\SitePhp;
 use App\Agent\Exceptions\AgentException;
@@ -11,6 +12,7 @@ use App\Agent\Exceptions\AgentNotFound;
 use App\Agent\ServerStatus;
 use App\Filament\Actions\ConfirmsPassword;
 use App\Filament\Resources\SiteResource;
+use App\Models\Certificate;
 use App\Models\Site;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
@@ -18,7 +20,7 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Support\Exceptions\Halt;
 
-/** A site's page: Overview, Jobs, Security and Logs tabs; Switch PHP version for an active PHP site (§9.5); Retry for a failed site (§9.2); Delete for an active or failed one (§9.8). */
+/** A site's page: Overview, Jobs, Security and Logs tabs; Issue certificate for an active site (§10); Switch PHP version for an active PHP site (§9.5); Retry for a failed site (§9.2); Delete for an active or failed one (§9.8). */
 class ViewSite extends ViewRecord
 {
     protected static string $resource = SiteResource::class;
@@ -26,6 +28,20 @@ class ViewSite extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
+            AgentHealth::guard(
+                Action::make('issueCertificate')
+                    ->label(fn (Site $record): string => $record->certificate?->status === Certificate::FAILED
+                        ? __('zimam.sites.certificate.retry')
+                        : __('zimam.sites.certificate.issue'))
+                    ->requiresConfirmation()
+                    ->modalHeading(fn (Site $record): string => __('zimam.sites.certificate.heading', ['domain' => $record->primaryDomain?->hostname]))
+                    ->modalDescription(__('zimam.sites.certificate.description'))
+                    ->modalSubmitActionLabel(__('zimam.sites.certificate.issue'))
+                    ->visible(fn (Site $record): bool => $record->status === Site::ACTIVE
+                        && in_array($record->certificate?->status, [null, Certificate::FAILED], true))
+                    ->action(fn (Site $record) => $this->issueCertificate($record)),
+                fn (Site $record): ?string => $record->hasUnfinishedJob() ? __('zimam.sites.busy') : null,
+            ),
             AgentHealth::guard(
                 Action::make('switchPhp')
                     ->label(__('zimam.sites.switch.label'))
@@ -64,6 +80,32 @@ class ViewSite extends ViewRecord
                 fn (Site $record): ?string => $record->hasUnfinishedJob() ? __('zimam.sites.busy') : null,
             ),
         ];
+    }
+
+    /**
+     * Submits cert.issue for the site's certificate row, marked issuing
+     * until the outcome; a refusal puts the row back as it was.
+     */
+    private function issueCertificate(Site $site): void
+    {
+        $certificate = $site->certificate ?? $site->certificate()->make();
+        $previous = $certificate->exists ? $certificate->only(['status', 'last_error']) : null;
+        $certificate->fill(['status' => Certificate::ISSUING, 'last_error' => null])->save();
+        $undo = fn () => $previous === null ? $certificate->delete() : $certificate->update($previous);
+        try {
+            app(SubmitAgentCommand::class)->run(new CertIssue($site->name), $certificate);
+        } catch (Halt $e) {
+            $undo();
+
+            throw $e;
+        } catch (AgentException $e) {
+            $undo();
+            Notification::make()->title($e->getMessage())->danger()->send();
+
+            return;
+        }
+        $site->unsetRelation('certificate');
+        Notification::make()->title(__('zimam.sites.certificate.submitted', ['name' => $site->name]))->success()->send();
     }
 
     /**

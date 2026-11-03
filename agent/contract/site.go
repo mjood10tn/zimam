@@ -3,6 +3,7 @@ package contract
 import (
 	"errors"
 	"slices"
+	"time"
 )
 
 func init() {
@@ -28,6 +29,14 @@ func init() {
 		Audited: true,
 		Params:  func() Params { return &SiteNameParams{} },
 		Result:  SiteNameResult{},
+		Subject: siteNameSubject,
+	})
+	Register(Descriptor{
+		Name:    "cert.issue",
+		Kind:    KindJob,
+		Audited: true,
+		Params:  func() Params { return &SiteNameParams{} },
+		Result:  CertIssueResult{},
 		Subject: siteNameSubject,
 	})
 }
@@ -123,3 +132,9 @@ type SiteNameResult struct {
 }
 
 func siteNameSubject(p Params) string { return "site:" + string(p.(*SiteNameParams).Name) }
+
+// CertIssueResult is what cert.issue answers: when the site's new
+// certificate expires (§10).
+type CertIssueResult struct {
+	ExpiresAt time.Time `json:"expires_at"`
+}

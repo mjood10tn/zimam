@@ -154,6 +154,24 @@ func TestHookSiteLineage(t *testing.T) {
 	}
 }
 
+// A site's renewed certificate reaches Nginx the same way as the panel's:
+// tested, then reloaded, with the site's HTTPS vhost in place (Task 30).
+func TestHookReloadsForSite(t *testing.T) {
+	run := sysexec.NewFakeRunner(hookNginxTest, hookReload)
+	d := hookDeps(t, run)
+	if err := os.WriteFile(d.Paths.SiteState("shop"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeHookCert(t, d.Paths, "zimam-shop")
+	if code, stderr := runHook(t, d, "/etc/letsencrypt/live/zimam-shop"); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	want := []string{"/usr/sbin/nginx -t", "/usr/bin/systemctl reload-or-restart nginx"}
+	if got := hookCommands(run); !slices.Equal(got, want) {
+		t.Errorf("ran %q, want %q", got, want)
+	}
+}
+
 func TestHookRejectsUnknownLineage(t *testing.T) {
 	for _, value := range []string{
 		"/etc/letsencrypt/live/other",

@@ -4,6 +4,7 @@ namespace App\Filament\Widgets;
 
 use App\Agent\AgentHealth;
 use App\Agent\ServerStatus;
+use App\Models\Certificate;
 use Carbon\CarbonImmutable;
 use Filament\Widgets\Widget;
 
@@ -12,8 +13,9 @@ use Filament\Widgets\Widget;
  * a headline counting them, one sentence naming them, the issued time,
  * then one card per warning. Milestone 1 knows three: agent unreachable
  * (the headline and the banner), reboot required and security updates
- * pending (§7.5). Tasks 30 and 32 add certificates, disks, memory and
- * services, and with the first critical card, the critical-first order.
+ * pending (§7.5). Task 30 adds certificates near or past their end, the
+ * first critical card, and so the critical-first order; Task 32 adds disks,
+ * memory and services.
  */
 class Warnings extends Widget
 {
@@ -61,8 +63,43 @@ class Warnings extends Widget
                 'at' => __('zimam.dashboard.checked', ['time' => self::time(is_string($checked) ? CarbonImmutable::parse($checked) : $status->issuedAt, 'H:i')]),
             ];
         }
+        array_push($warnings, ...$this->certificateWarnings());
+        // Critical first; otherwise in the order above.
+        usort($warnings, fn (array $a, array $b): int => ($a['severity'] === 'critical' ? 0 : 1) <=> ($b['severity'] === 'critical' ? 0 : 1));
 
         return $warnings;
+    }
+
+    /**
+     * Issued certificates within Certificate::WARN_DAYS of their end are a
+     * warning, expired ones critical (§9.7's certificate_valid), soonest
+     * first. The expiry is the panel's copy; security.check refreshes it.
+     *
+     * @return list<array{severity: 'critical'|'warning', title: string, detail: string, at: string}>
+     */
+    private function certificateWarnings(): array
+    {
+        $now = CarbonImmutable::now();
+        $certificates = Certificate::query()
+            ->with('site')
+            ->where('status', Certificate::ISSUED)
+            ->where('expires_at', '<=', $now->addDays(Certificate::WARN_DAYS))
+            ->orderBy('expires_at')
+            ->get();
+
+        return $certificates->map(function (Certificate $certificate) use ($now): array {
+            $expired = $certificate->expires_at->lte($now);
+            $days = (int) max(1, ceil($now->diffInHours($certificate->expires_at) / 24));
+
+            return [
+                'severity' => $expired ? 'critical' : 'warning',
+                'title' => $expired
+                    ? __('zimam.dashboard.warnings.certificate_expired.title', ['site' => $certificate->site->name])
+                    : trans_choice('zimam.dashboard.warnings.certificate_expiring.title', $days, ['site' => $certificate->site->name, 'days' => $days]),
+                'detail' => __($expired ? 'zimam.dashboard.warnings.certificate_expired.detail' : 'zimam.dashboard.warnings.certificate_expiring.detail'),
+                'at' => __('zimam.dashboard.expires', ['time' => self::time($certificate->expires_at, 'j M H:i')]),
+            ];
+        })->values()->all();
     }
 
     /** @param list<array{severity: string}> $warnings */

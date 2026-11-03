@@ -106,6 +106,7 @@ return [
         'issued_at' => 'Issued :issued',
         'waiting' => 'Waiting for the agent',
         'checked' => 'checked :time',
+        'expires' => 'ends :time',
         'warnings_label' => 'Warnings in force',
         'severity' => [
             'warning' => 'Warning',
@@ -119,6 +120,14 @@ return [
             'security_updates' => [
                 'title' => '{1} :count security update pending|[2,*] :count security updates pending',
                 'detail' => 'Install them over SSH with sudo apt upgrade.',
+            ],
+            'certificate_expiring' => [
+                'title' => '{1} The certificate for :site expires in :days day|[2,*] The certificate for :site expires in :days days',
+                'detail' => 'Certificates renew 30 days before they end, so renewal has been failing. Check that the domain still points at this server and that port 80 is open.',
+            ],
+            'certificate_expired' => [
+                'title' => 'The certificate for :site has expired',
+                'detail' => 'Browsers now refuse the site over HTTPS. Renewal retries twice a day: check that the domain still points at this server and that port 80 is open.',
             ],
         ],
     ],
@@ -168,6 +177,8 @@ return [
             'url' => 'Address',
             'template_version' => 'Config template version',
             'last_error' => 'Last error',
+            'certificate' => 'Certificate',
+            'certificate_error' => 'Certificate error',
         ],
         'types' => [
             'php' => 'PHP',
@@ -216,6 +227,18 @@ return [
             'submitted' => 'Deleting :name',
             'done' => ':name is deleted',
             'cancelled' => 'Deleting was cancelled before it finished. Delete again to finish it.',
+        ],
+        'certificate' => [
+            'issue' => 'Issue certificate',
+            'retry' => 'Retry certificate',
+            'heading' => 'Get a certificate for :domain',
+            'description' => 'Let’s Encrypt checks the domain over HTTP, so its DNS must point at this server and port 80 must be open. Once issued, the site redirects HTTP to HTTPS, and the certificate renews itself.',
+            'submitted' => 'Requesting a certificate for :name',
+            'none' => 'None yet',
+            'issuing' => 'Issuing…',
+            'issued' => 'Issued, expires :date',
+            'failed' => 'Failed',
+            'cancelled' => 'The request was cancelled before it finished.',
         ],
         'busy' => 'Wait for this site’s current job to finish.',
     ],

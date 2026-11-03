@@ -6,6 +6,7 @@ use App\Filament\Resources\SiteResource\Pages\CreateSite;
 use App\Filament\Resources\SiteResource\Pages\ListSites;
 use App\Filament\Resources\SiteResource\Pages\ViewSite;
 use App\Livewire\SiteJobs;
+use App\Models\Certificate;
 use App\Models\Domain;
 use App\Models\Site;
 use BackedEnum;
@@ -116,6 +117,18 @@ class SiteResource extends Resource
                     TextEntry::make('php_version')
                         ->label(__('zimam.sites.fields.php_version'))
                         ->placeholder(__('zimam.sites.fields.php_static')),
+                    TextEntry::make('certificate')
+                        ->label(__('zimam.sites.fields.certificate'))
+                        ->state(fn (Site $record): string => match ($record->certificate?->status) {
+                            Certificate::ISSUED => __('zimam.sites.certificate.issued', ['date' => $record->certificate->expires_at?->setTimezone(config('app.timezone'))->format('j M Y')]),
+                            Certificate::ISSUING => __('zimam.sites.certificate.issuing'),
+                            Certificate::FAILED => __('zimam.sites.certificate.failed'),
+                            default => __('zimam.sites.certificate.none'),
+                        }),
+                    TextEntry::make('certificate.last_error')
+                        ->label(__('zimam.sites.fields.certificate_error'))
+                        ->visible(fn (Site $record): bool => $record->certificate?->status === Certificate::FAILED && filled($record->certificate->last_error))
+                        ->columnSpanFull(),
                     TextEntry::make('template_version')
                         ->label(__('zimam.sites.fields.template_version'))
                         ->placeholder('—'),
