@@ -107,3 +107,12 @@ func lastOf(lines []string) string {
 	}
 	return lines[len(lines)-1]
 }
+
+var dpkgConfigure = sysexec.Script{Path: "/usr/bin/dpkg", Args: []string{"--force-confdef", "--force-confold", "--configure", "-a"}}
+
+// interrupted is s answered as apt-get answers while a dpkg run is
+// unfinished (checked on Ubuntu 26.04).
+func interrupted(s sysexec.Script) sysexec.Script {
+	s.Result = sysexec.Result{ExitCode: 100, Stderr: []byte("E: dpkg was interrupted, you must manually run 'dpkg --configure -a' to correct the problem. \n")}
+	return s
+}

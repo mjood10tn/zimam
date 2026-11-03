@@ -145,6 +145,27 @@ func TestStatusAllFields(t *testing.T) {
 	}
 }
 
+// A version is in use while it has a Zimam pool, a site's or the panel's:
+// what php.uninstall refuses on.
+func TestStatusPHPInUse(t *testing.T) {
+	run := sysexec.NewFakeRunner(nginxV(t), fpmActive("8.3", false), fpmActive("8.4", true), fpmActive("8.5", true))
+	d := statusDeps(t, run)
+	for _, v := range []contract.PHPVersion{"8.3", "8.4", "8.5"} {
+		touch(t, d.Paths.PHPFPMBinary(v))
+	}
+	touch(t, d.Paths.PHPGlobalConf("8.3")) // not a pool
+	touch(t, d.Paths.PHPPool("8.4", "shop"))
+	touch(t, d.Paths.PanelPool("8.5"))
+	want := []contract.InstalledPHP{
+		{Version: "8.3", FPMActive: false, InUse: false},
+		{Version: "8.4", FPMActive: true, InUse: true},
+		{Version: "8.5", FPMActive: true, InUse: true},
+	}
+	if got := getStatus(t, d).PHP.Installed; !reflect.DeepEqual(got, want) {
+		t.Errorf("installed = %+v, want %+v", got, want)
+	}
+}
+
 // Before maintenance first counts the updates there is no updates.json, and
 // the counts are null. Slices are empty, never null: the schema says array.
 func TestStatusBeforeFirstUpdateCheck(t *testing.T) {

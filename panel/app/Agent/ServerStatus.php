@@ -36,6 +36,16 @@ final class ServerStatus
             return new self($last['data'], $issuedAt, true);
         }
 
+        return self::fresh() ?? ($issuedAt === null ? null : new self($last['data'], $issuedAt, false));
+    }
+
+    /**
+     * Asks the agent now, past the 10-second cache, and caches the answer:
+     * after a job ends, the cached one predates it. Null if the agent
+     * didn't answer.
+     */
+    public static function fresh(): ?self
+    {
         try {
             $data = app(AgentClient::class)->call(new SystemStatus)->data;
         } catch (AgentException $e) {
@@ -43,7 +53,7 @@ final class ServerStatus
                 report($e);
             }
 
-            return $issuedAt === null ? null : new self($last['data'], $issuedAt, false);
+            return null;
         }
         $issuedAt = CarbonImmutable::now();
         Cache::forever(self::KEY, ['data' => $data, 'issued_at' => $issuedAt->toIso8601String()]);

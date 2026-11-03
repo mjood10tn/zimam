@@ -6,6 +6,7 @@ use App\Agent\Commands\AgentVersion;
 use App\Agent\Exceptions\AgentException;
 use App\Agent\Exceptions\AgentUnavailable;
 use Carbon\CarbonImmutable;
+use Closure;
 use Filament\Actions\Action;
 use Illuminate\Support\Facades\Cache;
 
@@ -52,11 +53,20 @@ final class AgentHealth
         return is_string($at) ? CarbonImmutable::parse($at) : null;
     }
 
-    /** Disables an action that calls the agent while the agent is unreachable, and says why. */
-    public static function guard(Action $action): Action
+    /**
+     * Disables an action that calls the agent while the agent is unreachable,
+     * and says why. $blocker, evaluated like any action closure (with the
+     * $record, say), returns another reason to disable it, or null.
+     * Filament keeps one disabled() condition, so both live here.
+     */
+    public static function guard(Action $action, ?Closure $blocker = null): Action
     {
+        $reason = fn (Action $action): ?string => app(self::class)->isReachable()
+            ? ($blocker === null ? null : $action->evaluate($blocker))
+            : __('zimam.agent.paused');
+
         return $action
-            ->disabled(fn (): bool => ! app(self::class)->isReachable())
-            ->tooltip(fn (): ?string => app(self::class)->isReachable() ? null : __('zimam.agent.paused'));
+            ->disabled(fn (Action $action): bool => $reason($action) !== null)
+            ->tooltip(fn (Action $action): ?string => $reason($action));
     }
 }

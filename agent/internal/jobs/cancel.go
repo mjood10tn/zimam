@@ -6,11 +6,13 @@ import (
 
 	"zimam/agent/contract"
 	"zimam/agent/internal/audit"
+	"zimam/agent/internal/sysexec"
 )
 
 // Cancel stops a queued or running job's unit, which ends everything in its
-// cgroup, and records the job as cancelled (§5.7). A finished job answers
-// conflict. Every outcome is audited as job.cancel, with the caller from ctx.
+// cgroup, and records the job as cancelled (§5.7). A finished job, and one
+// that is running apt-get or dpkg, answer conflict. Every outcome is audited
+// as job.cancel, with the caller from ctx.
 func (m *Manager) Cancel(ctx context.Context, id contract.JobID) (contract.JobCancelResult, error) {
 	start := m.now()
 	res, err := m.cancel(ctx, id)
@@ -41,6 +43,17 @@ func (m *Manager) cancel(ctx context.Context, id contract.JobID) (contract.JobCa
 	if st.final() {
 		return contract.JobCancelResult{}, finished(id, st.Status)
 	}
+	// Held until the stop is over, so the job can't start apt-get or dpkg
+	// while systemd stops it.
+	unlock, free, err := sysexec.TryLock(m.Paths.JobCancelLock(id))
+	if err != nil {
+		return contract.JobCancelResult{}, err
+	}
+	if !free {
+		return contract.JobCancelResult{}, &contract.AgentError{Code: contract.ErrConflict,
+			Message: fmt.Sprintf("Job %s is installing or removing packages, and stopping dpkg midway would leave the package database broken. Try again once that step is over.", id)}
+	}
+	defer unlock()
 	unit := unitName(id)
 	u, err := m.Systemd.Show(ctx, unit)
 	if err != nil {

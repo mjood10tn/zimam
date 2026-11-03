@@ -93,6 +93,19 @@ final class FakeAgentClient implements AgentClient
         return $this;
     }
 
+    /**
+     * Changes the server the fake reports in system.status, and checks the
+     * PHP commands against: $change gets system.status's data and returns it.
+     *
+     * @param  Closure(array<string, mixed> $status): array<string, mixed>  $change
+     */
+    public function changeServer(Closure $change): static
+    {
+        $this->systemStatus = $change($this->systemStatus);
+
+        return $this;
+    }
+
     /** @return list<array{method: string, command: string, params: array<string, mixed>}> */
     public function calls(): array
     {
@@ -134,8 +147,45 @@ final class FakeAgentClient implements AgentClient
         if (count($unfinished) >= self::MAX_UNFINISHED) {
             throw new AgentBusy('Two jobs are already running');
         }
+        $this->precheck($command);
 
         return new AgentJob($this->queue($command, $subject));
+    }
+
+    /** The agent's prechecks for the PHP commands (§8.3–§8.5), against the fake's own server. */
+    private function precheck(AgentCommand $command): void
+    {
+        if (! str_starts_with($command->name(), 'php.')) {
+            return;
+        }
+        $php = $this->systemStatus['php'];
+        $version = $command->params()['version'];
+        $installed = array_column($php['installed'], null, 'version');
+        $available = array_column($php['available'], null, 'version');
+        match (true) {
+            $command->name() === 'php.install' && ! $available[$version]['supported'] => throw new AgentValidationFailed('Invalid parameters', [
+                'version' => "PHP {$version}'s security support ended on {$available[$version]['security_end']}, so it can't be installed",
+            ]),
+            $command->name() === 'php.install' && isset($installed[$version]) => throw new AgentConflict("PHP {$version} is already installed."),
+            $command->name() !== 'php.install' && ! isset($installed[$version]) => throw new AgentNotFound("PHP {$version} isn't installed."),
+            $command->name() === 'php.uninstall' && $version === $php['panel'] => throw new AgentConflict("The panel runs on PHP {$version}, so it can't be uninstalled."),
+            $command->name() === 'php.uninstall' && $version === $php['default'] => throw new AgentConflict("PHP {$version} is the default version. Make another version the default first."),
+            $command->name() === 'php.uninstall' && $installed[$version]['in_use'] => throw new AgentConflict("Sites still run on PHP {$version}. Move them to another version or delete them first."),
+            default => null,
+        };
+    }
+
+    /** What a succeeded PHP job changed on the fake's server, so system.status reports it. */
+    private function applyEffect(string $command, array $params): void
+    {
+        $php = &$this->systemStatus['php'];
+        match ($command) {
+            'php.install' => $php['installed'][] = ['version' => $params['version'], 'fpm_active' => false, 'in_use' => false],
+            'php.uninstall' => $php['installed'] = array_values(array_filter($php['installed'], fn (array $v): bool => $v['version'] !== $params['version'])),
+            'php.default' => $php['default'] = $params['version'],
+            default => null,
+        };
+        usort($php['installed'], fn (array $a, array $b): int => version_compare($a['version'], $b['version']));
     }
 
     public function status(string $jobId): AgentJobStatus
@@ -202,10 +252,17 @@ final class FakeAgentClient implements AgentClient
     /** The agent's own checks for the commands it knows (§5.4). */
     private function validate(AgentCommand $command): void
     {
+        $params = $command->params();
+        if (str_starts_with($command->name(), 'php.')) {
+            if (! in_array($params['version'], array_column($this->systemStatus['php']['available'], 'version'), true)) {
+                throw new AgentValidationFailed('Invalid parameters', ['version' => 'is not a supported PHP version']);
+            }
+
+            return;
+        }
         if ($command->name() !== 'e2e.sleep') {
             return;
         }
-        $params = $command->params();
         $fields = [];
         if (! is_int($params['seconds']) || $params['seconds'] < 1 || $params['seconds'] > 120) {
             $fields['seconds'] = 'must be between 1 and 120';
@@ -239,6 +296,7 @@ final class FakeAgentClient implements AgentClient
         $this->jobs[$id] = [
             'job' => $id,
             'command' => $command->name(),
+            'params' => $command->params(),
             'subject' => $subject,
             'status' => 'queued',
             'states' => $script['states'] ?? ['running', 'succeeded'],
@@ -301,6 +359,9 @@ final class FakeAgentClient implements AgentClient
         if (in_array($status, AgentJobStatus::FINISHED, true)) {
             $job['finished_at'] = $now;
         }
+        if ($status === 'succeeded') {
+            $this->applyEffect($job['command'], $job['params']);
+        }
     }
 
     /** @return array<string, mixed> */
@@ -346,8 +407,13 @@ final class FakeAgentClient implements AgentClient
             'nginx_version' => '1.28.3',
             'php' => [
                 'installed' => $demo
-                    ? [['version' => '8.3', 'fpm_active' => false], ['version' => '8.4', 'fpm_active' => true], ['version' => '8.5', 'fpm_active' => true]]
-                    : [['version' => '8.5', 'fpm_active' => true]],
+                    ? [
+                        ['version' => '8.3', 'fpm_active' => false, 'in_use' => false],
+                        ['version' => '8.4', 'fpm_active' => true, 'in_use' => true],
+                        ['version' => '8.5', 'fpm_active' => true, 'in_use' => true],
+                    ]
+                    // The panel's pool puts its version in use.
+                    : [['version' => '8.5', 'fpm_active' => true, 'in_use' => true]],
                 'default' => $demo ? '8.4' : '8.5',
                 'panel' => '8.5',
                 'available' => $available,

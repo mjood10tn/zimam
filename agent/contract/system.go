@@ -40,6 +40,7 @@ type PHPStatus struct {
 type InstalledPHP struct {
 	Version   PHPVersion `json:"version"`
 	FPMActive bool       `json:"fpm_active"`
+	InUse     bool       `json:"in_use"` // it has a Zimam pool, a site's or the panel's, so php.uninstall refuses it
 }
 
 type AvailablePHP struct {

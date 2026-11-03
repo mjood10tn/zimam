@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "enum": [
+        "8.2",
+        "8.3",
+        "8.4",
+        "8.5"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "version"
+  ],
+  "title": "php.install params",
+  "type": "object"
+}

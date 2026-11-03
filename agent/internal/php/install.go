@@ -14,7 +14,8 @@ import (
 // Install installs PHP v (§8.3 steps 1–6): the repository, the packages,
 // Zimam's ini file and global FPM settings, without the stock www.conf pool.
 // Then it starts, reloads or stops v's FPM service to match its pools.
-// Running it again converges.
+// Running it again converges, and finishes a dpkg run that a killed job
+// interrupted.
 func Install(ctx context.Context, d sysexec.Deps, v contract.PHPVersion) error {
 	if err := v.Validate(); err != nil {
 		return fmt.Errorf("PHP %q %v", v, err)
@@ -27,7 +28,7 @@ func Install(ctx context.Context, d sysexec.Deps, v contract.PHPVersion) error {
 	// nobody to answer it.
 	args := append(slices.Clone(aptLockWait), "-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold",
 		"install", "-y", "--no-install-recommends")
-	if _, err := d.Run.Run(ctx, sysexec.Cmd{Path: aptGet, Args: append(args, Packages(v)...), Env: aptEnv}); err != nil {
+	if err := aptGetRepairing(ctx, d, append(args, Packages(v)...)); err != nil {
 		return err
 	}
 	ini, err := templates.Render("php/99-zimam.ini", nil)

@@ -114,4 +114,53 @@ return [
         'updates_none' => 'None pending, checked :time',
         'updates_unknown' => 'Not checked yet',
     ],
+
+    'php' => [
+        'title' => 'PHP versions',
+        'empty' => 'No PHP versions reported by the agent yet.',
+        'columns' => [
+            'version' => 'Version',
+            'roles' => 'Used by',
+            'status' => 'Status',
+            'eol' => 'Security support ends',
+        ],
+        'badges' => [
+            'default' => 'Default',
+            'panel' => 'Panel',
+        ],
+        'status' => [
+            'installing' => 'Installing',
+            'installed' => 'Installed',
+            'uninstalling' => 'Uninstalling',
+            'failed' => 'Failed',
+        ],
+        'submitted_body' => 'The job runs in the background. Follow it under Jobs.',
+        'install' => [
+            'label' => 'Install a version',
+            'version' => 'Version',
+            'option' => 'PHP :version (security support until :end)',
+            'none' => 'Every supported version is already installed.',
+            'submit' => 'Install',
+            'submitted' => 'Installing PHP :version',
+        ],
+        'uninstall' => [
+            'label' => 'Uninstall',
+            'heading' => 'Uninstall PHP :version?',
+            'description' => 'Its packages are removed from the server. Confirm with your password.',
+            'submitted' => 'Uninstalling PHP :version',
+            'blocked' => [
+                'panel' => 'The panel runs on PHP :version.',
+                'default' => 'PHP :version is the default. Make another version the default first.',
+                'in_use' => 'Sites still run on PHP :version.',
+                'busy' => 'A job for PHP :version hasn’t finished yet.',
+                'not_installed' => 'PHP :version isn’t installed.',
+            ],
+        ],
+        'set_default' => [
+            'label' => 'Make default',
+            'heading' => 'Make PHP :version the default?',
+            'description' => 'The php command runs this version, and new sites start on it. Existing sites keep their version.',
+            'submitted' => 'Making PHP :version the default',
+        ],
+    ],
 ];

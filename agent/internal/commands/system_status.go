@@ -11,6 +11,7 @@ import (
 	"zimam/agent/contract"
 	"zimam/agent/internal/config"
 	"zimam/agent/internal/maintenance"
+	"zimam/agent/internal/php"
 	"zimam/agent/internal/release"
 	"zimam/agent/internal/sysexec"
 )
@@ -52,7 +53,7 @@ func systemStatus(d sysexec.Deps) Handler {
 // phpStatus lists the installed versions, each with whether its FPM service
 // runs, and the allowlist with each version's end of support, so the panel
 // never hard-codes it (D19). A version is installed while its php-fpm
-// binary exists.
+// binary exists, and in use while it has a Zimam pool.
 func phpStatus(ctx context.Context, d sysexec.Deps, cfg config.Agent) (contract.PHPStatus, error) {
 	st := contract.PHPStatus{
 		Installed: []contract.InstalledPHP{},
@@ -63,7 +64,7 @@ func phpStatus(ctx context.Context, d sysexec.Deps, cfg config.Agent) (contract.
 	now := d.Now()
 	for _, r := range contract.PHPAllowlist {
 		st.Available = append(st.Available, contract.AvailablePHP{Version: r.Version, SecurityEnd: r.SecurityEnd, Supported: r.SupportedOn(now)})
-		installed, err := exists(d.Paths.PHPFPMBinary(r.Version))
+		installed, err := php.Installed(d, r.Version)
 		if err != nil {
 			return contract.PHPStatus{}, err
 		}
@@ -74,7 +75,11 @@ func phpStatus(ctx context.Context, d sysexec.Deps, cfg config.Agent) (contract.
 		if err != nil {
 			return contract.PHPStatus{}, err
 		}
-		st.Installed = append(st.Installed, contract.InstalledPHP{Version: r.Version, FPMActive: active})
+		inUse, err := php.HasPools(d, r.Version)
+		if err != nil {
+			return contract.PHPStatus{}, err
+		}
+		st.Installed = append(st.Installed, contract.InstalledPHP{Version: r.Version, FPMActive: active, InUse: inUse})
 	}
 	return st, nil
 }

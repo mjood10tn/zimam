@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/signal"
 	"os/user"
 	"strconv"
 	"syscall"
+	"time"
 
 	"zimam/agent/contract"
 	"zimam/agent/internal/audit"
@@ -61,10 +63,13 @@ func jobManager(p paths.Paths, cfg config.Agent, logGID int) *jobs.Manager {
 		Systemd:  jobs.Systemctl{Run: run},
 		Audit:    audit.Writer{Paths: p},
 		Handlers: commands.JobHandlers(),
-		Config:   cfg,
-		Run:      run,
-		Helper:   &helper.Client{AgentBinary: p.AgentBinary()},
-		LogGID:   logGID,
+		// Prechecks run in serve, before a job exists; they read agent.json
+		// themselves, since jobs change it while serve runs.
+		Prechecks: commands.Prechecks(sysexec.Deps{Paths: p, Run: run, Logf: log.Printf, Now: time.Now}),
+		Config:    cfg,
+		Run:       run,
+		Helper:    &helper.Client{AgentBinary: p.AgentBinary()},
+		LogGID:    logGID,
 	}
 }
 

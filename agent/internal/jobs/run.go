@@ -36,6 +36,11 @@ type Context struct {
 	Helper *helper.Client
 }
 
+// Deps is the job's view of the system, for the packages that take one.
+func (j *Context) Deps() sysexec.Deps {
+	return sysexec.Deps{Paths: j.Paths, Run: j.Run, Config: j.Config, Logf: j.Logf, Now: time.Now}
+}
+
 // RunJob is the body of `zimam-agent job run <id>`, inside the job's unit
 // (§5.7). It returns nil once the outcome is recorded, and also when systemd
 // stops the unit (ctx cancelled): Cancel then records cancelled, and
@@ -107,7 +112,8 @@ func (m *Manager) call(ctx context.Context, id contract.JobID, sp spec, logf fun
 			err = fmt.Errorf("panic: %v", r)
 		}
 	}()
-	return h(ctx, &Context{ID: id, Logf: logf, Config: m.Config, Paths: m.Paths, Run: m.Run, Helper: m.Helper}, p)
+	run := packageGuard{Runner: m.Run, lock: m.Paths.JobCancelLock(id)}
+	return h(ctx, &Context{ID: id, Logf: logf, Config: m.Config, Paths: m.Paths, Run: run, Helper: m.Helper}, p)
 }
 
 // record writes a run's final state and audits it.

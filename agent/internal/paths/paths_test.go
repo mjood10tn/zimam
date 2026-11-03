@@ -34,6 +34,7 @@ var production = map[string]string{
 	"JobDir":                "/var/lib/zimam/jobs/" + testJob,
 	"JobSpec":               "/var/lib/zimam/jobs/" + testJob + "/spec.json",
 	"JobState":              "/var/lib/zimam/jobs/" + testJob + "/state.json",
+	"JobCancelLock":         "/var/lib/zimam/jobs/" + testJob + "/cancel.lock",
 	"SitesStateDir":         "/var/lib/zimam/sites",
 	"SiteState":             "/var/lib/zimam/sites/shop.json",
 	"DownloadsDir":          "/var/lib/zimam/downloads",

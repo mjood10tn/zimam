@@ -41,3 +41,30 @@ func Lock(ctx context.Context, path string) (unlock func(), err error) {
 		}
 	}
 }
+
+// TryLock takes the exclusive flock on path (created 0600) if it is free,
+// and reports false at once if another holder has it.
+func TryLock(path string) (unlock func(), ok bool, err error) {
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, false, err
+	}
+	for {
+		err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+		switch {
+		case err == nil:
+			return func() {
+				unix.Flock(int(f.Fd()), unix.LOCK_UN)
+				f.Close()
+			}, true, nil
+		case errors.Is(err, unix.EINTR):
+			continue
+		case errors.Is(err, unix.EWOULDBLOCK):
+			f.Close()
+			return nil, false, nil
+		default:
+			f.Close()
+			return nil, false, &os.PathError{Op: "flock", Path: path, Err: err}
+		}
+	}
+}

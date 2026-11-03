@@ -62,7 +62,13 @@ func (p Paths) JobDir(id contract.JobID) string {
 }
 func (p Paths) JobSpec(id contract.JobID) string  { return filepath.Join(p.JobDir(id), "spec.json") }
 func (p Paths) JobState(id contract.JobID) string { return filepath.Join(p.JobDir(id), "state.json") }
-func (p Paths) SitesStateDir() string             { return p.at("var/lib/zimam/sites") }
+
+// JobCancelLock is held while the job runs apt-get or dpkg, and by
+// job.cancel while it stops the job, so a cancel never stops dpkg midway.
+func (p Paths) JobCancelLock(id contract.JobID) string {
+	return filepath.Join(p.JobDir(id), "cancel.lock")
+}
+func (p Paths) SitesStateDir() string { return p.at("var/lib/zimam/sites") }
 
 // SiteState is the site's state file (D15).
 func (p Paths) SiteState(name contract.SiteName) string {

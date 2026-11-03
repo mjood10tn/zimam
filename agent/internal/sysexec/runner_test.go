@@ -200,3 +200,20 @@ func TestLockHonoursContext(t *testing.T) {
 		t.Errorf("Lock on a held lock = %v, want context.DeadlineExceeded", err)
 	}
 }
+
+func TestTryLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cancel.lock")
+	unlock, ok, err := TryLock(path)
+	if err != nil || !ok {
+		t.Fatalf("TryLock on a free lock = %v, %v; want it taken", ok, err)
+	}
+	if _, ok, err := TryLock(path); err != nil || ok {
+		t.Errorf("TryLock on a held lock = %v, %v; want false at once", ok, err)
+	}
+	unlock()
+	unlock, ok, err = TryLock(path)
+	if err != nil || !ok {
+		t.Fatalf("TryLock after unlock = %v, %v; want it taken", ok, err)
+	}
+	unlock()
+}

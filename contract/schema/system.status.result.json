@@ -64,6 +64,9 @@
               "fpm_active": {
                 "type": "boolean"
               },
+              "in_use": {
+                "type": "boolean"
+              },
               "version": {
                 "enum": [
                   "8.2",
@@ -76,6 +79,7 @@
             },
             "required": [
               "fpm_active",
+              "in_use",
               "version"
             ],
             "type": "object"

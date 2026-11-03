@@ -202,3 +202,46 @@ func TestApplyFPMFailedTestDoesNotReload(t *testing.T) {
 		t.Errorf("ran %q, want only the test", got)
 	}
 }
+
+// A dpkg run interrupted by a killed job makes apt-get refuse everything
+// until dpkg --configure -a. Install runs that when apt-get says so, then
+// tries once more.
+func TestInstallRepairsInterruptedDpkg(t *testing.T) {
+	e := newEnv(t, fixture(t, "sury-apt.gpg"), "/php/")
+	writeFile(t, filepath.Join(e.p.PHPPoolDir("8.4"), "zimam-shop.conf"), "[zimam-shop]\n")
+	for _, s := range []sysexec.Script{
+		aptUpdate, interrupted(aptInstall("8.4")), dpkgConfigure, aptInstall("8.4"),
+		fpmTest("8.4"), systemctlCmd("is-active", "--quiet", "php8.4-fpm"), systemctlCmd("reload", "php8.4-fpm"),
+	} {
+		e.run.Add(s)
+	}
+	if err := Install(context.Background(), e.d, "8.4"); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	calls := e.run.Calls()
+	install := commands([]sysexec.Call{calls[1]})[0]
+	if got := commands(calls[1:4]); !slices.Equal(got, []string{install, "/usr/bin/dpkg --force-confdef --force-confold --configure -a", install}) {
+		t.Errorf("ran %q, want apt-get install, dpkg --configure -a, apt-get install", got)
+	}
+	if !slices.Contains(calls[2].Env, "DEBIAN_FRONTEND=noninteractive") {
+		t.Errorf("dpkg ran with env %q", calls[2].Env)
+	}
+}
+
+// Any other apt-get failure comes back as it is, without dpkg.
+func TestInstallOtherAptFailureIsNotRepaired(t *testing.T) {
+	e := newEnv(t, fixture(t, "sury-apt.gpg"), "/php/")
+	failed := aptInstall("8.4")
+	failed.Result = sysexec.Result{ExitCode: 100, Stderr: []byte("E: Unable to locate package php8.4-redis\n")}
+	e.run.Add(aptUpdate)
+	e.run.Add(failed)
+	err := Install(context.Background(), e.d, "8.4")
+	if err == nil || !strings.Contains(err.Error(), "Unable to locate package") {
+		t.Fatalf("Install = %v, want apt-get's error", err)
+	}
+	for _, c := range commands(e.run.Calls()) {
+		if strings.HasPrefix(c, "/usr/bin/dpkg") {
+			t.Errorf("ran %q", c)
+		}
+	}
+}

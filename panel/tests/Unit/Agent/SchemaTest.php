@@ -9,6 +9,9 @@ use App\Agent\Commands\E2eSleep;
 use App\Agent\Commands\JobCancel;
 use App\Agent\Commands\JobFollow;
 use App\Agent\Commands\JobStatus;
+use App\Agent\Commands\PhpDefault;
+use App\Agent\Commands\PhpInstall;
+use App\Agent\Commands\PhpUninstall;
 use App\Agent\Commands\SystemStatus;
 use App\Agent\Exceptions\AgentException;
 use App\Agent\Exceptions\AgentNotFound;
@@ -53,6 +56,9 @@ final class SchemaTest extends TestCase
             new JobFollow(self::JOB, 0),
             new JobCancel(self::JOB),
             new E2eSleep(5, 'shop'),
+            new PhpInstall('8.4'),
+            new PhpUninstall('8.3'),
+            new PhpDefault('8.5'),
         ];
 
         return array_combine(
