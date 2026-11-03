@@ -1,6 +1,10 @@
 package templates
 
-import "zimam/agent/contract"
+import (
+	"net/netip"
+
+	"zimam/agent/contract"
+)
 
 // PanelVhost fills nginx/panel.conf (§9.3).
 type PanelVhost struct {
@@ -39,10 +43,22 @@ type SiteVhost struct {
 	ForceHTTPS bool                // the HTTP server redirects (§9.6); only with HTTPS
 }
 
-// SiteSecurity fills nginx/security.conf (§9.6). Task 33 adds the other
-// settings.
+// SiteSecurity fills nginx/security.conf (§9.6). IP entries are the parsed
+// prefixes, never the raw input (D21).
 type SiteSecurity struct {
-	HeadersPreset bool
+	Name                  contract.SiteName // names the htpasswd file
+	HeadersPreset         bool
+	HSTSMaxAge            contract.HSTSMaxAge // 0 is off
+	HSTSIncludeSubdomains bool
+	IPDeny                []netip.Prefix
+	IPAllow               []netip.Prefix // when not empty, everyone else is denied
+	PasswordProtection    bool
+}
+
+// Htpasswd fills nginx/htpasswd (§9.6): one "username:bcrypt hash" line per
+// user.
+type Htpasswd struct {
+	Users contract.BasicAuthUsers
 }
 
 // SitePool fills php/site-pool.conf (§9.4).

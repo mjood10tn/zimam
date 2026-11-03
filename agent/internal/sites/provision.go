@@ -379,19 +379,13 @@ func checkPHPInstalled(d sysexec.Deps, v contract.PHPVersion) error {
 	return nil
 }
 
-// ensureVhost is step 5: security.conf and the vhost, HTTP only until the
-// site's certificate exists, enabled, tested and Nginx reloaded. If Nginx
+// ensureVhost is step 5: security.conf, with every setting in the state
+// file, and the vhost, HTTP only until the site's certificate exists,
+// enabled, tested and Nginx reloaded. If Nginx
 // rejects them, they are removed again, or the previous ones restored.
 // site.php re-renders the vhost through it too.
 func ensureVhost(ctx context.Context, d sysexec.Deps, st State) error {
-	secConf, err := templates.Render("nginx/security.conf", templates.SiteSecurity{HeadersPreset: st.Security.HeadersPreset})
-	if err != nil {
-		return err
-	}
-	https := exists(d.Paths.LetsEncryptCert("zimam-" + string(st.Name)))
-	vhost, err := templates.Render("nginx/site.conf", templates.SiteVhost{
-		Name: st.Name, Domain: st.Domain, PHPVersion: st.PHPVersion, HTTPS: https, ForceHTTPS: https && st.Security.ForceHTTPS,
-	})
+	secConf, vhost, _, err := siteFiles(d, st)
 	if err != nil {
 		return err
 	}

@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "block_risky_functions": {
+      "type": "boolean"
+    },
+    "force_https": {
+      "type": "boolean"
+    },
+    "headers_preset": {
+      "type": "boolean"
+    },
+    "hsts": {
+      "additionalProperties": false,
+      "properties": {
+        "include_subdomains": {
+          "type": "boolean"
+        },
+        "max_age": {
+          "anyOf": [
+            {
+              "enum": [
+                86400,
+                2592000,
+                31536000
+              ],
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "include_subdomains",
+        "max_age"
+      ],
+      "type": "object"
+    },
+    "ip_allow": {
+      "items": {
+        "pattern": "^[0-9A-Fa-f.:]+(/[0-9]{1,3})?$",
+        "type": "string"
+      },
+      "maxItems": 100,
+      "type": "array"
+    },
+    "ip_deny": {
+      "items": {
+        "pattern": "^[0-9A-Fa-f.:]+(/[0-9]{1,3})?$",
+        "type": "string"
+      },
+      "maxItems": 100,
+      "type": "array"
+    },
+    "name": {
+      "not": {
+        "enum": [
+          "zimam",
+          "panel",
+          "default",
+          "acme"
+        ]
+      },
+      "pattern": "^[a-z][a-z0-9-]{0,22}[a-z0-9]$",
+      "type": "string"
+    },
+    "password_protection": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "users": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "password_hash": {
+                "pattern": "^\\$2y\\$1[0-4]\\$[./A-Za-z0-9]{53}$",
+                "type": "string",
+                "x-zimam-secret": true
+              },
+              "username": {
+                "pattern": "^[A-Za-z0-9._-]{1,32}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "username",
+              "password_hash"
+            ],
+            "type": "object"
+          },
+          "maxItems": 20,
+          "type": "array"
+        }
+      },
+      "required": [
+        "enabled",
+        "users"
+      ],
+      "type": "object"
+    },
+    "restrict_to_site_folder": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "block_risky_functions",
+    "force_https",
+    "headers_preset",
+    "hsts",
+    "ip_allow",
+    "ip_deny",
+    "name",
+    "password_protection",
+    "restrict_to_site_folder"
+  ],
+  "title": "site.security params",
+  "type": "object"
+}

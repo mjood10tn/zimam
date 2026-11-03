@@ -16,6 +16,7 @@ use App\Agent\Commands\PhpUninstall;
 use App\Agent\Commands\SiteDestroy;
 use App\Agent\Commands\SitePhp;
 use App\Agent\Commands\SiteProvision;
+use App\Agent\Commands\SiteSecurity;
 use App\Agent\Commands\SystemMetrics;
 use App\Agent\Commands\SystemStatus;
 use App\Agent\Exceptions\AgentException;
@@ -67,6 +68,7 @@ final class SchemaTest extends TestCase
             new PhpDefault('8.5'),
             new SiteProvision('shop', 'shop.example.com', 'php', '8.4'),
             new SitePhp('shop', '8.5'),
+            new SiteSecurity('shop', forceHttps: true, hstsMaxAge: 31536000, hstsIncludeSubdomains: true, ipAllow: ['192.0.2.0/24'], ipDeny: ['2001:db8::1'], passwordProtection: true, users: [['username' => 'alice', 'password_hash' => '$2y$12$Mda0LhSrcwEX8fAIrkvr/eP5OR7zhBWHVUNmE9n4xm8B76JOYiAI.']]),
             new SiteDestroy('shop'),
             new CertIssue('shop'),
         ];

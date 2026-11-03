@@ -79,3 +79,43 @@ func TestSiteNameParams(t *testing.T) {
 		}
 	}
 }
+
+func TestSiteSecurityParamsValidate(t *testing.T) {
+	age := HSTSMaxAge(86400)
+	bad := HSTSMaxAge(60)
+	hash := "$2y$12$Mda0LhSrcwEX8fAIrkvr/eP5OR7zhBWHVUNmE9n4xm8B76JOYiAI."
+	ok := func() SiteSecurityParams {
+		return SiteSecurityParams{Name: "shop", HSTS: HSTS{MaxAge: &age}, IPAllow: IPList{}, IPDeny: IPList{"10.0.0.0/8"}, PasswordProtection: PasswordProtection{Users: BasicAuthUsers{}}}
+	}
+	p := ok()
+	if err := p.Validate(); err != nil {
+		t.Fatalf("valid params: %v", err)
+	}
+	for field, change := range map[string]func(*SiteSecurityParams){
+		"name":         func(p *SiteSecurityParams) { p.Name = "Shop" },
+		"hsts.max_age": func(p *SiteSecurityParams) { p.HSTS.MaxAge = &bad },
+		"ip_allow":     func(p *SiteSecurityParams) { p.IPAllow = IPList{"10.0.0.1/8"} },
+		"ip_deny":      func(p *SiteSecurityParams) { p.IPDeny = nil },
+		"password_protection.users": func(p *SiteSecurityParams) {
+			p.PasswordProtection = PasswordProtection{Enabled: true, Users: BasicAuthUsers{}}
+		},
+	} {
+		p := ok()
+		change(&p)
+		err := p.Validate()
+		var ae *AgentError
+		if !errors.As(err, &ae) || ae.Fields[field] == "" {
+			t.Errorf("%s: Validate = %v, want a message for %s", field, err, field)
+		}
+	}
+	// Users that break the rules are refused even while protection is off.
+	p = ok()
+	p.PasswordProtection.Users = BasicAuthUsers{{Username: "a:b", PasswordHash: hash}}
+	if p.Validate() == nil {
+		t.Error("a username with a colon passed")
+	}
+	p.PasswordProtection = PasswordProtection{Enabled: true, Users: BasicAuthUsers{{Username: "alice", PasswordHash: hash}}}
+	if err := p.Validate(); err != nil {
+		t.Errorf("one valid user: %v", err)
+	}
+}

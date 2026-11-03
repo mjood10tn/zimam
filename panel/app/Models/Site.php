@@ -62,6 +62,12 @@ class Site extends Model
         return new SiteProvision($this->name, $this->primaryDomain->hostname, $this->type, $this->type === self::PHP ? $this->php_version : null);
     }
 
+    /** The password-protection users (§9.6), as bcrypt hashes. */
+    public function basicAuthUsers(): HasMany
+    {
+        return $this->hasMany(SiteBasicAuthUser::class);
+    }
+
     public function certificate(): HasOne
     {
         return $this->hasOne(Certificate::class);

@@ -4,6 +4,7 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\SiteResource\Pages\CreateSite;
 use App\Filament\Resources\SiteResource\Pages\ListSites;
+use App\Filament\Resources\SiteResource\Pages\SecurityTab;
 use App\Filament\Resources\SiteResource\Pages\ViewSite;
 use App\Livewire\SiteJobs;
 use App\Models\Certificate;
@@ -140,7 +141,9 @@ class SiteResource extends Resource
                 Tab::make(__('zimam.sites.tabs.jobs'))->schema([
                     Livewire::make(SiteJobs::class, fn (Site $record): array => ['site' => $record])->key('site-jobs'),
                 ]),
-                Tab::make(__('zimam.sites.tabs.security'))->schema([Text::make(__('zimam.sites.tabs.later'))]),
+                Tab::make(__('zimam.sites.tabs.security'))->schema([
+                    Livewire::make(SecurityTab::class, fn (Site $record): array => ['site' => $record])->key('site-security'),
+                ]),
                 Tab::make(__('zimam.sites.tabs.logs'))->schema([Text::make(__('zimam.sites.tabs.later'))]),
             ]),
         ]);

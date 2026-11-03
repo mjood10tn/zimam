@@ -28,7 +28,7 @@ var designCommands = []struct {
 	{"php.default", KindJob, "server", true, true},
 	{"site.provision", KindJob, "site:<name>", true, true},
 	{"site.php", KindJob, "site:<name>", true, true},
-	{"site.security", KindJob, "site:<name>", true, false},
+	{"site.security", KindJob, "site:<name>", true, true},
 	{"site.destroy", KindJob, "site:<name>", true, true},
 	{"cert.issue", KindJob, "site:<name>", true, true},
 	{"security.check", KindJob, "server or site:<name>", true, false},

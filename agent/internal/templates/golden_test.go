@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
+	"net/netip"
 	"os"
 	"path"
 	"path/filepath"
@@ -66,6 +67,55 @@ var goldenCases = map[string][]goldenFile{
 	"site-php-http":     site(SiteVhost{Name: "shop", Domain: "shop.example.com", PHPVersion: "8.4"}),
 	"site-static-https": site(SiteVhost{Name: "shop", Domain: "shop.example.com", HTTPS: true, ForceHTTPS: true}),
 	"site-php-https":    site(SiteVhost{Name: "blog", Domain: "blog.example.com", PHPVersion: "8.5", HTTPS: true}),
+	// One case per row of §9.6, each on a PHP site over HTTPS with the
+	// redirect: every HSTS max-age with and without include_subdomains,
+	// the header preset off, an allow list, a deny list and both, password
+	// protection, and each pool setting alone and together.
+	"security-hsts-86400":                 secured(SiteSecurity{HeadersPreset: true, HSTSMaxAge: 86400}, SitePool{}),
+	"security-hsts-86400-subdomains":      secured(SiteSecurity{HeadersPreset: true, HSTSMaxAge: 86400, HSTSIncludeSubdomains: true}, SitePool{}),
+	"security-hsts-2592000":               secured(SiteSecurity{HeadersPreset: true, HSTSMaxAge: 2592000}, SitePool{}),
+	"security-hsts-2592000-subdomains":    secured(SiteSecurity{HeadersPreset: true, HSTSMaxAge: 2592000, HSTSIncludeSubdomains: true}, SitePool{}),
+	"security-hsts-31536000":              secured(SiteSecurity{HeadersPreset: true, HSTSMaxAge: 31536000}, SitePool{}),
+	"security-hsts-31536000-subdomains":   secured(SiteSecurity{HeadersPreset: true, HSTSMaxAge: 31536000, HSTSIncludeSubdomains: true}, SitePool{}),
+	"security-headers-off":                secured(SiteSecurity{}, SitePool{}),
+	"security-ip-allow":                   secured(SiteSecurity{HeadersPreset: true, IPAllow: testAllow}, SitePool{}),
+	"security-ip-deny":                    secured(SiteSecurity{HeadersPreset: true, IPDeny: testDeny}, SitePool{}),
+	"security-ip-both":                    secured(SiteSecurity{HeadersPreset: true, IPAllow: testAllow, IPDeny: testDeny}, SitePool{}),
+	"security-password":                   secured(SiteSecurity{HeadersPreset: true, PasswordProtection: true}, SitePool{}),
+	"security-block-risky-functions":      secured(SiteSecurity{HeadersPreset: true}, SitePool{BlockRiskyFunctions: true}),
+	"security-restrict-to-site-folder":    secured(SiteSecurity{HeadersPreset: true}, SitePool{RestrictToSiteFolder: true}),
+	"security-risky-functions-and-folder": secured(SiteSecurity{HeadersPreset: true}, SitePool{BlockRiskyFunctions: true, RestrictToSiteFolder: true}),
+}
+
+// testAllow and testDeny are parsed entries, as contract.ParseIPEntry
+// returns them: a bare address is a /32 or /128 prefix (D21).
+var (
+	testAllow = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("192.0.2.7/32"), netip.MustParsePrefix("2001:db8::/32")}
+	testDeny  = []netip.Prefix{netip.MustParsePrefix("10.1.0.0/16"), netip.MustParsePrefix("2001:db8:dead::1/128")}
+	testUsers = contract.BasicAuthUsers{
+		{Username: "alice", PasswordHash: "$2y$12$Mda0LhSrcwEX8fAIrkvr/eP5OR7zhBWHVUNmE9n4xm8B76JOYiAI."},
+		{Username: "bob.smith", PasswordHash: "$2y$12$ifXGrP1eih89gNPFeFYepuBiF7nCxjSFFfo5RtwlJTtWL9TDH4Hdq"},
+	}
+)
+
+// secured is the PHP site shop over HTTPS with force_https, with these
+// security settings and pool flags; password protection brings htpasswd.
+func secured(sec SiteSecurity, pool SitePool) []goldenFile {
+	var p paths.Paths
+	sec.Name = "shop"
+	pool.Name, pool.PHPVersion = "shop", "8.4"
+	files := []goldenFile{
+		{path: p.NginxSiteAvailable("shop"), tmpl: "nginx/site.conf", data: func() any {
+			return SiteVhost{Name: "shop", Domain: "shop.example.com", PHPVersion: "8.4", HTTPS: true, ForceHTTPS: true}
+		}},
+		{path: p.SiteSecurityConf("shop"), tmpl: "nginx/security.conf", data: func() any { return sec }},
+		{path: "/etc/nginx/zimam/tls.conf", tmpl: "nginx/tls.conf"},
+		{path: p.PHPPool("8.4", "shop"), tmpl: "php/site-pool.conf", data: func() any { return pool }},
+	}
+	if sec.PasswordProtection {
+		files = append(files, goldenFile{path: p.SiteHtpasswd("shop"), tmpl: "nginx/htpasswd", data: func() any { return Htpasswd{Users: testUsers} }})
+	}
+	return files
 }
 
 func site(v SiteVhost) []goldenFile {
@@ -260,7 +310,9 @@ type renderedString struct {
 // sentinel put there shows up in the output. A field the template doesn't
 // use, such as SuryRepo.Host in the source file, is left out.
 func renderedStrings(t testing.TB) []renderedString {
-	const sentinel = "zimamsentinel"
+	// A string a template checks again before writing it, such as a
+	// bcrypt hash in htpasswd, takes the sentinel in its own shape.
+	sentinels := []string{"zimamsentinel", "$2y$12$zimamsentinel" + strings.Repeat("a", 40)}
 	var found []renderedString
 	for name, files := range goldenCases {
 		for _, gf := range files {
@@ -269,14 +321,22 @@ func renderedStrings(t testing.TB) []renderedString {
 			}
 			_, fields := stringsIn(gf.data())
 			for i := range fields {
-				root, fields := stringsIn(gf.data())
-				fields[i].SetString(sentinel)
-				out, err := Render(gf.tmpl, root.Interface())
-				if err != nil {
-					t.Fatalf("%s %s with %q in string %d: %v", name, gf.tmpl, sentinel, i, err)
+				var errs []string
+				for _, sentinel := range sentinels {
+					root, fields := stringsIn(gf.data())
+					fields[i].SetString(sentinel)
+					out, err := Render(gf.tmpl, root.Interface())
+					if err != nil {
+						errs = append(errs, err.Error())
+						continue
+					}
+					if bytes.Contains(out, []byte(sentinel)) {
+						found = append(found, renderedString{fmt.Sprintf("%s %s (string %d)", name, gf.tmpl, i), gf, i})
+					}
+					break
 				}
-				if bytes.Contains(out, []byte(sentinel)) {
-					found = append(found, renderedString{fmt.Sprintf("%s %s (string %d)", name, gf.tmpl, i), gf, i})
+				if len(errs) == len(sentinels) {
+					t.Fatalf("%s %s refuses every sentinel in string %d: %s", name, gf.tmpl, i, strings.Join(errs, "; "))
 				}
 			}
 		}

@@ -1,8 +1,27 @@
 # Managed by Zimam. Changes here are overwritten.
 # The site's security settings (§9.6), included by each of its servers.
+{{- /* Every rule sits at server level, so the ACME location's "allow all"
+and "auth_basic off" override them and renewals keep working. A site with
+default settings renders as it did before Task 33, so Version stays 1. */}}
 {{if .HeadersPreset -}}
 add_header X-Content-Type-Options "nosniff" always;
 add_header X-Frame-Options "SAMEORIGIN" always;
 add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+{{end -}}
+{{if .HSTSMaxAge -}}
+add_header Strict-Transport-Security "max-age={{.HSTSMaxAge}}{{if .HSTSIncludeSubdomains}}; includeSubDomains{{end}}" always;
+{{end -}}
+{{range .IPDeny -}}
+deny {{prefix .}};
+{{end -}}
+{{if .IPAllow -}}
+{{range .IPAllow -}}
+allow {{prefix .}};
+{{end -}}
+deny all;
+{{end -}}
+{{if .PasswordProtection -}}
+auth_basic "Restricted";
+auth_basic_user_file /etc/nginx/zimam/{{safe .Name}}/htpasswd;
 {{end -}}

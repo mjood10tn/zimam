@@ -285,9 +285,10 @@ func TestSecretFieldsMarked(t *testing.T) {
 		checked += checkSecrets(t, d.Name+" result", reflect.TypeOf(d.Result), docs[d.Name+".result.json"])
 	}
 	// test.secret: token, users.*.password_hash, keys.*.secret, backup.secret
-	// in its params, and keys.*.secret in its result.
-	if checked != 5 {
-		t.Errorf("checked %d secret fields, want 5", checked)
+	// in its params, and keys.*.secret in its result; site.security:
+	// password_protection.users.*.password_hash.
+	if checked != 6 {
+		t.Errorf("checked %d secret fields, want 6", checked)
 	}
 }
 

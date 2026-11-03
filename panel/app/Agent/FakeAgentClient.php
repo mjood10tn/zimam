@@ -12,6 +12,8 @@ use App\Agent\Exceptions\AgentJobFailed;
 use App\Agent\Exceptions\AgentNotFound;
 use App\Agent\Exceptions\AgentUnknownCommand;
 use App\Agent\Exceptions\AgentValidationFailed;
+use App\Models\SiteBasicAuthUser;
+use App\Support\IpEntry;
 use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Support\Str;
@@ -63,6 +65,9 @@ final class FakeAgentClient implements AgentClient
     /** @var list<Closure(array<string, mixed>): array<string, mixed>> */
     private array $metricsChanges = [];
 
+    /** @var array<string, true> the sites with a certificate, by name, as succeeded cert.issue jobs left them */
+    private array $certified = [];
+
     public function __construct()
     {
         $this->systemStatus = self::serverStatus(demo: false);
@@ -113,6 +118,14 @@ final class FakeAgentClient implements AgentClient
     public function changeServer(Closure $change): static
     {
         $this->systemStatus = $change($this->systemStatus);
+
+        return $this;
+    }
+
+    /** Gives a site a certificate on the fake's server, as a succeeded cert.issue would. */
+    public function certify(string $site): static
+    {
+        $this->certified[$site] = true;
 
         return $this;
     }
@@ -196,6 +209,9 @@ final class FakeAgentClient implements AgentClient
      */
     private function precheck(AgentCommand $command): void
     {
+        if ($command->name() === 'site.security' && $command->params()['force_https'] && ! isset($this->certified[$command->params()['name']])) {
+            throw new AgentConflict("Site {$command->params()['name']} has no certificate yet, so HTTPS can't be forced. Issue one first.");
+        }
         if ($command->name() === 'site.php') {
             $version = $command->params()['php_version'];
             $available = array_column($this->systemStatus['php']['available'], null, 'version');
@@ -243,7 +259,7 @@ final class FakeAgentClient implements AgentClient
             'php.install', 'php.uninstall', 'php.default' => ['version' => $params['version']],
             'site.provision' => ['name' => $params['name'], 'template_version' => 1],
             'site.php' => ['name' => $params['name'], 'php_version' => $params['php_version']],
-            'site.destroy' => ['name' => $params['name']],
+            'site.destroy', 'site.security' => ['name' => $params['name']],
             // Let's Encrypt's certificates last 90 days.
             'cert.issue' => ['expires_at' => self::goTime(CarbonImmutable::now('UTC')->addDays(90))],
             default => [],
@@ -266,7 +282,10 @@ final class FakeAgentClient implements AgentClient
         }
         if ($command === 'site.destroy') {
             $moved = $this->pools[$params['name']] ?? null;
-            unset($this->pools[$params['name']]);
+            unset($this->pools[$params['name']], $this->certified[$params['name']]);
+        }
+        if ($command === 'cert.issue') {
+            $this->certified[$params['name']] = true;
         }
         match ($command) {
             'php.install' => $php['installed'][] = ['version' => $params['version'], 'fpm_active' => false, 'in_use' => false],
@@ -364,6 +383,11 @@ final class FakeAgentClient implements AgentClient
 
             return;
         }
+        if ($command->name() === 'site.security') {
+            $this->validateSecurity($params);
+
+            return;
+        }
         if (in_array($command->name(), ['site.php', 'site.destroy', 'cert.issue'], true)) {
             $fields = [];
             if (! preg_match(self::SITE_NAME, $params['name']) || in_array($params['name'], self::RESERVED_NAMES, true)) {
@@ -387,6 +411,46 @@ final class FakeAgentClient implements AgentClient
         }
         if (! preg_match(self::SITE_NAME, $params['subject']) || in_array($params['subject'], self::RESERVED_NAMES, true)) {
             $fields['subject'] = 'must be 2 to 24 lowercase letters, digits and hyphens, starting with a letter';
+        }
+        if ($fields !== []) {
+            throw new AgentValidationFailed('Invalid parameters', $fields);
+        }
+    }
+
+    /** @param array<string, mixed> $params site.security's (§5.4, §9.6) */
+    private function validateSecurity(array $params): void
+    {
+        $fields = [];
+        if (! preg_match(self::SITE_NAME, $params['name']) || in_array($params['name'], self::RESERVED_NAMES, true)) {
+            $fields['name'] = 'must be 2–24 lowercase letters, digits or hyphens, start with a letter and not end with a hyphen';
+        }
+        if ($params['hsts']['max_age'] !== null && ! in_array($params['hsts']['max_age'], [86400, 2592000, 31536000], true)) {
+            $fields['hsts.max_age'] = 'must be 86400, 2592000 or 31536000';
+        }
+        foreach (['ip_allow', 'ip_deny'] as $list) {
+            if (count($params[$list]) > IpEntry::MAX_ENTRIES) {
+                $fields[$list] = 'must have at most 100 entries';
+            }
+            foreach ($params[$list] as $i => $entry) {
+                if (IpEntry::error($entry) !== null) {
+                    $fields[$list] ??= 'entry '.($i + 1).' '.IpEntry::error($entry);
+                }
+            }
+        }
+        $users = $params['password_protection']['users'];
+        $names = array_column($users, 'username');
+        foreach ($users as $i => $user) {
+            match (true) {
+                ! preg_match(SiteBasicAuthUser::USERNAME_PATTERN, $user['username']) => $fields['password_protection.users'] ??= 'user '.($i + 1).': username must be 1–32 letters, digits, dots, underscores or hyphens',
+                ! preg_match('/^\$2y\$1[0-4]\$[.\/A-Za-z0-9]{53}\z/', $user['password_hash']) => $fields['password_protection.users'] ??= 'user '.($i + 1).': password hash must be bcrypt ($2y$, cost 10–14)',
+                default => null,
+            };
+        }
+        if (count($users) > SiteBasicAuthUser::MAX_USERS || count(array_unique($names)) !== count($names)) {
+            $fields['password_protection.users'] ??= 'must have at most 20 users, each username once';
+        }
+        if ($params['password_protection']['enabled'] && $users === []) {
+            $fields['password_protection.users'] = 'needs at least one user while password protection is on';
         }
         if ($fields !== []) {
             throw new AgentValidationFailed('Invalid parameters', $fields);
