@@ -36,22 +36,7 @@ class CreateSite extends CreateRecord
      */
     public function phpVersionOptions(): array
     {
-        $php = ServerStatus::current()?->data['php'] ?? null;
-        if ($php === null) {
-            return [];
-        }
-        $supported = array_column($php['available'], 'supported', 'version');
-        $options = [];
-        foreach ($php['installed'] as $installed) {
-            $version = $installed['version'];
-            if ($supported[$version] ?? false) {
-                $options[$version] = $version === $php['default']
-                    ? __('zimam.sites.fields.php_default', ['version' => $version])
-                    : __('zimam.sites.fields.php_option', ['version' => $version]);
-            }
-        }
-
-        return $options;
+        return ServerStatus::current()?->sitePhpOptions() ?? [];
     }
 
     public function defaultPhpVersion(): ?string

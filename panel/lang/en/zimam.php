@@ -200,6 +200,16 @@ return [
             'label' => 'Retry',
             'submitted' => 'Provisioning :name again',
         ],
+        'switch' => [
+            'label' => 'Switch PHP version',
+            'heading' => 'Switch :name to another PHP version',
+            'description' => 'The new version starts serving before the old one stops, so the site stays up. Extensions and php.ini settings are per version.',
+            'submit' => 'Switch',
+            'none' => 'No other supported PHP version is installed. Install one under PHP versions.',
+            'busy' => 'Wait for this site’s current job to finish.',
+            'submitted' => 'Switching :name to PHP :version',
+            'cancelled' => 'The PHP switch was cancelled before it finished. Switch again to finish it.',
+        ],
         'delete' => [
             'label' => 'Delete',
             'later' => 'Deleting sites isn’t available in this version yet.',

@@ -89,7 +89,7 @@ func checkPHP(d sysexec.Deps, v contract.PHPVersion) error {
 		now = d.Now()
 	}
 	if !r.SupportedOn(now) {
-		return contract.FieldErrors{"php_version": fmt.Sprintf("PHP %s's security support ended on %s, so new sites can't use it", v, r.SecurityEnd)}.Err()
+		return contract.FieldErrors{"php_version": fmt.Sprintf("PHP %s's security support ended on %s, so sites can't move to it", v, r.SecurityEnd)}.Err()
 	}
 	return nil
 }
@@ -114,6 +114,7 @@ func Provision(ctx context.Context, d sysexec.Deps, h Helper, lookup Lookup, p c
 	case !errors.Is(err, fs.ErrNotExist):
 		return contract.SiteProvisionResult{}, err
 	}
+	st := State{Name: p.Name, Domain: p.Domain, Type: p.Type, PHPVersion: p.PHPVersion, TemplateVersion: templates.Version, Security: sec}
 	a, err := ensureUser(ctx, d, lookup, p.Name)
 	if err != nil {
 		return contract.SiteProvisionResult{}, err
@@ -129,13 +130,12 @@ func Provision(ctx context.Context, d sysexec.Deps, h Helper, lookup Lookup, p c
 			return contract.SiteProvisionResult{}, err
 		}
 	}
-	if err := ensureVhost(ctx, d, p, sec); err != nil {
+	if err := ensureVhost(ctx, d, st); err != nil {
 		return contract.SiteProvisionResult{}, err
 	}
 	if err := logpolicy.ApplySite(ctx, d, p.Name, d.Config.LogRetentionDays); err != nil {
 		return contract.SiteProvisionResult{}, err
 	}
-	st := State{Name: p.Name, Domain: p.Domain, Type: p.Type, PHPVersion: p.PHPVersion, TemplateVersion: templates.Version, Security: sec}
 	if err := Save(d.Paths, st); err != nil {
 		return contract.SiteProvisionResult{}, err
 	}
@@ -323,7 +323,7 @@ func ensurePool(ctx context.Context, d sysexec.Deps, name contract.SiteName, v c
 	d.Logf("Writing %s's PHP %s pool, then running php-fpm%s -t", name, v, v)
 	err = configtx.WithReloadLock(ctx, d.Paths, func() error {
 		return configtx.Apply(ctx, []configtx.Change{configtx.RootFile(path, pool, 0o644)}, func(ctx context.Context) error {
-			return configtx.RunTest(ctx, d.Run, sysexec.Cmd{Path: "/usr/sbin/php-fpm" + string(v), Args: []string{"-t"}})
+			return testPools(ctx, d, v)
 		})
 	})
 	if err != nil {
@@ -355,6 +355,17 @@ func waitForSocket(ctx context.Context, sock string) error {
 	return nil
 }
 
+// testPools runs php-fpm<v> -t while v has a pool. With none, there is
+// nothing to test: php-fpm -t refuses a config without a pool, and the
+// service is stopped instead (php.ApplyFPM).
+func testPools(ctx context.Context, d sysexec.Deps, v contract.PHPVersion) error {
+	pools, err := php.HasPools(d, v)
+	if err != nil || !pools {
+		return err
+	}
+	return configtx.RunTest(ctx, d.Run, sysexec.Cmd{Path: "/usr/sbin/php-fpm" + string(v), Args: []string{"-t"}})
+}
+
 func checkPHPInstalled(d sysexec.Deps, v contract.PHPVersion) error {
 	installed, err := php.Installed(d, v)
 	if err != nil {
@@ -368,27 +379,28 @@ func checkPHPInstalled(d sysexec.Deps, v contract.PHPVersion) error {
 
 // ensureVhost is step 5: security.conf and the vhost, HTTP only until the
 // site's certificate exists, enabled, tested and Nginx reloaded. If Nginx
-// rejects them, they are removed again.
-func ensureVhost(ctx context.Context, d sysexec.Deps, p contract.SiteProvisionParams, sec Security) error {
-	secConf, err := templates.Render("nginx/security.conf", templates.SiteSecurity{HeadersPreset: sec.HeadersPreset})
+// rejects them, they are removed again, or the previous ones restored.
+// site.php re-renders the vhost through it too.
+func ensureVhost(ctx context.Context, d sysexec.Deps, st State) error {
+	secConf, err := templates.Render("nginx/security.conf", templates.SiteSecurity{HeadersPreset: st.Security.HeadersPreset})
 	if err != nil {
 		return err
 	}
-	https := exists(d.Paths.LetsEncryptCert("zimam-" + string(p.Name)))
+	https := exists(d.Paths.LetsEncryptCert("zimam-" + string(st.Name)))
 	vhost, err := templates.Render("nginx/site.conf", templates.SiteVhost{
-		Name: p.Name, Domain: p.Domain, PHPVersion: p.PHPVersion, HTTPS: https, ForceHTTPS: https && sec.ForceHTTPS,
+		Name: st.Name, Domain: st.Domain, PHPVersion: st.PHPVersion, HTTPS: https, ForceHTTPS: https && st.Security.ForceHTTPS,
 	})
 	if err != nil {
 		return err
 	}
-	avail, enabled, secPath := d.Paths.NginxSiteAvailable(p.Name), d.Paths.NginxSiteEnabled(p.Name), d.Paths.SiteSecurityConf(p.Name)
+	avail, enabled, secPath := d.Paths.NginxSiteAvailable(st.Name), d.Paths.NginxSiteEnabled(st.Name), d.Paths.SiteSecurityConf(st.Name)
 	if target, err := os.Readlink(enabled); err == nil && target == avail && fileIs(avail, vhost) && fileIs(secPath, secConf) {
 		return nil
 	}
-	if err := os.MkdirAll(d.Paths.SiteNginxDir(p.Name), 0o755); err != nil {
+	if err := os.MkdirAll(d.Paths.SiteNginxDir(st.Name), 0o755); err != nil {
 		return err
 	}
-	d.Logf("Writing %s's vhost and security settings, then running nginx -t", p.Name)
+	d.Logf("Writing %s's vhost and security settings, then running nginx -t", st.Name)
 	return nginx.ApplySite(ctx, d, []configtx.Change{
 		configtx.RootFile(secPath, secConf, 0o644),
 		configtx.RootFile(avail, vhost, 0o644),

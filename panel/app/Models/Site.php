@@ -62,6 +62,12 @@ class Site extends Model
         return new SiteProvision($this->name, $this->primaryDomain->hostname, $this->type, $this->type === self::PHP ? $this->php_version : null);
     }
 
+    /** Whether a job on this site has yet to end: the agent runs one per site at a time. */
+    public function hasUnfinishedJob(): bool
+    {
+        return $this->jobs()->whereNotIn('status', AgentJob::FINISHED)->exists();
+    }
+
     /** The address the site answers on until it has a certificate. */
     public function url(): string
     {

@@ -54,6 +54,9 @@ final class FakeAgentClient implements AgentClient
     /** @var array<string, mixed> */
     private array $systemStatus;
 
+    /** @var array<string, string> the PHP version of each site's pool, by site name, as succeeded jobs left them */
+    private array $pools = [];
+
     public function __construct()
     {
         $this->systemStatus = self::serverStatus(demo: false);
@@ -167,9 +170,26 @@ final class FakeAgentClient implements AgentClient
         return new AgentJob($this->queue($command, $subject));
     }
 
-    /** The agent's prechecks for the PHP commands (§8.3–§8.5), against the fake's own server. */
+    /**
+     * The agent's prechecks for the PHP commands (§8.3–§8.5) and for the
+     * version site.php moves to (§9.5), against the fake's own server.
+     */
     private function precheck(AgentCommand $command): void
     {
+        if ($command->name() === 'site.php') {
+            $version = $command->params()['php_version'];
+            $available = array_column($this->systemStatus['php']['available'], null, 'version');
+            match (true) {
+                ! in_array($version, array_column($this->systemStatus['php']['installed'], 'version'), true) => throw new AgentNotFound("PHP {$version} isn't installed."),
+                ! $available[$version]['supported'] => throw new AgentValidationFailed('Invalid parameters', [
+                    'php_version' => "PHP {$version}'s security support ended on {$available[$version]['security_end']}, so sites can't move to it",
+                ]),
+                ($this->pools[$command->params()['name']] ?? null) === $version => throw new AgentConflict("Site {$command->params()['name']} already runs PHP {$version}."),
+                default => null,
+            };
+
+            return;
+        }
         if (! str_starts_with($command->name(), 'php.')) {
             return;
         }
@@ -202,6 +222,7 @@ final class FakeAgentClient implements AgentClient
         return match ($command->name()) {
             'php.install', 'php.uninstall', 'php.default' => ['version' => $params['version']],
             'site.provision' => ['name' => $params['name'], 'template_version' => 1],
+            'site.php' => ['name' => $params['name'], 'php_version' => $params['php_version']],
             default => [],
         };
     }
@@ -215,12 +236,23 @@ final class FakeAgentClient implements AgentClient
     private function applyEffect(string $command, array $params): void
     {
         $php = &$this->systemStatus['php'];
+        $moved = null;
+        if (in_array($command, ['site.provision', 'site.php'], true) && isset($params['php_version'])) {
+            $moved = $this->pools[$params['name']] ?? null;
+            $this->pools[$params['name']] = $params['php_version'];
+        }
         match ($command) {
             'php.install' => $php['installed'][] = ['version' => $params['version'], 'fpm_active' => false, 'in_use' => false],
             'php.uninstall' => $php['installed'] = array_values(array_filter($php['installed'], fn (array $v): bool => $v['version'] !== $params['version'])),
             'php.default' => $php['default'] = $params['version'],
-            'site.provision' => $php['installed'] = array_map(
-                fn (array $v): array => $v['version'] === ($params['php_version'] ?? null) ? ['version' => $v['version'], 'fpm_active' => true, 'in_use' => true] : $v,
+            // The new version runs the site's pool; the one it left is in use
+            // while the panel or another site still has a pool on it.
+            'site.provision', 'site.php' => $php['installed'] = array_map(
+                fn (array $v): array => match ($v['version']) {
+                    $params['php_version'] ?? null => ['version' => $v['version'], 'fpm_active' => true, 'in_use' => true],
+                    $moved => ['version' => $v['version'], 'fpm_active' => $v['version'] === $php['panel'] || in_array($moved, $this->pools, true), 'in_use' => $v['version'] === $php['panel'] || in_array($moved, $this->pools, true)],
+                    default => $v,
+                },
                 $php['installed'],
             ),
             default => null,
@@ -302,6 +334,20 @@ final class FakeAgentClient implements AgentClient
         }
         if ($command->name() === 'site.provision') {
             $this->validateProvision($params);
+
+            return;
+        }
+        if ($command->name() === 'site.php') {
+            $fields = [];
+            if (! preg_match(self::SITE_NAME, $params['name']) || in_array($params['name'], self::RESERVED_NAMES, true)) {
+                $fields['name'] = 'must be 2–24 lowercase letters, digits or hyphens, start with a letter and not end with a hyphen';
+            }
+            if (! in_array($params['php_version'], array_column($this->systemStatus['php']['available'], 'version'), true)) {
+                $fields['php_version'] = 'is not a supported PHP version';
+            }
+            if ($fields !== []) {
+                throw new AgentValidationFailed('Invalid parameters', $fields);
+            }
 
             return;
         }

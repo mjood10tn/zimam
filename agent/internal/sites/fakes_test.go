@@ -222,6 +222,7 @@ func newEnv(t *testing.T) *env {
 		e.run.Add(sysexec.Script{Path: "/usr/sbin/php-fpm" + v, Args: []string{"-t"}})
 		e.run.Add(sysexec.Script{Path: "/usr/bin/systemctl", Args: []string{"enable", "--now", "php" + v + "-fpm"}})
 		e.run.Add(sysexec.Script{Path: "/usr/bin/systemctl", Args: []string{"reload", "php" + v + "-fpm"}})
+		e.run.Add(sysexec.Script{Path: "/usr/bin/systemctl", Args: []string{"disable", "--now", "php" + v + "-fpm"}})
 	}
 	e.d = sysexec.Deps{Paths: e.p, Run: hookRunner{FakeRunner: e.run, env: e}, Config: cfg, Logf: t.Logf, Now: func() time.Time { return testNow }}
 	return e

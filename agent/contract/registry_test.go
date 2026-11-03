@@ -27,7 +27,7 @@ var designCommands = []struct {
 	{"php.uninstall", KindJob, "php:<version>", true, true},
 	{"php.default", KindJob, "server", true, true},
 	{"site.provision", KindJob, "site:<name>", true, true},
-	{"site.php", KindJob, "site:<name>", true, false},
+	{"site.php", KindJob, "site:<name>", true, true},
 	{"site.security", KindJob, "site:<name>", true, false},
 	{"site.destroy", KindJob, "site:<name>", true, false},
 	{"cert.issue", KindJob, "site:<name>", true, false},

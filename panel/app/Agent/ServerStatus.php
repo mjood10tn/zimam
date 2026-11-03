@@ -61,6 +61,29 @@ final class ServerStatus
         return new self($data, $issuedAt, true);
     }
 
+    /**
+     * The versions a site can run on: installed and still supported (§8.1),
+     * labelled, the default marked.
+     *
+     * @return array<string, string> version => label
+     */
+    public function sitePhpOptions(): array
+    {
+        $php = $this->data['php'];
+        $supported = array_column($php['available'], 'supported', 'version');
+        $options = [];
+        foreach ($php['installed'] as $installed) {
+            $version = $installed['version'];
+            if ($supported[$version] ?? false) {
+                $options[$version] = $version === $php['default']
+                    ? __('zimam.sites.fields.php_default', ['version' => $version])
+                    : __('zimam.sites.fields.php_option', ['version' => $version]);
+            }
+        }
+
+        return $options;
+    }
+
     /** When the next answer is due, for the bulletin's "Next" time. */
     public function nextAt(): CarbonImmutable
     {

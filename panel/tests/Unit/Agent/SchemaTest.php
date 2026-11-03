@@ -12,6 +12,7 @@ use App\Agent\Commands\JobStatus;
 use App\Agent\Commands\PhpDefault;
 use App\Agent\Commands\PhpInstall;
 use App\Agent\Commands\PhpUninstall;
+use App\Agent\Commands\SitePhp;
 use App\Agent\Commands\SiteProvision;
 use App\Agent\Commands\SystemStatus;
 use App\Agent\Exceptions\AgentException;
@@ -61,6 +62,7 @@ final class SchemaTest extends TestCase
             new PhpUninstall('8.3'),
             new PhpDefault('8.5'),
             new SiteProvision('shop', 'shop.example.com', 'php', '8.4'),
+            new SitePhp('shop', '8.5'),
         ];
 
         return array_combine(

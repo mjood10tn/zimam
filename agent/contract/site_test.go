@@ -52,3 +52,18 @@ func TestProvisionParamsCheckEveryField(t *testing.T) {
 		}
 	}
 }
+
+func TestSitePHPParamsCheckEveryField(t *testing.T) {
+	ok := SitePHPParams{Name: "shop", PHPVersion: "8.5"}
+	if err := ok.Validate(); err != nil {
+		t.Errorf("a valid switch: %v", err)
+	}
+	var ae *AgentError
+	err := (&SitePHPParams{Name: "Shop", PHPVersion: "8.5; rm -rf /"}).Validate()
+	if !errors.As(err, &ae) || ae.Fields["name"] == "" || ae.Fields["php_version"] == "" {
+		t.Errorf("Validate = %v, want name and php_version refused", err)
+	}
+	if err := (&SitePHPParams{Name: "shop"}).Validate(); !errors.As(err, &ae) || ae.Fields["php_version"] == "" {
+		t.Errorf("Validate = %v, want php_version required", err)
+	}
+}

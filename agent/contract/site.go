@@ -14,6 +14,14 @@ func init() {
 		Result:  SiteProvisionResult{},
 		Subject: func(p Params) string { return "site:" + string(p.(*SiteProvisionParams).Name) },
 	})
+	Register(Descriptor{
+		Name:    "site.php",
+		Kind:    KindJob,
+		Audited: true,
+		Params:  func() Params { return &SitePHPParams{} },
+		Result:  SitePHPResult{},
+		Subject: func(p Params) string { return "site:" + string(p.(*SitePHPParams).Name) },
+	})
 }
 
 // SiteType is what a site serves (§9.2).
@@ -67,4 +75,24 @@ func (p *SiteProvisionParams) Validate() error {
 type SiteProvisionResult struct {
 	Name            SiteName `json:"name"`
 	TemplateVersion int      `json:"template_version"`
+}
+
+// SitePHPParams is site.php's params (§5.3): the site and the PHP version
+// it moves to.
+type SitePHPParams struct {
+	Name       SiteName   `json:"name"`
+	PHPVersion PHPVersion `json:"php_version"`
+}
+
+func (p *SitePHPParams) Validate() error {
+	f := FieldErrors{}
+	f.Check("name", p.Name)
+	f.Check("php_version", p.PHPVersion)
+	return f.Err()
+}
+
+// SitePHPResult is what a switched site reports: the version it now runs.
+type SitePHPResult struct {
+	Name       SiteName   `json:"name"`
+	PHPVersion PHPVersion `json:"php_version"`
 }
