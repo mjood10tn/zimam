@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "domain": {
+      "maxLength": 253,
+      "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+([a-z]{1,63}|xn--[a-z0-9-]{0,58}[a-z0-9])$",
+      "type": "string"
+    },
+    "name": {
+      "not": {
+        "enum": [
+          "zimam",
+          "panel",
+          "default",
+          "acme"
+        ]
+      },
+      "pattern": "^[a-z][a-z0-9-]{0,22}[a-z0-9]$",
+      "type": "string"
+    },
+    "php_version": {
+      "enum": [
+        "8.2",
+        "8.3",
+        "8.4",
+        "8.5"
+      ],
+      "type": "string"
+    },
+    "type": {
+      "enum": [
+        "static",
+        "php"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "domain",
+    "name",
+    "type"
+  ],
+  "title": "site.provision params",
+  "type": "object"
+}

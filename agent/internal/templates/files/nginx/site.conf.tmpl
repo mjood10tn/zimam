@@ -1,0 +1,77 @@
+# Managed by Zimam. Changes here are overwritten.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name {{safe .Domain}};{{template "nginx/site.conf logs" .}}
+{{if and .HTTPS .ForceHTTPS -}}
+{{template "nginx/site.conf acme"}}
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+{{else -}}
+{{template "nginx/site.conf app" .}}}
+{{end -}}
+{{if .HTTPS}}
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name {{safe .Domain}};{{template "nginx/site.conf logs" .}}
+
+    ssl_certificate     /etc/letsencrypt/live/zimam-{{safe .Name}}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/zimam-{{safe .Name}}/privkey.pem;
+    include /etc/nginx/zimam/tls.conf;
+{{template "nginx/site.conf app" .}}}
+{{end -}}
+
+{{- define "nginx/site.conf logs"}}
+    access_log /var/log/zimam/sites/{{safe .Name}}/access.log;
+    error_log  /var/log/zimam/sites/{{safe .Name}}/error.log;
+{{- end}}
+{{- /* The ACME location comes first, so renewals work whatever follows. */ -}}
+{{define "nginx/site.conf acme"}}
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/zimam-acme;
+        default_type text/plain;
+        allow all;
+        auth_basic off;
+    }
+{{- end}}
+
+{{- /* The site itself, after the security settings (§9.6), which the ACME
+location overrides. */ -}}
+{{define "nginx/site.conf app"}}
+    include /etc/nginx/zimam/{{safe .Name}}/security.conf;
+
+    root /home/s_{{safe .Name}}/site/current/public;
+{{- if .PHPVersion}}
+    index index.php index.html;
+{{- else}}
+    index index.html;
+{{- end}}
+    autoindex off;
+{{template "nginx/site.conf acme"}}
+
+    location ~ /\.(?!well-known) {
+        deny all;
+    }
+
+    location / {
+{{- if .PHPVersion}}
+        try_files $uri $uri/ /index.php?$query_string;
+{{- else}}
+        try_files $uri $uri/ =404;
+{{- end}}
+    }
+{{- if .PHPVersion}}
+
+    location ~ \.php$ {
+        fastcgi_pass unix:/run/php/zimam-{{safe .Name}}-{{safe .PHPVersion}}.sock;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+        fastcgi_param DOCUMENT_ROOT $realpath_root;
+    }
+{{- end}}
+{{end -}}

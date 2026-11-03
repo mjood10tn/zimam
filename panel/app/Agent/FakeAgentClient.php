@@ -35,6 +35,8 @@ final class FakeAgentClient implements AgentClient
 
     private const RESERVED_NAMES = ['zimam', 'panel', 'default', 'acme'];
 
+    private const DOMAIN = '/^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+([a-z]{1,63}|xn--[a-z0-9-]{0,58}[a-z0-9])\z/';
+
     private const MAX_UNFINISHED = 2;
 
     /** @var list<array{method: string, command: string, params: array<string, mixed>}> */
@@ -175,7 +177,28 @@ final class FakeAgentClient implements AgentClient
         };
     }
 
-    /** What a succeeded PHP job changed on the fake's server, so system.status reports it. */
+    /**
+     * What a job command answers when it succeeds, as the agent's result types are (§5.3).
+     *
+     * @return array<string, mixed>
+     */
+    private static function defaultResult(AgentCommand $command): array
+    {
+        $params = $command->params();
+
+        return match ($command->name()) {
+            'php.install', 'php.uninstall', 'php.default' => ['version' => $params['version']],
+            'site.provision' => ['name' => $params['name'], 'template_version' => 1],
+            default => [],
+        };
+    }
+
+    /**
+     * What a succeeded job changed on the fake's server, so system.status
+     * reports it: PHP versions, and the version a PHP site's pool now uses.
+     *
+     * @param  array<string, mixed>  $params
+     */
     private function applyEffect(string $command, array $params): void
     {
         $php = &$this->systemStatus['php'];
@@ -183,6 +206,10 @@ final class FakeAgentClient implements AgentClient
             'php.install' => $php['installed'][] = ['version' => $params['version'], 'fpm_active' => false, 'in_use' => false],
             'php.uninstall' => $php['installed'] = array_values(array_filter($php['installed'], fn (array $v): bool => $v['version'] !== $params['version'])),
             'php.default' => $php['default'] = $params['version'],
+            'site.provision' => $php['installed'] = array_map(
+                fn (array $v): array => $v['version'] === ($params['php_version'] ?? null) ? ['version' => $v['version'], 'fpm_active' => true, 'in_use' => true] : $v,
+                $php['installed'],
+            ),
             default => null,
         };
         usort($php['installed'], fn (array $a, array $b): int => version_compare($a['version'], $b['version']));
@@ -260,6 +287,11 @@ final class FakeAgentClient implements AgentClient
 
             return;
         }
+        if ($command->name() === 'site.provision') {
+            $this->validateProvision($params);
+
+            return;
+        }
         if ($command->name() !== 'e2e.sleep') {
             return;
         }
@@ -270,6 +302,29 @@ final class FakeAgentClient implements AgentClient
         if (! preg_match(self::SITE_NAME, $params['subject']) || in_array($params['subject'], self::RESERVED_NAMES, true)) {
             $fields['subject'] = 'must be 2 to 24 lowercase letters, digits and hyphens, starting with a letter';
         }
+        if ($fields !== []) {
+            throw new AgentValidationFailed('Invalid parameters', $fields);
+        }
+    }
+
+    /** @param array<string, mixed> $params site.provision's (§5.3, §5.4) */
+    private function validateProvision(array $params): void
+    {
+        $fields = [];
+        if (! preg_match(self::SITE_NAME, $params['name']) || in_array($params['name'], self::RESERVED_NAMES, true)) {
+            $fields['name'] = 'must be 2–24 lowercase letters, digits or hyphens, start with a letter and not end with a hyphen';
+        }
+        if (strlen($params['domain']) > 253 || ! preg_match(self::DOMAIN, $params['domain'])) {
+            $fields['domain'] = 'must be lowercase ASCII labels of letters, digits and inner hyphens';
+        }
+        $php = $params['php_version'] ?? null;
+        match (true) {
+            ! in_array($params['type'], ['static', 'php'], true) => $fields['type'] = 'must be static or php',
+            $params['type'] === 'php' && $php === null => $fields['php_version'] = 'is required for a PHP site',
+            $params['type'] === 'php' && ! in_array($php, array_column($this->systemStatus['php']['available'], 'version'), true) => $fields['php_version'] = 'is not a supported PHP version',
+            $params['type'] === 'static' && $php !== null => $fields['php_version'] = 'must be left out for a static site',
+            default => null,
+        };
         if ($fields !== []) {
             throw new AgentValidationFailed('Invalid parameters', $fields);
         }
@@ -302,7 +357,7 @@ final class FakeAgentClient implements AgentClient
             'states' => $script['states'] ?? ['running', 'succeeded'],
             'step' => 0,
             'log' => array_map(fn (string $message): string => '['.self::goTime($now).'] '.$message, $log),
-            'result' => $script === null ? [] : $script['result'],
+            'result' => $script === null ? self::defaultResult($command) : $script['result'],
             'error_code' => $script['error_code'] ?? null,
             'message' => $script['message'] ?? '',
             'started_at' => null,

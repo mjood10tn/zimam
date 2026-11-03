@@ -132,3 +132,30 @@ func TestPolicyRefusesInvalidValues(t *testing.T) {
 		}
 	}
 }
+
+// A new site gets its own rules, tested with logrotate -d, without the
+// journald restart a policy change needs; rules already as rendered are
+// left alone.
+func TestApplySite(t *testing.T) {
+	d, run := newDeps(t)
+	run.Add(logrotateTest(d.Paths))
+	if err := ApplySite(context.Background(), d, "shop", 30); err != nil {
+		t.Fatalf("ApplySite: %v", err)
+	}
+	if got := commands(run); !slices.Equal(got, []string{line(logrotateTest(d.Paths))}) {
+		t.Errorf("ran %q, want only logrotate -d", got)
+	}
+	b, err := os.ReadFile(d.Paths.SiteLogrotateConf("shop"))
+	if err != nil || !strings.Contains(string(b), "/var/log/zimam/sites/shop/*.log {") || !strings.Contains(string(b), "maxage 30\n") {
+		t.Fatalf("rules = %q, %v", b, err)
+	}
+	if err := ApplySite(context.Background(), d, "shop", 30); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(run.Calls()); n != 1 {
+		t.Errorf("the second ApplySite ran %d commands in all, want none of its own", n)
+	}
+	if err := ApplySite(context.Background(), d, "shop", 0); err == nil {
+		t.Error("ApplySite accepted 0 days")
+	}
+}

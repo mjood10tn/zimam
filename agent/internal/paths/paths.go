@@ -93,6 +93,10 @@ func (p Paths) KeyringRefresh() string { return p.at("var/lib/zimam/keyring-refr
 func (p Paths) RebootRequired() string { return p.at("run/reboot-required") }
 func (p Paths) AptCheck() string       { return p.at("usr/lib/update-notifier/apt-check") }
 
+// EtcGroup lists each group's members: site.provision reads whether www-data
+// is in a site's group yet (§9.2).
+func (p Paths) EtcGroup() string { return p.at("etc/group") }
+
 // /var/log/zimam
 
 func (p Paths) LogDir() string     { return p.at("var/log/zimam") }

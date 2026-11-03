@@ -12,6 +12,7 @@ use App\Agent\Commands\JobStatus;
 use App\Agent\Commands\PhpDefault;
 use App\Agent\Commands\PhpInstall;
 use App\Agent\Commands\PhpUninstall;
+use App\Agent\Commands\SiteProvision;
 use App\Agent\Commands\SystemStatus;
 use App\Agent\Exceptions\AgentException;
 use App\Agent\Exceptions\AgentNotFound;
@@ -59,6 +60,7 @@ final class SchemaTest extends TestCase
             new PhpInstall('8.4'),
             new PhpUninstall('8.3'),
             new PhpDefault('8.5'),
+            new SiteProvision('shop', 'shop.example.com', 'php', '8.4'),
         ];
 
         return array_combine(
@@ -88,6 +90,29 @@ final class SchemaTest extends TestCase
             return;
         }
         $this->assertValid(self::wire($command->jsonParams()), file_get_contents($schema), $command->name().' params');
+    }
+
+    /**
+     * commands() holds one instance per command, so a static site's params,
+     * which leave php_version out, are checked here.
+     */
+    public function testStaticSiteProvisionParamsMatchSchema(): void
+    {
+        $static = new SiteProvision('docs', 'docs.example.com', 'static');
+        $this->assertArrayNotHasKey('php_version', $static->params());
+        $this->assertValid(self::wire($static->jsonParams()), file_get_contents($this->schemaPath('site.provision.params')), 'static site.provision params');
+    }
+
+    /** What the fake's jobs answer when they succeed matches each command's result schema. */
+    public function testFakeJobResultsMatchSchemas(): void
+    {
+        $fake = new FakeAgentClient;
+        foreach ([new PhpInstall('8.4'), new SiteProvision('shop', 'shop.example.com', 'static')] as $command) {
+            $job = $fake->submit($command);
+            $final = $fake->follow($job->id, 0, function (): void {});
+            $this->assertSame('succeeded', $final->status);
+            $this->assertResult($command->name(), $final->result, "fake {$command->name()} result");
+        }
     }
 
     public function testFakeResponsesMatchResultAndEnvelopeSchemas(): void

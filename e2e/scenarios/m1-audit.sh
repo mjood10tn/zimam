@@ -2,8 +2,9 @@
 # Done-when 11 for milestone 1 (design §2, §5.8): after the run, the audit
 # log holds a cli:root entry for every bootstrap step and for each
 # `panel setup-link`, the probes' rejections, and the contract suite's
-# e2e.sleep submissions, outcome and cancels. It holds no successful
-# routine read, and never a setup link.
+# site.provision submissions, outcomes and refusals, and its e2e.sleep
+# submission and cancel. It holds no successful routine read, and never a
+# setup link.
 # shellcheck source=../scripts/common.sh
 source "$(dirname "$0")/../scripts/common.sh"
 
@@ -43,10 +44,12 @@ for code, least in [("invalid_request", 5), ("unsupported_protocol", 1), ("unkno
     n = count(outcome="error:" + code)
     check(n >= least, f"the protocol probes' rejections: {n} error:{code}, want at least {least}")
 
-check(count(command="e2e.sleep", outcome="accepted") >= 3, "e2e.sleep submissions accepted")
-check(count(command="e2e.sleep", outcome="ok") >= 1, "an e2e.sleep job's outcome")
-check(count(command="e2e.sleep", outcome="error:busy") >= 1, "e2e.sleep refused as busy")
-check(count(command="job.cancel", outcome="ok") >= 2, "job.cancel audited")
+check(count(command="site.provision", outcome="accepted") >= 2, "site.provision submissions accepted")
+check(count(command="site.provision", outcome="ok") >= 2, "the site.provision jobs' outcomes")
+check(count(command="site.provision", outcome="error:busy") >= 1, "site.provision refused as busy")
+check(count(command="site.provision", outcome="error:validation_failed") >= 1, "site.provision refused for a bad site name")
+check(count(command="e2e.sleep", outcome="accepted") >= 1, "the e2e.sleep submission accepted")
+check(count(command="job.cancel", outcome="ok") >= 1, "job.cancel audited")
 
 reads = {"agent.version", "system.status", "system.metrics", "job.status", "job.follow", "logs.list", "logs.read"}
 bad = [e for e in entries if e["command"] in reads and not e["outcome"].startswith("error:")]

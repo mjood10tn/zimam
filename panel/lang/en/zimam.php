@@ -115,6 +115,64 @@ return [
         'updates_unknown' => 'Not checked yet',
     ],
 
+    'sites' => [
+        'title' => 'Sites',
+        'label' => 'site',
+        'empty' => 'No sites yet.',
+        'cancelled' => 'Provisioning was cancelled before it finished.',
+        'fields' => [
+            'name' => 'Name',
+            'name_help' => '2 to 24 lowercase letters, digits and hyphens, starting with a letter. It names the site’s folder and user, and can’t be changed.',
+            'domain' => 'Domain',
+            'domain_help' => 'Point its DNS at this server. International names are fine.',
+            'type' => 'Type',
+            'php_version' => 'PHP version',
+            'php_option' => 'PHP :version',
+            'php_default' => 'PHP :version (default)',
+            'php_none' => 'No supported PHP version is installed. Install one under PHP versions.',
+            'php_static' => 'None (static site)',
+            'status' => 'Status',
+            'url' => 'Address',
+            'template_version' => 'Config template version',
+            'last_error' => 'Last error',
+        ],
+        'types' => [
+            'php' => 'PHP',
+            'static' => 'Static',
+        ],
+        'status' => [
+            'provisioning' => 'Provisioning',
+            'active' => 'Active',
+            'failed' => 'Failed',
+            'deleting' => 'Deleting',
+        ],
+        'validation' => [
+            'name' => 'Use 2 to 24 lowercase letters, digits and hyphens, starting with a letter and not ending with a hyphen.',
+            'reserved' => 'This name is reserved.',
+            'name_taken' => 'Another site already has this name.',
+            'domain' => 'Enter a domain such as shop.example.com: at least two labels, no wildcards.',
+            'domain_taken' => 'Another site already uses this domain.',
+        ],
+        'tabs' => [
+            'overview' => 'Overview',
+            'jobs' => 'Jobs',
+            'security' => 'Security',
+            'logs' => 'Logs',
+            'later' => 'Not available in this version yet.',
+        ],
+        'create' => [
+            'submitted' => 'Provisioning :name',
+        ],
+        'retry' => [
+            'label' => 'Retry',
+            'submitted' => 'Provisioning :name again',
+        ],
+        'delete' => [
+            'label' => 'Delete',
+            'later' => 'Deleting sites isn’t available in this version yet.',
+        ],
+    ],
+
     'php' => [
         'title' => 'PHP versions',
         'empty' => 'No PHP versions reported by the agent yet.',

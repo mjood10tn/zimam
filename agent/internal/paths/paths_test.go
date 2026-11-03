@@ -44,6 +44,7 @@ var production = map[string]string{
 	"LogrotateState":        "/var/lib/zimam/logrotate.state",
 	"RebootRequired":        "/run/reboot-required",
 	"AptCheck":              "/usr/lib/update-notifier/apt-check",
+	"EtcGroup":              "/etc/group",
 	"PHPFPMBinary":          "/usr/sbin/php-fpm8.4",
 	"LogDir":                "/var/log/zimam",
 	"AuditLog":              "/var/log/zimam/audit.log",

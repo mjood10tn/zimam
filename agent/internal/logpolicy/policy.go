@@ -3,6 +3,7 @@
 package logpolicy
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -79,4 +80,32 @@ func Apply(ctx context.Context, d sysexec.Deps, p Policy, sites []contract.SiteN
 	d.Logf("Restarting journald")
 	_, err = d.Run.Run(ctx, sysexec.Cmd{Path: systemctl, Args: []string{"restart", "systemd-journald"}})
 	return err
+}
+
+// ApplySite writes one site's rotation rules and tests them with logrotate
+// -d, for a new site (§9.2 step 6); Apply re-renders every site's when the
+// policy changes. Rules already as rendered are left alone, so a retry
+// changes nothing.
+func ApplySite(ctx context.Context, d sysexec.Deps, name contract.SiteName, days contract.RetentionDays) error {
+	if err := name.Validate(); err != nil {
+		return fmt.Errorf("site %q %v", name, err)
+	}
+	if err := days.Validate(); err != nil {
+		return fmt.Errorf("log retention %v", err)
+	}
+	content, err := templates.Render("logrotate/site.conf", templates.SiteLogs{Name: name, RetentionDays: days})
+	if err != nil {
+		return err
+	}
+	path := d.Paths.SiteLogrotateConf(name)
+	if old, err := os.ReadFile(path); err == nil && bytes.Equal(old, content) {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	d.Logf("Writing %s's log rules (%d days), then running logrotate -d", name, days)
+	return configtx.Apply(ctx, []configtx.Change{configtx.RootFile(path, content, 0o644)}, func(ctx context.Context) error {
+		return configtx.RunTest(ctx, d.Run, sysexec.Cmd{Path: logrotate, Args: []string{"-d", "--state", d.Paths.LogrotateState(), d.Paths.LogrotateConf()}})
+	})
 }

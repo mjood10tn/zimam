@@ -59,6 +59,30 @@ var goldenCases = map[string][]goldenFile{
 	"units": units(),
 	// The log policy (§11.3): Zimam's own rules, one site's, and the journal's.
 	"log-policy": logPolicy(),
+	// A site's vhost with its default security.conf, static or PHP, before
+	// and after its certificate exists; the PHP cases carry their pool, one
+	// on 8.4 and one on 8.5 (§9.3, §9.4, §9.6).
+	"site-static-http":  site(SiteVhost{Name: "shop", Domain: "shop.example.com"}),
+	"site-php-http":     site(SiteVhost{Name: "shop", Domain: "shop.example.com", PHPVersion: "8.4"}),
+	"site-static-https": site(SiteVhost{Name: "shop", Domain: "shop.example.com", HTTPS: true, ForceHTTPS: true}),
+	"site-php-https":    site(SiteVhost{Name: "blog", Domain: "blog.example.com", PHPVersion: "8.5", HTTPS: true}),
+}
+
+func site(v SiteVhost) []goldenFile {
+	var p paths.Paths
+	files := []goldenFile{
+		{path: p.NginxSiteAvailable(v.Name), tmpl: "nginx/site.conf", data: func() any { return v }},
+		{path: p.SiteSecurityConf(v.Name), tmpl: "nginx/security.conf", data: func() any { return SiteSecurity{HeadersPreset: true} }},
+	}
+	if v.HTTPS {
+		files = append(files, goldenFile{path: "/etc/nginx/zimam/tls.conf", tmpl: "nginx/tls.conf"})
+	}
+	if v.PHPVersion != "" {
+		files = append(files, goldenFile{path: p.PHPPool(v.PHPVersion, v.Name), tmpl: "php/site-pool.conf", data: func() any {
+			return SitePool{Name: v.Name, PHPVersion: v.PHPVersion}
+		}})
+	}
+	return files
 }
 
 func panel(https bool) []goldenFile {

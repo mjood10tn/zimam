@@ -51,10 +51,10 @@ func TestJobLogGID(t *testing.T) {
 	}
 }
 
-// serve's manager runs the PHP commands' prechecks before accepting a job.
+// serve's manager runs the job commands' prechecks before accepting a job.
 func TestJobManagerHasPrechecks(t *testing.T) {
 	m := jobManager(paths.Paths{Root: t.TempDir()}, config.Agent{}, -1)
-	for _, name := range []string{"php.install", "php.uninstall", "php.default"} {
+	for _, name := range []string{"php.install", "php.uninstall", "php.default", "site.provision"} {
 		if m.Handlers[name] == nil || m.Prechecks[name] == nil {
 			t.Errorf("%s: handler %v, precheck %v; want both", name, m.Handlers[name] != nil, m.Prechecks[name] != nil)
 		}

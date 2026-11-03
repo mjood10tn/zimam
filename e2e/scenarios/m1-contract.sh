@@ -19,3 +19,13 @@ log "phpunit tests/Contract as zimam on PHP $php"
 AS_CWD=/home/zimam/contract-test bash "$E2E_ROOT/e2e/scripts/as.sh" zimam \
 	env ZIMAM_AGENT_SOCKET=/run/zimam/agent.sock "php$php" vendor/bin/phpunit --fail-on-skipped tests/Contract
 echo "PASS  the contract suite against the real agent"
+
+# The suite provisioned contract-life as a PHP site on the default version.
+# Its placeholder answering through Nginx shows the vhost, www-data's new
+# group and the site's own pool all work (§9.2).
+default=$(in_c python3 -c 'import json; print(json.load(open("/etc/zimam/agent.json"))["default_php"])')
+body=$(in_c curl -fsS -H 'Host: contract-life.example.com' http://127.0.0.1/) || die "contract-life didn't answer over HTTP"
+case "$body" in
+"Zimam site contract-life is ready. PHP $default."*) echo "PASS  contract-life serves its placeholder on PHP $default" ;;
+*) die "contract-life answered: $body" ;;
+esac

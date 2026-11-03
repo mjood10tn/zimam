@@ -7,6 +7,8 @@ use App\Agent\AgentJobStatus;
 use App\Agent\Commands\AgentVersion;
 use App\Agent\Commands\E2eSleep;
 use App\Agent\Commands\JobCancel;
+use App\Agent\Commands\SiteProvision;
+use App\Agent\Commands\SystemStatus;
 use App\Agent\Exceptions\AgentBusy;
 use App\Agent\Exceptions\AgentException;
 use App\Agent\Exceptions\AgentNotFound;
@@ -17,9 +19,10 @@ use Tests\TestCase;
 /**
  * The contract scenarios (design §6), run against every client: the fake on
  * every CI run, the socket client against a real agent in the end-to-end
- * runs. Until site.provision exists, the job scenarios use the test-only
- * e2e.sleep (D22). Each scenario uses its own subject and cancels what it
- * started, since the real agent allows two unfinished jobs at a time.
+ * runs. The job scenarios provision sites; cancelling uses the test-only
+ * e2e.sleep (D22), since a site provisions in about a second and cancelling
+ * one would race its end. Each scenario uses its own subject and ends what
+ * it started, since the real agent allows two unfinished jobs at a time.
  */
 abstract class AgentClientContract extends TestCase
 {
@@ -41,10 +44,11 @@ abstract class AgentClientContract extends TestCase
     public function testValidationErrorShape(): void
     {
         try {
-            $this->client->status('bad');
-            $this->fail('job.status accepted the job id "bad"');
+            $this->client->submit(new SiteProvision('Bad_Name', 'contract.example.com', 'static'));
+            $this->fail('site.provision accepted the site name "Bad_Name"');
         } catch (AgentValidationFailed $e) {
-            $this->assertArrayHasKey('job', $e->fields());
+            $this->assertArrayHasKey('name', $e->fields());
+            $this->assertArrayNotHasKey('domain', $e->fields());
         }
     }
 
@@ -54,32 +58,42 @@ abstract class AgentClientContract extends TestCase
         $this->client->status(strtoupper((string) Str::ulid()));
     }
 
+    /**
+     * Provision → status → follow → result, for a PHP site on the server's
+     * default version, so a real agent writes a pool and reloads PHP-FPM as
+     * well as Nginx.
+     */
     public function testJobLifecycle(): void
     {
-        $job = $this->client->submit(new E2eSleep(2, 'contract-life'));
-        try {
-            $this->assertSame('running', $this->waitUntilRunning($job->id)->status);
-            $lines = 0;
-            $final = $this->client->follow($job->id, 0, function () use (&$lines): void {
-                $lines++;
-            });
+        $php = $this->client->call(new SystemStatus)->data['php']['default'];
+        $job = $this->client->submit(new SiteProvision('contract-life', 'contract-life.example.com', 'php', $php));
 
-            $this->assertSame('succeeded', $final->status);
-            $this->assertGreaterThan(0, $lines);
-            $this->assertSame($job->id, $final->job);
-        } finally {
-            $this->cancelQuietly($job->id);
-        }
+        $this->assertContains($this->client->status($job->id)->status, ['queued', 'running', 'succeeded']);
+        $lines = 0;
+        $final = $this->client->follow($job->id, 0, function () use (&$lines): void {
+            $lines++;
+        });
+
+        $this->assertSame('succeeded', $final->status, $final->message);
+        $this->assertGreaterThan(0, $lines);
+        $this->assertSame($job->id, $final->job);
+        $this->assertSame('contract-life', $final->result['name']);
+        $this->assertGreaterThanOrEqual(1, $final->result['template_version']);
     }
 
+    /**
+     * A second job for the same site is busy. The first is followed to its
+     * end rather than cancelled, so no half-made site is left behind.
+     */
     public function testBusyForSameSubject(): void
     {
-        $first = $this->client->submit(new E2eSleep(30, 'contract-busy'));
+        $command = new SiteProvision('contract-busy', 'contract-busy.example.com', 'static');
+        $first = $this->client->submit($command);
         try {
             $this->expectException(AgentBusy::class);
-            $this->client->submit(new E2eSleep(30, 'contract-busy'));
+            $this->client->submit($command);
         } finally {
-            $this->cancelQuietly($first->id);
+            $this->assertSame('succeeded', $this->client->follow($first->id, 0, function (): void {})->status);
         }
     }
 

@@ -32,7 +32,7 @@ final class TrackAgentJob implements ShouldQueue
             return;
         } catch (AgentException $e) {
             // not_found: the agent no longer knows the job.
-            $this->agentJob->markFailed($e->agentCode() ?? 'internal', $e->getMessage());
+            $outcomes->fail($this->agentJob, $e->agentCode() ?? 'internal', $e->getMessage());
 
             return;
         }
@@ -65,7 +65,7 @@ final class TrackAgentJob implements ShouldQueue
     public function failed(?Throwable $e): void
     {
         if (! $this->agentJob->refresh()->isFinished()) {
-            $this->agentJob->markFailed('untracked', __('zimam.jobs.untracked'));
+            app(JobOutcomes::class)->fail($this->agentJob, 'untracked', __('zimam.jobs.untracked'));
         }
     }
 }

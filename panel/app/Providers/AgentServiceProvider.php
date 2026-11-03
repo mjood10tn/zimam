@@ -8,6 +8,7 @@ use App\Agent\AuditingAgentClient;
 use App\Agent\FakeAgentClient;
 use App\Agent\JobOutcomes;
 use App\Agent\Outcomes\PhpOutcomes;
+use App\Agent\Outcomes\SiteOutcomes;
 use App\Agent\SocketAgentClient;
 use App\Agent\UnixSocketTransport;
 use Illuminate\Support\ServiceProvider;
@@ -24,6 +25,7 @@ class AgentServiceProvider extends ServiceProvider
         $this->app->singleton(JobOutcomes::class, function (): JobOutcomes {
             $outcomes = new JobOutcomes;
             PhpOutcomes::register($outcomes);
+            SiteOutcomes::register($outcomes);
 
             return $outcomes;
         });

@@ -7,6 +7,7 @@ use App\Agent\AgentCommand;
 use App\Agent\Exceptions\AgentBusy;
 use App\Agent\Exceptions\AgentException;
 use App\Agent\Exceptions\AgentUnavailable;
+use App\Agent\JobOutcomes;
 use App\Models\AgentJob;
 use DateTimeInterface;
 use Illuminate\Contracts\Queue\ShouldBeEncrypted;
@@ -43,7 +44,7 @@ final class SubmitAgentJob implements ShouldBeEncrypted, ShouldQueue
             return;
         } catch (AgentException $e) {
             // Something changed while it waited, and the agent now refuses it.
-            $this->agentJob->markFailed($e->agentCode() ?? 'internal', $e->getMessage());
+            app(JobOutcomes::class)->fail($this->agentJob, $e->agentCode() ?? 'internal', $e->getMessage());
 
             return;
         }
@@ -64,9 +65,9 @@ final class SubmitAgentJob implements ShouldBeEncrypted, ShouldQueue
             return;
         }
         if ($e === null || $e instanceof MaxAttemptsExceededException) {
-            $this->agentJob->markFailed('busy', __('zimam.jobs.busy'));
+            app(JobOutcomes::class)->fail($this->agentJob, 'busy', __('zimam.jobs.busy'));
         } else {
-            $this->agentJob->markFailed('internal', $e->getMessage());
+            app(JobOutcomes::class)->fail($this->agentJob, 'internal', $e->getMessage());
         }
     }
 }

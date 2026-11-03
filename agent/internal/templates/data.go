@@ -29,3 +29,32 @@ type SuryRepo struct {
 	URL  string // php_repo_url, the source's URIs
 	Host string // its host, which the pin names as the origin
 }
+
+// SiteVhost fills nginx/site.conf (§9.3).
+type SiteVhost struct {
+	Name       contract.SiteName
+	Domain     contract.Domain
+	PHPVersion contract.PHPVersion // empty for a static site
+	HTTPS      bool                // the site's certificate exists
+	ForceHTTPS bool                // the HTTP server redirects (§9.6); only with HTTPS
+}
+
+// SiteSecurity fills nginx/security.conf (§9.6). Task 33 adds the other
+// settings.
+type SiteSecurity struct {
+	HeadersPreset bool
+}
+
+// SitePool fills php/site-pool.conf (§9.4).
+type SitePool struct {
+	Name                 contract.SiteName
+	PHPVersion           contract.PHPVersion
+	BlockRiskyFunctions  bool
+	RestrictToSiteFolder bool
+}
+
+// SitePlaceholder fills site/index.html and site/index.php, the page a new
+// site serves until its first deploy (§9.2).
+type SitePlaceholder struct {
+	Name contract.SiteName
+}
