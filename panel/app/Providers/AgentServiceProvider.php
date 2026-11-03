@@ -6,6 +6,9 @@ use App\Agent\AgentClient;
 use App\Agent\AgentHealth;
 use App\Agent\AuditingAgentClient;
 use App\Agent\FakeAgentClient;
+use App\Agent\FakeJobLogReader;
+use App\Agent\FileJobLogReader;
+use App\Agent\JobLogReader;
 use App\Agent\JobOutcomes;
 use App\Agent\Outcomes\PhpOutcomes;
 use App\Agent\Outcomes\SiteOutcomes;
@@ -29,6 +32,10 @@ class AgentServiceProvider extends ServiceProvider
 
             return $outcomes;
         });
+        // The live job log reads the agent's log files, or the fake's lines.
+        $this->app->bind(JobLogReader::class, fn (): JobLogReader => $this->app->make(AgentClient::class) instanceof FakeAgentClient
+            ? new FakeJobLogReader($this->app->make(AgentClient::class))
+            : new FileJobLogReader(config('zimam.job_logs')));
         // One answer per request or queued job, so a worker never keeps a stale one.
         $this->app->scoped(AgentHealth::class);
     }

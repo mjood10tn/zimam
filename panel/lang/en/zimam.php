@@ -50,6 +50,39 @@ return [
     'jobs' => [
         'busy' => 'Gave up after 15 minutes: another job kept the server or this site busy.',
         'untracked' => 'The panel stopped checking this job, so its result is unknown. Check the server over SSH.',
+        'title' => 'Jobs',
+        'label' => 'job',
+        'empty' => 'No jobs yet.',
+        'fields' => [
+            'command' => 'Command',
+            'subject' => 'Subject',
+            'status' => 'Status',
+            'related' => 'Site',
+            'created_at' => 'Submitted',
+            'started_at' => 'Started',
+            'finished_at' => 'Finished',
+            'agent_job_id' => 'Agent job id',
+            'error' => 'Error',
+        ],
+        'status' => [
+            'waiting' => 'Waiting',
+            'queued' => 'Queued',
+            'running' => 'Running',
+            'succeeded' => 'Succeeded',
+            'failed' => 'Failed',
+            'cancelled' => 'Cancelled',
+        ],
+        'log' => [
+            'heading' => 'Log',
+            'empty' => 'Nothing logged yet.',
+            'live' => 'Updating every 2 seconds.',
+        ],
+        'cancel' => [
+            'label' => 'Cancel job',
+            'heading' => 'Cancel this job?',
+            'description' => 'The agent stops it where it is. What it already changed stays; running the same action again continues from there.',
+            'done' => 'The job was cancelled',
+        ],
     ],
 
     // Headline counts are spelled out up to twelve.

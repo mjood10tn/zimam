@@ -13,4 +13,8 @@ return [
 
     'agent_socket' => env('ZIMAM_AGENT_SOCKET', '/run/zimam/agent.sock'),
 
+    // The agent's job logs, which the panel's user reads through the
+    // zimam-agent group (design §5.1).
+    'job_logs' => env('ZIMAM_JOB_LOGS', '/var/log/zimam/jobs'),
+
 ];

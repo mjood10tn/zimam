@@ -5,6 +5,7 @@ namespace App\Filament\Resources;
 use App\Filament\Resources\SiteResource\Pages\CreateSite;
 use App\Filament\Resources\SiteResource\Pages\ListSites;
 use App\Filament\Resources\SiteResource\Pages\ViewSite;
+use App\Livewire\SiteJobs;
 use App\Models\Domain;
 use App\Models\Site;
 use BackedEnum;
@@ -14,6 +15,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\ToggleButtons;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Livewire;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\Text;
@@ -122,7 +124,9 @@ class SiteResource extends Resource
                         ->visible(fn (Site $record): bool => filled($record->last_error))
                         ->columnSpanFull(),
                 ]),
-                Tab::make(__('zimam.sites.tabs.jobs'))->schema([Text::make(__('zimam.sites.tabs.later'))]),
+                Tab::make(__('zimam.sites.tabs.jobs'))->schema([
+                    Livewire::make(SiteJobs::class, fn (Site $record): array => ['site' => $record])->key('site-jobs'),
+                ]),
                 Tab::make(__('zimam.sites.tabs.security'))->schema([Text::make(__('zimam.sites.tabs.later'))]),
                 Tab::make(__('zimam.sites.tabs.logs'))->schema([Text::make(__('zimam.sites.tabs.later'))]),
             ]),

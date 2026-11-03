@@ -108,6 +108,19 @@ final class FakeAgentClient implements AgentClient
         return $this;
     }
 
+    /**
+     * A job's log lines as far as it has run, "[<time>] <message>" as the
+     * agent writes them; none for a job the fake doesn't know.
+     *
+     * @return list<string>
+     */
+    public function logLines(string $jobId): array
+    {
+        $job = $this->jobs[$jobId] ?? null;
+
+        return $job === null || $job['status'] === 'queued' ? [] : $job['log'];
+    }
+
     /** @return list<array{method: string, command: string, params: array<string, mixed>}> */
     public function calls(): array
     {
