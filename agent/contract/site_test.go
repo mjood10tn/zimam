@@ -119,3 +119,18 @@ func TestSiteSecurityParamsValidate(t *testing.T) {
 		t.Errorf("one valid user: %v", err)
 	}
 }
+
+func TestSecurityCheckParamsValidate(t *testing.T) {
+	for p, ok := range map[SecurityCheckParams]bool{
+		{Scope: "server"}:               true,
+		{Scope: "site", Name: "shop"}:   true,
+		{Scope: "site"}:                 false,
+		{Scope: "server", Name: "shop"}: false,
+		{Scope: "site", Name: "Shop"}:   false,
+		{Scope: "everything"}:           false,
+	} {
+		if err := p.Validate(); (err == nil) != ok {
+			t.Errorf("%+v: Validate = %v", p, err)
+		}
+	}
+}

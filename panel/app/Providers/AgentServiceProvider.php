@@ -12,6 +12,7 @@ use App\Agent\JobLogReader;
 use App\Agent\JobOutcomes;
 use App\Agent\Outcomes\CertificateOutcomes;
 use App\Agent\Outcomes\PhpOutcomes;
+use App\Agent\Outcomes\SecurityOutcomes;
 use App\Agent\Outcomes\SiteOutcomes;
 use App\Agent\SocketAgentClient;
 use App\Agent\UnixSocketTransport;
@@ -30,6 +31,7 @@ class AgentServiceProvider extends ServiceProvider
             $outcomes = new JobOutcomes;
             PhpOutcomes::register($outcomes);
             SiteOutcomes::register($outcomes);
+            SecurityOutcomes::register($outcomes);
             CertificateOutcomes::register($outcomes);
 
             return $outcomes;

@@ -68,6 +68,12 @@ class Site extends Model
         return $this->hasMany(SiteBasicAuthUser::class);
     }
 
+    /** The latest result of each of the site's security checks (§9.7). */
+    public function securityFindings(): HasMany
+    {
+        return $this->hasMany(SecurityFinding::class);
+    }
+
     public function certificate(): HasOne
     {
         return $this->hasOne(Certificate::class);

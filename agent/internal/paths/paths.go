@@ -102,6 +102,11 @@ func (p Paths) ProcMeminfo() string { return p.at("proc/meminfo") }
 func (p Paths) ProcMounts() string  { return p.at("proc/self/mounts") }
 func (p Paths) ProcNetDev() string  { return p.at("proc/net/dev") }
 
+// What firewall_active reads for the listening TCP ports (§9.7).
+
+func (p Paths) ProcNetTCP() string  { return p.at("proc/net/tcp") }
+func (p Paths) ProcNetTCP6() string { return p.at("proc/net/tcp6") }
+
 // EtcGroup lists each group's members: site.provision reads whether www-data
 // is in a site's group yet (§9.2).
 func (p Paths) EtcGroup() string { return p.at("etc/group") }

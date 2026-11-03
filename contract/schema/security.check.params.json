@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "not": {
+        "enum": [
+          "zimam",
+          "panel",
+          "default",
+          "acme"
+        ]
+      },
+      "pattern": "^[a-z][a-z0-9-]{0,22}[a-z0-9]$",
+      "type": "string"
+    },
+    "scope": {
+      "enum": [
+        "server",
+        "site"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "scope"
+  ],
+  "title": "security.check params",
+  "type": "object"
+}

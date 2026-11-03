@@ -51,6 +51,8 @@ var production = map[string]string{
 	"ProcMeminfo":           "/proc/meminfo",
 	"ProcMounts":            "/proc/self/mounts",
 	"ProcNetDev":            "/proc/net/dev",
+	"ProcNetTCP":            "/proc/net/tcp",
+	"ProcNetTCP6":           "/proc/net/tcp6",
 	"PHPFPMBinary":          "/usr/sbin/php-fpm8.4",
 	"LogDir":                "/var/log/zimam",
 	"AuditLog":              "/var/log/zimam/audit.log",

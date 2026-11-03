@@ -13,6 +13,7 @@ use App\Agent\Commands\JobStatus;
 use App\Agent\Commands\PhpDefault;
 use App\Agent\Commands\PhpInstall;
 use App\Agent\Commands\PhpUninstall;
+use App\Agent\Commands\SecurityCheck;
 use App\Agent\Commands\SiteDestroy;
 use App\Agent\Commands\SitePhp;
 use App\Agent\Commands\SiteProvision;
@@ -71,6 +72,7 @@ final class SchemaTest extends TestCase
             new SiteSecurity('shop', forceHttps: true, hstsMaxAge: 31536000, hstsIncludeSubdomains: true, ipAllow: ['192.0.2.0/24'], ipDeny: ['2001:db8::1'], passwordProtection: true, users: [['username' => 'alice', 'password_hash' => '$2y$12$Mda0LhSrcwEX8fAIrkvr/eP5OR7zhBWHVUNmE9n4xm8B76JOYiAI.']]),
             new SiteDestroy('shop'),
             new CertIssue('shop'),
+            new SecurityCheck('shop'),
         ];
 
         return array_combine(
@@ -106,6 +108,11 @@ final class SchemaTest extends TestCase
      * commands() holds one instance per command, so a static site's params,
      * which leave php_version out, are checked here.
      */
+    public function testServerSecurityCheckParamsMatchSchema(): void
+    {
+        $this->assertValid(self::wire((new SecurityCheck)->jsonParams()), file_get_contents($this->schemaPath('security.check.params')), 'server security.check params');
+    }
+
     public function testStaticSiteProvisionParamsMatchSchema(): void
     {
         $static = new SiteProvision('docs', 'docs.example.com', 'static');
@@ -117,7 +124,7 @@ final class SchemaTest extends TestCase
     public function testFakeJobResultsMatchSchemas(): void
     {
         $fake = new FakeAgentClient;
-        foreach ([new PhpInstall('8.4'), new SiteProvision('shop', 'shop.example.com', 'static')] as $command) {
+        foreach ([new PhpInstall('8.4'), new SiteProvision('shop', 'shop.example.com', 'static'), new SecurityCheck, new SecurityCheck('shop')] as $command) {
             $job = $fake->submit($command);
             $final = $fake->follow($job->id, 0, function (): void {});
             $this->assertSame('succeeded', $final->status);

@@ -12,6 +12,7 @@ use App\Agent\Exceptions\AgentJobFailed;
 use App\Agent\Exceptions\AgentNotFound;
 use App\Agent\Exceptions\AgentUnknownCommand;
 use App\Agent\Exceptions\AgentValidationFailed;
+use App\Models\SecurityFinding;
 use App\Models\SiteBasicAuthUser;
 use App\Support\IpEntry;
 use Carbon\CarbonImmutable;
@@ -260,6 +261,7 @@ final class FakeAgentClient implements AgentClient
             'site.provision' => ['name' => $params['name'], 'template_version' => 1],
             'site.php' => ['name' => $params['name'], 'php_version' => $params['php_version']],
             'site.destroy', 'site.security' => ['name' => $params['name']],
+            'security.check' => self::securityFindings($params),
             // Let's Encrypt's certificates last 90 days.
             'cert.issue' => ['expires_at' => self::goTime(CarbonImmutable::now('UTC')->addDays(90))],
             default => [],
@@ -388,6 +390,14 @@ final class FakeAgentClient implements AgentClient
 
             return;
         }
+        if ($command->name() === 'security.check') {
+            $site = $params['scope'] === 'site';
+            if (! in_array($params['scope'], ['server', 'site'], true) || $site !== isset($params['name']) || ($site && ! preg_match(self::SITE_NAME, $params['name']))) {
+                throw new AgentValidationFailed('Invalid parameters', ['scope' => 'must be server, or site with a site name']);
+            }
+
+            return;
+        }
         if (in_array($command->name(), ['site.php', 'site.destroy', 'cert.issue'], true)) {
             $fields = [];
             if (! preg_match(self::SITE_NAME, $params['name']) || in_array($params['name'], self::RESERVED_NAMES, true)) {
@@ -415,6 +425,29 @@ final class FakeAgentClient implements AgentClient
         if ($fields !== []) {
             throw new AgentValidationFailed('Invalid parameters', $fields);
         }
+    }
+
+    /**
+     * security.check's result when every check passes (§9.7).
+     *
+     * @param  array<string, mixed>  $params
+     * @return array<string, mixed>
+     */
+    private static function securityFindings(array $params): array
+    {
+        $checks = ($params['scope'] ?? 'server') === 'site' ? SecurityFinding::SITE_CHECKS : SecurityFinding::SERVER_CHECKS;
+        $result = ['scope' => $params['scope']];
+        if (isset($params['name'])) {
+            $result['name'] = $params['name'];
+        }
+        $result['findings'] = array_map(fn (string $check): array => [
+            'check' => $check,
+            'status' => 'pass',
+            'detail' => 'Fine.',
+            'expires_at' => null,
+        ], $checks);
+
+        return $result;
     }
 
     /** @param array<string, mixed> $params site.security's (§5.4, §9.6) */
@@ -486,6 +519,7 @@ final class FakeAgentClient implements AgentClient
 
         return match (true) {
             $command->name() === 'e2e.sleep' => 'e2e:'.$params['subject'],
+            $command->name() === 'security.check' => isset($params['name']) ? 'site:'.$params['name'] : 'server',
             str_starts_with($command->name(), 'site.') || $command->name() === 'cert.issue' => 'site:'.($params['name'] ?? ''),
             str_starts_with($command->name(), 'php.') && $command->name() !== 'php.default' => 'php:'.($params['version'] ?? ''),
             default => 'server',

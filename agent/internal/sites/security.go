@@ -253,3 +253,21 @@ func groupID(path, group string) (int, error) {
 	}
 	return 0, fmt.Errorf("%s has no group %s", path, group)
 }
+
+// ExpectedFiles is what a site's vhost, security.conf and, for a PHP site,
+// pool render to from its state file, by path: config_matches_template
+// compares them with the files on disk (§9.7).
+func ExpectedFiles(d sysexec.Deps, st State) (map[string][]byte, error) {
+	secConf, vhost, pool, err := siteFiles(d, st)
+	if err != nil {
+		return nil, err
+	}
+	files := map[string][]byte{
+		d.Paths.NginxSiteAvailable(st.Name): vhost,
+		d.Paths.SiteSecurityConf(st.Name):   secConf,
+	}
+	if pool != nil {
+		files[d.Paths.PHPPool(st.PHPVersion, st.Name)] = pool
+	}
+	return files, nil
+}

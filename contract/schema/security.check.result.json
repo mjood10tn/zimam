@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "findings": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "check": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "pass",
+              "warn",
+              "fail",
+              "inconclusive"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "check",
+          "detail",
+          "expires_at",
+          "status"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "name": {
+      "not": {
+        "enum": [
+          "zimam",
+          "panel",
+          "default",
+          "acme"
+        ]
+      },
+      "pattern": "^[a-z][a-z0-9-]{0,22}[a-z0-9]$",
+      "type": "string"
+    },
+    "scope": {
+      "enum": [
+        "server",
+        "site"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "findings",
+    "scope"
+  ],
+  "title": "security.check result",
+  "type": "object"
+}
