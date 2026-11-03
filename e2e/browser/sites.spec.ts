@@ -31,7 +31,8 @@ async function create(page: Page, name: string, php: string | null): Promise<str
 async function issueCertificate(page: Page, url: string): Promise<void> {
   await page.goto(url);
   await page.getByRole('button', { name: 'Issue certificate' }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Issue certificate' }).click();
+  // A confirmation is an alertdialog.
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Issue certificate' }).click();
   await untilText(page, /Certificate\s+Issued, expires \d{1,2} [A-Z][a-z]{2} \d{4}/, /Certificate error/, 5 * minutes);
 }
 

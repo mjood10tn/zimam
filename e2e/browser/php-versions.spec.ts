@@ -50,7 +50,8 @@ test('done-when 6: the default changes what new sites start with and what php ru
   await signInAsAdmin(page);
   await page.goto(`${panel}/admin/php-versions`);
   await row(page, '8.4').getByRole('button', { name: 'Make default' }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Confirm' }).click();
+  // A confirmation is an alertdialog.
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Confirm' }).click();
   await expect(page.getByText('Making PHP 8.4 the default')).toBeVisible();
 
   await untilRow(page, '8.4', /Default/, 5 * 60_000);
