@@ -4,9 +4,12 @@ namespace App\Filament\Resources\SiteResource\Pages;
 
 use App\Actions\SubmitAgentCommand;
 use App\Agent\AgentHealth;
+use App\Agent\Commands\SiteDestroy;
 use App\Agent\Commands\SitePhp;
 use App\Agent\Exceptions\AgentException;
+use App\Agent\Exceptions\AgentNotFound;
 use App\Agent\ServerStatus;
+use App\Filament\Actions\ConfirmsPassword;
 use App\Filament\Resources\SiteResource;
 use App\Models\Site;
 use Filament\Actions\Action;
@@ -15,7 +18,7 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Support\Exceptions\Halt;
 
-/** A site's page: Overview, Jobs, Security and Logs tabs; Switch PHP version for an active PHP site (§9.5); Retry and Delete for a failed site (§9.2). */
+/** A site's page: Overview, Jobs, Security and Logs tabs; Switch PHP version for an active PHP site (§9.5); Retry for a failed site (§9.2); Delete for an active or failed one (§9.8). */
 class ViewSite extends ViewRecord
 {
     protected static string $resource = SiteResource::class;
@@ -39,7 +42,7 @@ class ViewSite extends ViewRecord
                             ->in(fn (): array => array_keys($this->switchPhpOptions())),
                     ])
                     ->action(fn (Site $record, array $data) => $this->switchPhp($record, $data['php_version'])),
-                fn (Site $record): ?string => $record->hasUnfinishedJob() ? __('zimam.sites.switch.busy') : null,
+                fn (Site $record): ?string => $record->hasUnfinishedJob() ? __('zimam.sites.busy') : null,
             ),
             AgentHealth::guard(
                 Action::make('retry')
@@ -47,14 +50,51 @@ class ViewSite extends ViewRecord
                     ->visible(fn (Site $record): bool => $record->status === Site::FAILED)
                     ->action(fn (Site $record) => $this->retry($record)),
             ),
-            // site.destroy arrives with Task 29.
-            Action::make('delete')
-                ->label(__('zimam.sites.delete.label'))
-                ->color('danger')
-                ->visible(fn (Site $record): bool => $record->status === Site::FAILED)
-                ->disabled()
-                ->tooltip(__('zimam.sites.delete.later')),
+            AgentHealth::guard(
+                ConfirmsPassword::apply(
+                    Action::make('delete')
+                        ->label(__('zimam.sites.delete.label'))
+                        ->color('danger')
+                        ->modalHeading(fn (Site $record): string => __('zimam.sites.delete.heading', ['name' => $record->name]))
+                        ->modalDescription(__('zimam.sites.delete.description'))
+                        ->modalSubmitActionLabel(__('zimam.sites.delete.label'))
+                        ->visible(fn (Site $record): bool => in_array($record->status, [Site::ACTIVE, Site::FAILED], true))
+                        ->action(fn (Site $record) => $this->delete($record)),
+                ),
+                fn (Site $record): ?string => $record->hasUnfinishedJob() ? __('zimam.sites.busy') : null,
+            ),
         ];
+    }
+
+    /**
+     * Submits site.destroy and marks the site deleting; its outcome removes
+     * the rows. A site with nothing left on the server (not_found) loses its
+     * rows at once. Any other refusal puts the status back.
+     */
+    private function delete(Site $site): void
+    {
+        $status = $site->status;
+        $site->update(['status' => Site::DELETING]);
+        try {
+            app(SubmitAgentCommand::class)->run(new SiteDestroy($site->name), $site);
+        } catch (AgentNotFound) {
+            $site->delete();
+            Notification::make()->title(__('zimam.sites.delete.done', ['name' => $site->name]))->success()->send();
+            $this->redirect(SiteResource::getUrl('index'));
+
+            return;
+        } catch (Halt $e) {
+            $site->update(['status' => $status]);
+
+            throw $e;
+        } catch (AgentException $e) {
+            $site->update(['status' => $status]);
+            Notification::make()->title($e->getMessage())->danger()->send();
+
+            return;
+        }
+        Notification::make()->title(__('zimam.sites.delete.submitted', ['name' => $site->name]))->success()->send();
+        $this->redirect(SiteResource::getUrl('index'));
     }
 
     /**

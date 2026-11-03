@@ -223,6 +223,7 @@ final class FakeAgentClient implements AgentClient
             'php.install', 'php.uninstall', 'php.default' => ['version' => $params['version']],
             'site.provision' => ['name' => $params['name'], 'template_version' => 1],
             'site.php' => ['name' => $params['name'], 'php_version' => $params['php_version']],
+            'site.destroy' => ['name' => $params['name']],
             default => [],
         };
     }
@@ -241,13 +242,17 @@ final class FakeAgentClient implements AgentClient
             $moved = $this->pools[$params['name']] ?? null;
             $this->pools[$params['name']] = $params['php_version'];
         }
+        if ($command === 'site.destroy') {
+            $moved = $this->pools[$params['name']] ?? null;
+            unset($this->pools[$params['name']]);
+        }
         match ($command) {
             'php.install' => $php['installed'][] = ['version' => $params['version'], 'fpm_active' => false, 'in_use' => false],
             'php.uninstall' => $php['installed'] = array_values(array_filter($php['installed'], fn (array $v): bool => $v['version'] !== $params['version'])),
             'php.default' => $php['default'] = $params['version'],
             // The new version runs the site's pool; the one it left is in use
             // while the panel or another site still has a pool on it.
-            'site.provision', 'site.php' => $php['installed'] = array_map(
+            'site.provision', 'site.php', 'site.destroy' => $php['installed'] = array_map(
                 fn (array $v): array => match ($v['version']) {
                     $params['php_version'] ?? null => ['version' => $v['version'], 'fpm_active' => true, 'in_use' => true],
                     $moved => ['version' => $v['version'], 'fpm_active' => $v['version'] === $php['panel'] || in_array($moved, $this->pools, true), 'in_use' => $v['version'] === $php['panel'] || in_array($moved, $this->pools, true)],
@@ -337,12 +342,12 @@ final class FakeAgentClient implements AgentClient
 
             return;
         }
-        if ($command->name() === 'site.php') {
+        if (in_array($command->name(), ['site.php', 'site.destroy', 'cert.issue'], true)) {
             $fields = [];
             if (! preg_match(self::SITE_NAME, $params['name']) || in_array($params['name'], self::RESERVED_NAMES, true)) {
                 $fields['name'] = 'must be 2–24 lowercase letters, digits or hyphens, start with a letter and not end with a hyphen';
             }
-            if (! in_array($params['php_version'], array_column($this->systemStatus['php']['available'], 'version'), true)) {
+            if ($command->name() === 'site.php' && ! in_array($params['php_version'], array_column($this->systemStatus['php']['available'], 'version'), true)) {
                 $fields['php_version'] = 'is not a supported PHP version';
             }
             if ($fields !== []) {

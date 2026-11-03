@@ -122,15 +122,14 @@ final class SiteLifecycleTest extends TestCase
     {
         Livewire::test(ViewSite::class, ['record' => $this->site(Site::ACTIVE)->getRouteKey()])
             ->assertActionHidden('retry')
-            ->assertActionHidden('delete');
+            ->assertActionVisible('delete');
 
         $failed = $this->site(Site::FAILED, 'blog');
         Livewire::test(ViewSite::class, ['record' => $failed->getRouteKey()])
             ->assertActionVisible('retry')
             ->assertActionEnabled('retry')
             ->assertActionVisible('delete')
-            // Deleting arrives with site.destroy (Task 29).
-            ->assertActionDisabled('delete');
+            ->assertActionEnabled('delete');
     }
 
     public function testRetrySubmitsProvisionAgain(): void

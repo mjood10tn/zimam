@@ -206,14 +206,18 @@ return [
             'description' => 'The new version starts serving before the old one stops, so the site stays up. Extensions and php.ini settings are per version.',
             'submit' => 'Switch',
             'none' => 'No other supported PHP version is installed. Install one under PHP versions.',
-            'busy' => 'Wait for this site’s current job to finish.',
             'submitted' => 'Switching :name to PHP :version',
             'cancelled' => 'The PHP switch was cancelled before it finished. Switch again to finish it.',
         ],
         'delete' => [
             'label' => 'Delete',
-            'later' => 'Deleting sites isn’t available in this version yet.',
+            'heading' => 'Delete :name',
+            'description' => 'This removes the site’s files, logs, certificate, PHP pool and user from the server. It can’t be undone.',
+            'submitted' => 'Deleting :name',
+            'done' => ':name is deleted',
+            'cancelled' => 'Deleting was cancelled before it finished. Delete again to finish it.',
         ],
+        'busy' => 'Wait for this site’s current job to finish.',
     ],
 
     'php' => [

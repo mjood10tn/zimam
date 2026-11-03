@@ -100,3 +100,31 @@ func exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
+
+// DisableSite takes a site out of sites-enabled, tests Nginx and reloads
+// it, under the reload lock. If the test fails, the link comes back. The
+// vhost it pointed at isn't included any more, so removing it needs no
+// test; that is the caller's. A link that is already gone changes nothing.
+func DisableSite(ctx context.Context, d sysexec.Deps, enabled Link) error {
+	return configtx.WithReloadLock(ctx, d.Paths, func() error {
+		target, err := os.Readlink(enabled.Path)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			return nil
+		case err != nil:
+			return fmt.Errorf("%s exists and isn't a symlink", enabled.Path)
+		case target != enabled.Target:
+			return fmt.Errorf("%s points at %s, not %s", enabled.Path, target, enabled.Target)
+		}
+		if err := os.Remove(enabled.Path); err != nil {
+			return err
+		}
+		if err := Test(ctx, d); err != nil {
+			if rerr := os.Symlink(target, enabled.Path); rerr != nil {
+				err = fmt.Errorf("%w; restoring %s: %v", err, enabled.Path, rerr)
+			}
+			return err
+		}
+		return reload(ctx, d)
+	})
+}

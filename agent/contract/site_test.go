@@ -67,3 +67,15 @@ func TestSitePHPParamsCheckEveryField(t *testing.T) {
 		t.Errorf("Validate = %v, want php_version required", err)
 	}
 }
+
+func TestSiteNameParams(t *testing.T) {
+	if err := (&SiteNameParams{Name: "shop"}).Validate(); err != nil {
+		t.Errorf("shop: %v", err)
+	}
+	for _, name := range []SiteName{"", "Shop", "../shop", "zimam", "shop.example"} {
+		var ae *AgentError
+		if err := (&SiteNameParams{Name: name}).Validate(); !errors.As(err, &ae) || ae.Fields["name"] == "" {
+			t.Errorf("%q: Validate = %v, want name refused", name, err)
+		}
+	}
+}

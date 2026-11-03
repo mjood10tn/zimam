@@ -32,13 +32,15 @@ const (
 	systemctl = "/usr/bin/systemctl"
 )
 
-// Helper is what provisioning needs of the site-user helper: root never
-// opens a path inside a site's home (§5.6). *helper.Client is the real one.
+// Helper is what provisioning and destroying need of the site-user helper:
+// root never opens a path inside a site's home (§5.6). *helper.Client is
+// the real one.
 type Helper interface {
 	Mkdir(ctx context.Context, a helper.Account, name string, mode fs.FileMode) error
 	Write(ctx context.Context, a helper.Account, name string, mode fs.FileMode, content io.Reader) error
 	Stat(ctx context.Context, a helper.Account, name string) (helper.FileInfo, error)
 	SymlinkSwap(ctx context.Context, a helper.Account, link, target string) error
+	RemoveTree(ctx context.Context, a helper.Account, name string) error
 }
 
 // Lookup finds the account the helper runs as; helper.LookupAccount is the

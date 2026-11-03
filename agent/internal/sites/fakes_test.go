@@ -105,6 +105,19 @@ func (h *fakeHelper) SymlinkSwap(_ context.Context, a helper.Account, link, targ
 	return nil
 }
 
+// RemoveTree deletes name and everything under it; "." empties the home.
+func (h *fakeHelper) RemoveTree(_ context.Context, a helper.Account, name string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.record(a, "remove-tree", name)
+	for n := range h.nodes {
+		if n != "." && (name == "." || n == name || strings.HasPrefix(n, name+"/")) {
+			delete(h.nodes, n)
+		}
+	}
+	return nil
+}
+
 // changes are the operations that changed the home, without the stats.
 func (h *fakeHelper) changes() []string {
 	h.mu.Lock()
@@ -118,8 +131,9 @@ func (h *fakeHelper) changes() []string {
 	return out
 }
 
-// hookRunner is a FakeRunner whose useradd and usermod change what the
-// account lookup and /etc/group report, as the real tools would.
+// hookRunner is a FakeRunner whose useradd, usermod, userdel and groupdel
+// change what the account lookup and /etc/group report, as the real tools
+// would, and whose pgrep finds the processes env.procs says are left.
 type hookRunner struct {
 	*sysexec.FakeRunner
 	env *env
@@ -131,6 +145,11 @@ func (r hookRunner) Run(ctx context.Context, c sysexec.Cmd) (sysexec.Result, err
 		delete(r.env.failOnce, cmd)
 		r.FakeRunner.Run(ctx, c) // recorded like any call
 		return sysexec.Result{ExitCode: 1, Stderr: []byte(stderr)}, &sysexec.ExitError{Path: c.Path, Code: 1, Stderr: []byte(stderr)}
+	}
+	if c.Path == "/usr/bin/pgrep" && r.env.procs != 0 {
+		r.env.procs--
+		r.FakeRunner.Run(ctx, c) // recorded like any call
+		return sysexec.Result{Stdout: []byte("4242\n")}, nil
 	}
 	res, err := r.FakeRunner.Run(ctx, c)
 	if err != nil {
@@ -145,6 +164,22 @@ func (r hookRunner) Run(ctx context.Context, c sysexec.Cmd) (sysexec.Result, err
 		// FPM makes each pool's socket once it has started or reloaded.
 		if len(c.Args) >= 2 && (c.Args[0] == "reload" || c.Args[0] == "enable") && !r.env.noSockets {
 			r.env.makeSockets(strings.TrimSuffix(strings.TrimPrefix(c.Args[len(c.Args)-1], "php"), "-fpm"))
+		}
+	case "/usr/sbin/userdel":
+		delete(r.env.users, c.Args[0])
+	case "/usr/sbin/groupdel":
+		b, err := os.ReadFile(r.env.p.EtcGroup())
+		if err != nil {
+			return res, err
+		}
+		var kept []string
+		for line := range strings.Lines(string(b)) {
+			if !strings.HasPrefix(line, c.Args[0]+":") {
+				kept = append(kept, line)
+			}
+		}
+		if err := os.WriteFile(r.env.p.EtcGroup(), []byte(strings.Join(kept, "")), 0o644); err != nil {
+			return res, err
 		}
 	case "/usr/sbin/usermod":
 		group, member := c.Args[1], c.Args[2]
@@ -187,6 +222,9 @@ type env struct {
 	failOnce map[string]string
 	// noSockets keeps FPM from making its pools' sockets.
 	noSockets bool
+	// procs is how many more times pgrep finds the site user's processes;
+	// -1 is for ever.
+	procs int
 }
 
 var testNow = time.Date(2026, 11, 3, 9, 0, 0, 0, time.UTC)
@@ -215,6 +253,11 @@ func newEnv(t *testing.T) *env {
 		{Path: "/usr/sbin/nginx", Args: []string{"-t"}},
 		{Path: "/usr/bin/systemctl", Args: []string{"reload-or-restart", "nginx"}},
 		{Path: "/usr/sbin/logrotate", Args: []string{"-d", "--state", e.p.LogrotateState(), e.p.LogrotateConf()}},
+		{Path: "/usr/bin/pkill", Args: []string{"-KILL", "-u", "s_shop"}, Result: sysexec.Result{ExitCode: 1}}, // nothing to kill
+		{Path: "/usr/bin/pgrep", Args: []string{"-u", "s_shop"}, Result: sysexec.Result{ExitCode: 1}},          // nothing left
+		{Path: "/usr/sbin/userdel", Args: []string{"s_shop"}},
+		{Path: "/usr/sbin/groupdel", Args: []string{"s_shop"}},
+		{Path: "/usr/bin/certbot", Args: []string{"delete", "--cert-name", "zimam-shop", "--non-interactive"}},
 	} {
 		e.run.Add(s)
 	}

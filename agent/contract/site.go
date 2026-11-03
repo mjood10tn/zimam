@@ -22,6 +22,14 @@ func init() {
 		Result:  SitePHPResult{},
 		Subject: func(p Params) string { return "site:" + string(p.(*SitePHPParams).Name) },
 	})
+	Register(Descriptor{
+		Name:    "site.destroy",
+		Kind:    KindJob,
+		Audited: true,
+		Params:  func() Params { return &SiteNameParams{} },
+		Result:  SiteNameResult{},
+		Subject: siteNameSubject,
+	})
 }
 
 // SiteType is what a site serves (§9.2).
@@ -96,3 +104,22 @@ type SitePHPResult struct {
 	Name       SiteName   `json:"name"`
 	PHPVersion PHPVersion `json:"php_version"`
 }
+
+// SiteNameParams is the params of site.destroy and cert.issue (§5.3): the
+// site alone.
+type SiteNameParams struct {
+	Name SiteName `json:"name"`
+}
+
+func (p *SiteNameParams) Validate() error {
+	f := FieldErrors{}
+	f.Check("name", p.Name)
+	return f.Err()
+}
+
+// SiteNameResult is what site.destroy answers: the site it removed.
+type SiteNameResult struct {
+	Name SiteName `json:"name"`
+}
+
+func siteNameSubject(p Params) string { return "site:" + string(p.(*SiteNameParams).Name) }

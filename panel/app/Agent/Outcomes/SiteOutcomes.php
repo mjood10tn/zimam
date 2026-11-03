@@ -7,7 +7,7 @@ use App\Agent\JobOutcomes;
 use App\Models\AgentJob;
 use App\Models\Site;
 
-/** What site.provision's and site.php's outcomes change in sites (§7.4, §9.2, §9.5). */
+/** What site.provision's, site.php's and site.destroy's outcomes change in sites (§7.4, §9.2, §9.5, §9.8). */
 final class SiteOutcomes
 {
     public static function register(JobOutcomes $outcomes): void
@@ -45,6 +45,24 @@ final class SiteOutcomes
             }
             $site->update([
                 'last_error' => $status->status === AgentJob::CANCELLED ? __('zimam.sites.switch.cancelled') : $status->message,
+            ]);
+        });
+        // The site's rows go once the server has nothing of it; domains and
+        // security settings follow through their cascades. A destroy that
+        // didn't finish leaves the site failed, so Delete runs it again.
+        $outcomes->register('site.destroy', function (AgentJob $job, AgentJobStatus $status): void {
+            $site = $job->related;
+            if (! $site instanceof Site) {
+                return;
+            }
+            if ($status->status === AgentJob::SUCCEEDED) {
+                $site->delete();
+
+                return;
+            }
+            $site->update([
+                'status' => Site::FAILED,
+                'last_error' => $status->status === AgentJob::CANCELLED ? __('zimam.sites.delete.cancelled') : $status->message,
             ]);
         });
     }

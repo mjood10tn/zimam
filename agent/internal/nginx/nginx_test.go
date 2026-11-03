@@ -189,3 +189,51 @@ func TestReloadTakesTheLock(t *testing.T) {
 		t.Errorf("ran %q", got)
 	}
 }
+
+// DisableSite takes the site out of sites-enabled, tests and reloads; a
+// vhost Nginx no longer includes needs no test of its own.
+func TestDisableSiteRemovesLinkThenReloads(t *testing.T) {
+	d, run := newDeps(t, nginxTest, reloadNginx)
+	changes, link := panelSite(d, "server {}\n")
+	if err := os.WriteFile(link.Target, changes[0].Content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(link.Target, link.Path); err != nil {
+		t.Fatal(err)
+	}
+	if err := DisableSite(context.Background(), d, link); err != nil {
+		t.Fatalf("DisableSite: %v", err)
+	}
+	if _, err := os.Lstat(link.Path); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the link is still there: %v", err)
+	}
+	if got, want := commands(run), []string{line(nginxTest), line(reloadNginx)}; !slices.Equal(got, want) {
+		t.Errorf("ran %q, want %q", got, want)
+	}
+	// Run again with nothing left, it changes nothing.
+	if err := DisableSite(context.Background(), d, link); err != nil || len(run.Calls()) != 2 {
+		t.Errorf("a second DisableSite = %v, ran %q", err, commands(run))
+	}
+}
+
+// When Nginx fails its test without the site, the link comes back, so
+// Nginx stays as it was.
+func TestDisableSiteRestoresLinkOnFailure(t *testing.T) {
+	failing := nginxTest
+	failing.Result = sysexec.Result{ExitCode: 1, Stderr: []byte("nginx: [emerg] host not found")}
+	d, _ := newDeps(t, failing)
+	_, link := panelSite(d, "")
+	if err := os.WriteFile(link.Target, []byte("server {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(link.Target, link.Path); err != nil {
+		t.Fatal(err)
+	}
+	err := DisableSite(context.Background(), d, link)
+	if err == nil || !strings.Contains(err.Error(), "host not found") {
+		t.Fatalf("DisableSite = %v, want nginx -t's output", err)
+	}
+	if target, err := os.Readlink(link.Path); err != nil || target != link.Target {
+		t.Errorf("the link wasn't restored: %q, %v", target, err)
+	}
+}
