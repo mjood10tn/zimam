@@ -4,6 +4,7 @@ namespace App\Filament\Widgets;
 
 use App\Agent\MetricsReading;
 use Filament\Widgets\Widget;
+use Illuminate\Support\Facades\Lang;
 
 /**
  * The monitored services' states (§7.5), read every 5 seconds from the
@@ -28,7 +29,7 @@ class ServiceStates extends Widget
                 'unit' => $service['unit'],
                 'active' => $service['active_state'] === 'active',
                 'failed' => $service['active_state'] === 'failed',
-                'state' => __()->has("zimam.monitoring.services.states.{$service['active_state']}")
+                'state' => Lang::has("zimam.monitoring.services.states.{$service['active_state']}")
                     ? __("zimam.monitoring.services.states.{$service['active_state']}")
                     : $service['active_state'],
                 'file_state' => $service['unit_file_state'],
