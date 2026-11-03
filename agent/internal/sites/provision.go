@@ -316,8 +316,8 @@ func ensurePool(ctx context.Context, d sysexec.Deps, name contract.SiteName, v c
 	if err != nil {
 		return err
 	}
-	path := d.Paths.PHPPool(v, name)
-	if fileIs(path, pool) && unitActive(ctx, d, "php"+string(v)+"-fpm") {
+	path, sock := d.Paths.PHPPool(v, name), d.Paths.PHPSocket(name, v)
+	if fileIs(path, pool) && exists(sock) && unitActive(ctx, d, "php"+string(v)+"-fpm") {
 		return nil
 	}
 	d.Logf("Writing %s's PHP %s pool, then running php-fpm%s -t", name, v, v)
@@ -329,7 +329,30 @@ func ensurePool(ctx context.Context, d sysexec.Deps, name contract.SiteName, v c
 	if err != nil {
 		return err
 	}
-	return php.ApplyFPM(ctx, d, v)
+	if err := php.ApplyFPM(ctx, d, v); err != nil {
+		return err
+	}
+	return waitForSocket(ctx, sock)
+}
+
+// socketWait is how long FPM gets to make a new pool's socket. A reload
+// returns before FPM has started again, which takes seconds on a small
+// server. A variable, so tests can shorten it.
+var socketWait = 30 * time.Second
+
+// waitForSocket waits for FPM to make a pool's socket (§9.5), so Nginx
+// never points at a socket that isn't there yet.
+func waitForSocket(ctx context.Context, sock string) error {
+	ctx, cancel := context.WithTimeout(ctx, socketWait)
+	defer cancel()
+	for !exists(sock) {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("PHP-FPM didn't create %s within %s; its log says why", sock, socketWait)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return nil
 }
 
 func checkPHPInstalled(d sysexec.Deps, v contract.PHPVersion) error {

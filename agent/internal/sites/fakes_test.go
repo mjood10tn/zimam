@@ -141,6 +141,11 @@ func (r hookRunner) Run(ctx context.Context, c sysexec.Cmd) (sysexec.Result, err
 		name := c.Args[len(c.Args)-1]
 		r.env.users[name] = true
 		r.env.appendGroup(fmt.Sprintf("%s:x:%d:\n", name, os.Getgid()))
+	case "/usr/bin/systemctl":
+		// FPM makes each pool's socket once it has started or reloaded.
+		if len(c.Args) >= 2 && (c.Args[0] == "reload" || c.Args[0] == "enable") && !r.env.noSockets {
+			r.env.makeSockets(strings.TrimSuffix(strings.TrimPrefix(c.Args[len(c.Args)-1], "php"), "-fpm"))
+		}
 	case "/usr/sbin/usermod":
 		group, member := c.Args[1], c.Args[2]
 		b, err := os.ReadFile(r.env.p.EtcGroup())
@@ -180,6 +185,8 @@ type env struct {
 	// failOnce makes the next run of a command, "path args...", fail with
 	// this stderr.
 	failOnce map[string]string
+	// noSockets keeps FPM from making its pools' sockets.
+	noSockets bool
 }
 
 var testNow = time.Date(2026, 11, 3, 9, 0, 0, 0, time.UTC)
@@ -276,5 +283,22 @@ func (e *env) fpmActive(v string, answers ...bool) {
 			s.Result.ExitCode = 3
 		}
 		e.run.Add(s)
+	}
+}
+
+// makeSockets creates the socket of every Zimam site pool on v, as FPM does.
+func (e *env) makeSockets(v string) {
+	entries, err := os.ReadDir(e.p.PHPPoolDir(contract.PHPVersion(v)))
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	for _, de := range entries {
+		name, ok := strings.CutSuffix(strings.TrimPrefix(de.Name(), "zimam-"), ".conf")
+		if !ok || !strings.HasPrefix(de.Name(), "zimam-") {
+			continue
+		}
+		sock := e.p.PHPSocket(contract.SiteName(name), contract.PHPVersion(v))
+		mkdir(e.t, filepath.Dir(sock))
+		writeFile(e.t, sock, "")
 	}
 }

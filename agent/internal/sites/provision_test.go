@@ -309,3 +309,21 @@ func checkMode(t *testing.T, path string, want os.FileMode) {
 		t.Errorf("%s has mode %v, want %v", path, fi.Mode(), want)
 	}
 }
+
+// FPM reloads in the background, so the site isn't served until its pool's
+// socket appears (§9.5): provisioning waits for it before Nginx points at
+// it, and fails if it never comes.
+func TestProvisionWaitsForPoolSocket(t *testing.T) {
+	defer func(w time.Duration) { socketWait = w }(socketWait)
+	socketWait = 300 * time.Millisecond
+	e := newEnv(t)
+	e.noSockets = true
+	e.fpmActive("8.4", false)
+	_, err := e.provision(php84)
+	if err == nil || !strings.Contains(err.Error(), "zimam-shop-8.4.sock") {
+		t.Fatalf("Provision = %v, want the missing socket named", err)
+	}
+	if exists(e.p.NginxSiteAvailable("shop")) {
+		t.Error("the vhost was written before the pool's socket existed")
+	}
+}
