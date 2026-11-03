@@ -13,13 +13,13 @@ const minutes = 60_000;
 // returns its page's URL.
 async function create(page: Page, name: string, php: string | null): Promise<string> {
   await page.goto(`${panel}/admin/sites/create`);
-  await page.getByLabel(/^Name/).fill(name);
-  await page.getByLabel(/^Domain/).fill(`${name}.zimam.test`);
+  await page.getByRole('textbox', { name: /^Name/ }).fill(name);
+  await page.getByRole('textbox', { name: /^Domain/ }).fill(`${name}.zimam.test`);
   if (php === null) {
     await page.locator('label[for="form.type-static"]').click();
   } else {
     await page.locator('label[for="form.type-php"]').click();
-    await page.getByLabel('PHP version').selectOption(php);
+    await page.getByRole('combobox', { name: /^PHP version/ }).selectOption(php);
   }
   await page.getByRole('button', { name: 'Create', exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/sites\/\d+$/);
@@ -39,7 +39,7 @@ async function switchTo(page: Page, url: string, version: string): Promise<void>
   await page.goto(url);
   await page.getByRole('button', { name: 'Switch PHP version' }).click();
   const dialog = page.getByRole('dialog');
-  await dialog.getByLabel('PHP version').selectOption(version);
+  await dialog.getByRole('combobox', { name: /^PHP version/ }).selectOption(version);
   await dialog.getByRole('button', { name: 'Switch', exact: true }).click();
   await expect(page.getByText(`Switching php84 to PHP ${version}`)).toBeVisible();
   await untilText(page, new RegExp(`PHP version\\s+${version.replace('.', '\\.')}\\b`), /Last error/, 5 * minutes);

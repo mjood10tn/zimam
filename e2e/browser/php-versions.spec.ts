@@ -57,5 +57,5 @@ test('done-when 6: the default changes what new sites start with and what php ru
   scenario('m2-default.sh');
 
   await page.goto(`${panel}/admin/sites/create`);
-  await expect(page.getByLabel('PHP version')).toHaveValue('8.4');
+  await expect(page.getByRole('combobox', { name: /^PHP version/ })).toHaveValue('8.4');
 });
