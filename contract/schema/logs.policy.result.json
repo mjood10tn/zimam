@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "audit_retention_days": {
+      "maximum": 3650,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "retention_days": {
+      "maximum": 365,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "site_cap_bytes": {
+      "maximum": 107374182400,
+      "minimum": 1073741824,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "audit_retention_days",
+    "retention_days",
+    "site_cap_bytes"
+  ],
+  "title": "logs.policy result",
+  "type": "object"
+}

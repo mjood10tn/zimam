@@ -34,7 +34,7 @@ var designCommands = []struct {
 	{"security.check", KindJob, "server or site:<name>", true, true},
 	{"logs.list", KindRead, "", false, true},
 	{"logs.read", KindRead, "", false, true},
-	{"logs.policy", KindJob, "server", true, false},
+	{"logs.policy", KindJob, "server", true, true},
 	{"job.status", KindRead, "", false, true},
 	{"job.follow", KindRead, "", false, true},
 	{"job.cancel", KindDirect, "", true, true},

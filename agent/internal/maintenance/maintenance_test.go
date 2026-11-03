@@ -121,7 +121,7 @@ func (e *env) serve(keyring []byte) {
 }
 
 func (e *env) maintain() error {
-	return Run(context.Background(), e.d, e.jobs, audit.Writer{Paths: e.d.Paths})
+	return Run(context.Background(), e.d, e.jobs, Homes{}, audit.Writer{Paths: e.d.Paths})
 }
 
 // commandLines is each command run, as one line.
@@ -504,7 +504,7 @@ func TestMaintenanceAuditOnlyOnChange(t *testing.T) {
 		if err := e.maintain(); err != nil {
 			t.Fatalf("Run: %v", err)
 		}
-		checkEntry(t, e, "ok", map[string]any{"reconciled_jobs": 1.0, "keyring_refreshed": false})
+		checkEntry(t, e, "ok", map[string]any{"reconciled_jobs": 1.0, "keyring_refreshed": false, "pruned_jobs": 0.0})
 	})
 	t.Run("keyring changed", func(t *testing.T) {
 		e := newEnv(t)
@@ -515,7 +515,7 @@ func TestMaintenanceAuditOnlyOnChange(t *testing.T) {
 		if err := e.maintain(); err != nil {
 			t.Fatalf("Run: %v", err)
 		}
-		checkEntry(t, e, "ok", map[string]any{"reconciled_jobs": 0.0, "keyring_refreshed": true})
+		checkEntry(t, e, "ok", map[string]any{"reconciled_jobs": 0.0, "keyring_refreshed": true, "pruned_jobs": 0.0})
 	})
 	t.Run("a change and a failed step", func(t *testing.T) {
 		e := newEnv(t, logrotateRun(1))
@@ -523,7 +523,7 @@ func TestMaintenanceAuditOnlyOnChange(t *testing.T) {
 		if err := e.maintain(); err == nil {
 			t.Fatal("Run succeeded with logrotate failing")
 		}
-		checkEntry(t, e, "error:internal", map[string]any{"reconciled_jobs": 1.0, "keyring_refreshed": false})
+		checkEntry(t, e, "error:internal", map[string]any{"reconciled_jobs": 1.0, "keyring_refreshed": false, "pruned_jobs": 0.0})
 	})
 }
 

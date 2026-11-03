@@ -486,6 +486,29 @@ return [
         ],
     ],
 
+    'settings' => [
+        'title' => 'Settings',
+        'save' => 'Save settings',
+        'logs' => 'Logs',
+        'access' => 'Panel access',
+        'days' => 'days',
+        'log_retention_days' => 'Keep logs for',
+        'audit_retention_days' => 'Keep the audit log for',
+        'site_log_cap' => 'Logs per site, at most',
+        'ip_allowlist' => 'Allow the panel only from these addresses',
+        'help' => [
+            'log_retention_days' => 'Sites’ logs, the journal, the panel’s log and job logs: 1 to 365 days.',
+            'audit_retention_days' => 'The audit log and the panel’s action history: 1 to 3650 days.',
+            'site_log_cap' => 'When a site’s logs and archives pass this, the oldest archives are deleted: 1 to 100 GiB.',
+            'ip_allowlist' => 'One address or CIDR range per line. Empty allows every address; two-factor sign-in still applies.',
+        ],
+        'confirm_lockout' => 'I understand this list leaves out the address I am using now. To get back in, I will run :command over SSH.',
+        'lockout' => 'Your address, :ip, isn’t in this list, so saving it locks you out. If that is what you want, confirm below; to undo it, run :command over SSH.',
+        'allowlist_saved' => 'The panel IP allowlist is saved',
+        'policy_submitted' => 'Applying the log settings',
+        'policy_pending' => 'Wait for the log settings already being applied.',
+    ],
+
     'php' => [
         'title' => 'PHP versions',
         'empty' => 'No PHP versions reported by the agent yet.',

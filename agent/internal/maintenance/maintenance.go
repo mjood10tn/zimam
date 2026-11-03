@@ -44,7 +44,9 @@ const keyringRefreshEvery = 7 * 24 * time.Hour
 type changes struct {
 	RestoredConfigs  []string `json:"restored_configs,omitempty"` // undone after their process died
 	ReconciledJobs   int      `json:"reconciled_jobs"`
-	KeyringRefreshed bool     `json:"keyring_refreshed"` // the repository's files changed
+	KeyringRefreshed bool     `json:"keyring_refreshed"`          // the repository's files changed
+	DeletedArchives  []string `json:"deleted_archives,omitempty"` // over a site's log cap (§11.4)
+	PrunedJobs       int      `json:"pruned_jobs"`                // older than the log retention period
 }
 
 // Run is one maintenance run, which never overlaps another. Its steps don't
@@ -52,7 +54,7 @@ type changes struct {
 // returns every failure. A failed keyring refresh is only logged, since the
 // installed keyring keeps working. A run that changed something writes one
 // audit entry, as cli:root.
-func Run(ctx context.Context, d sysexec.Deps, j Jobs, w interface{ Write(audit.Entry) error }) error {
+func Run(ctx context.Context, d sysexec.Deps, j Jobs, homes Homes, w interface{ Write(audit.Entry) error }) error {
 	start := d.Now()
 	lockCtx, cancel := context.WithTimeout(ctx, lockWait)
 	unlock, err := sysexec.Lock(lockCtx, d.Paths.MaintenanceLock())
@@ -85,12 +87,20 @@ func Run(ctx context.Context, d sysexec.Deps, j Jobs, w interface{ Write(audit.E
 	if err := rotateLogs(ctx, d); err != nil {
 		errs = append(errs, err)
 	}
+	c.DeletedArchives, err = enforceCaps(ctx, d, homes)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("enforcing the per-site log cap: %w", err))
+	}
+	c.PrunedJobs, err = pruneJobs(d)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("pruning old jobs: %w", err))
+	}
 	c.KeyringRefreshed, err = refreshKeyring(ctx, d)
 	if err != nil {
 		errs = append(errs, err)
 	}
 	err = errors.Join(errs...)
-	if len(c.RestoredConfigs) == 0 && c.ReconciledJobs == 0 && !c.KeyringRefreshed {
+	if len(c.RestoredConfigs) == 0 && c.ReconciledJobs == 0 && !c.KeyringRefreshed && len(c.DeletedArchives) == 0 && c.PrunedJobs == 0 {
 		return err
 	}
 	outcome := "ok"

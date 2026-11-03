@@ -11,6 +11,7 @@ import (
 
 	"zimam/agent/internal/audit"
 	"zimam/agent/internal/config"
+	"zimam/agent/internal/helper"
 	"zimam/agent/internal/maintenance"
 	"zimam/agent/internal/sysexec"
 )
@@ -46,7 +47,7 @@ func runMaintenance(args []string, stdin io.Reader, stdout, stderr io.Writer) in
 		Logf:   func(format string, args ...any) { fmt.Fprintf(stderr, format+"\n", args...) },
 		Now:    time.Now,
 	}
-	if err := maintenance.Run(ctx, d, jobManager(p, cfg, -1), audit.Writer{Paths: p}); err != nil {
+	if err := maintenance.Run(ctx, d, jobManager(p, cfg, -1), maintenance.Homes{Helper: &helper.Client{AgentBinary: p.AgentBinary()}, Lookup: helper.LookupAccount}, audit.Writer{Paths: p}); err != nil {
 		return fail(err)
 	}
 	return 0

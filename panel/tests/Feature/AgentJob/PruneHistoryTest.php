@@ -30,14 +30,20 @@ final class PruneHistoryTest extends TestCase
         $this->assertModelMissing($old);
         $this->assertModelExists($recent);
         $this->assertModelExists($edge);
-        $this->assertModelMissing($oldAction);
+        // The panel's action log follows the audit log's own retention, a year by default (D24).
+        $this->assertModelExists($oldAction);
         $this->assertModelExists($recentAction);
+        $yearOld = $this->action(days: 366);
+        Artisan::call('zimam:prune-history');
+        $this->assertModelMissing($yearOld);
+        $this->assertModelExists($oldAction);
     }
 
     public function testFollowsTheRetentionSetting(): void
     {
         $this->freezeSecond();
         Setting::query()->updateOrCreate(['key' => 'log_retention_days'], ['value' => 3]);
+        Setting::query()->updateOrCreate(['key' => 'audit_retention_days'], ['value' => 3]);
         $job = $this->job(days: 4, status: AgentJob::CANCELLED);
         $action = $this->action(days: 4);
         $kept = $this->action(days: 2);

@@ -264,6 +264,7 @@ final class FakeAgentClient implements AgentClient
             'site.php' => ['name' => $params['name'], 'php_version' => $params['php_version']],
             'site.destroy', 'site.security' => ['name' => $params['name']],
             'security.check' => self::securityFindings($params),
+            'logs.policy' => $params,
             // Let's Encrypt's certificates last 90 days.
             'cert.issue' => ['expires_at' => self::goTime(CarbonImmutable::now('UTC')->addDays(90))],
             default => [],
@@ -389,6 +390,23 @@ final class FakeAgentClient implements AgentClient
         }
         if ($command->name() === 'site.security') {
             $this->validateSecurity($params);
+
+            return;
+        }
+        if ($command->name() === 'logs.policy') {
+            $fields = [];
+            if ($params['retention_days'] < 1 || $params['retention_days'] > 365) {
+                $fields['retention_days'] = 'must be between 1 and 365';
+            }
+            if ($params['audit_retention_days'] < 1 || $params['audit_retention_days'] > 3650) {
+                $fields['audit_retention_days'] = 'must be between 1 and 3650';
+            }
+            if ($params['site_cap_bytes'] < 1024 ** 3 || $params['site_cap_bytes'] > 100 * 1024 ** 3) {
+                $fields['site_cap_bytes'] = 'must be between 1073741824 and 107374182400 bytes';
+            }
+            if ($fields !== []) {
+                throw new AgentValidationFailed('Invalid parameters', $fields);
+            }
 
             return;
         }

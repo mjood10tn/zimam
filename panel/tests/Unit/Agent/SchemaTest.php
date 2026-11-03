@@ -11,6 +11,7 @@ use App\Agent\Commands\JobCancel;
 use App\Agent\Commands\JobFollow;
 use App\Agent\Commands\JobStatus;
 use App\Agent\Commands\LogsList;
+use App\Agent\Commands\LogsPolicy;
 use App\Agent\Commands\LogsRead;
 use App\Agent\Commands\PhpDefault;
 use App\Agent\Commands\PhpInstall;
@@ -76,6 +77,7 @@ final class SchemaTest extends TestCase
             new CertIssue('shop'),
             new SecurityCheck('shop'),
             new LogsList('site.nginx-access', 'shop'),
+            new LogsPolicy(14, 365, 5 * 1024 ** 3),
             new LogsRead('journal.nginx', 'back', cursor: 's=a;i=1', limit: 50, search: 'error', priority: 3),
         ];
 
@@ -128,7 +130,7 @@ final class SchemaTest extends TestCase
     public function testFakeJobResultsMatchSchemas(): void
     {
         $fake = new FakeAgentClient;
-        foreach ([new PhpInstall('8.4'), new SiteProvision('shop', 'shop.example.com', 'static'), new SecurityCheck, new SecurityCheck('shop')] as $command) {
+        foreach ([new PhpInstall('8.4'), new SiteProvision('shop', 'shop.example.com', 'static'), new SecurityCheck, new SecurityCheck('shop'), new LogsPolicy(30, 730, 2 * 1024 ** 3)] as $command) {
             $job = $fake->submit($command);
             $final = $fake->follow($job->id, 0, function (): void {});
             $this->assertSame('succeeded', $final->status);

@@ -12,11 +12,27 @@ class PanelSettings
 {
     public const LOG_RETENTION_DAYS = 14;
 
+    /** The audit log's own retention, a year (D24). */
+    public const AUDIT_RETENTION_DAYS = 365;
+
     public const SITE_LOG_CAP_BYTES = 5 * 1024 * 1024 * 1024;
 
     public function logRetentionDays(): int
     {
         return (int) $this->get('log_retention_days', self::LOG_RETENTION_DAYS);
+    }
+
+    public function auditRetentionDays(): int
+    {
+        return (int) $this->get('audit_retention_days', self::AUDIT_RETENTION_DAYS);
+    }
+
+    /** Stores the log policy the agent has applied (logs.policy's outcome). */
+    public function setLogPolicy(int $retentionDays, int $auditRetentionDays, int $siteLogCapBytes): void
+    {
+        $this->set('log_retention_days', $retentionDays);
+        $this->set('audit_retention_days', $auditRetentionDays);
+        $this->set('site_log_cap_bytes', $siteLogCapBytes);
     }
 
     public function siteLogCapBytes(): int
