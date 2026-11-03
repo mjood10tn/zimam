@@ -20,7 +20,7 @@ request() {
 run_job() {
 	local reply job status
 	reply=$(request "$1" "$2")
-	job=$(python3 -I -c 'import json, sys; print(json.load(sys.stdin)["data"]["job"])' <<<"$reply") ||
+	job=$(python3 -I -c 'import json, sys; r = json.load(sys.stdin); assert r["type"] == "accepted"; print(r["job"])' <<<"$reply") ||
 		die "$1 wasn't accepted: $reply"
 	for _ in $(seq 1 120); do
 		status=$(request job.status "{\"job\":\"$job\"}" | python3 -I -c 'import json, sys; d = json.load(sys.stdin)["data"]; print(d["status"], d.get("message") or "")')
