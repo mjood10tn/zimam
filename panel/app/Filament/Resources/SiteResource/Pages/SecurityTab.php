@@ -105,12 +105,12 @@ class SecurityTab extends Component implements HasSchemas
                         ->label(__('zimam.security.fields.ip_allow'))
                         ->helperText(__('zimam.security.help.ip_allow'))
                         ->rows(3)
-                        ->rule(self::ipListRule()),
+                        ->rule(fn (): Closure => self::ipListRule()),
                     Textarea::make('ip_deny')
                         ->label(__('zimam.security.fields.ip_deny'))
                         ->helperText(__('zimam.security.help.ip_deny'))
                         ->rows(3)
-                        ->rule(self::ipListRule()),
+                        ->rule(fn (): Closure => self::ipListRule()),
                     Toggle::make('password_protection')
                         ->label(__('zimam.security.fields.password_protection'))
                         ->helperText(__('zimam.security.help.password_protection'))

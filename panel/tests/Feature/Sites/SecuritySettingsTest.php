@@ -34,7 +34,9 @@ final class SecuritySettingsTest extends TestCase
         $this->beforeApplicationDestroyed($undo);
         $this->agent = new FakeAgentClient;
         $this->app->instance(AgentClient::class, $this->agent);
-        $this->actingAs(User::factory()->create());
+        $user = User::factory()->create();
+        $user->forceFill(['app_authentication_secret' => 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP'])->save();
+        $this->actingAs($user);
     }
 
     private function site(bool $certificate = true): Site
@@ -129,7 +131,7 @@ final class SecuritySettingsTest extends TestCase
         $this->assertSame(['cost' => 12], password_get_info($user->password_hash)['options']);
 
         // Left empty for a user who has one, the password stays as it was.
-        AgentJob::query()->update(['status' => AgentJob::SUCCEEDED]);
+        $this->trackToTheEnd(AgentJob::sole());
         Livewire::test(SecurityTab::class, ['site' => $site->fresh()])
             ->assertFormSet(['users.0.username' => 'alice', 'users.0.password' => null])
             ->call('save')
@@ -275,7 +277,7 @@ final class SecuritySettingsTest extends TestCase
             ->assertSee(__('zimam.security.fields.headers_preset'))
             ->assertSee(__('zimam.security.fields.ip_allow'));
 
-        AgentJob::create(['command' => 'site.php', 'status' => AgentJob::RUNNING, 'params' => [], 'related_type' => $site->getMorphClass(), 'related_id' => $site->id]);
+        AgentJob::forceCreate(['command' => 'site.php', 'status' => AgentJob::RUNNING, 'params' => [], 'related_type' => $site->getMorphClass(), 'related_id' => $site->id]);
         Livewire::test(SecurityTab::class, ['site' => $site->fresh()])
             ->call('save')
             ->assertNotified(__('zimam.sites.busy'));
