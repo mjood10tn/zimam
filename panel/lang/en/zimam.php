@@ -431,6 +431,61 @@ return [
         ],
     ],
 
+    'logs' => [
+        'title' => 'Logs',
+        'source' => 'Log',
+        'search' => 'Search (plain text)',
+        'priority' => 'Priority',
+        'archive' => 'File',
+        'current' => 'Current',
+        'follow' => 'Follow live',
+        'older' => 'Load older',
+        'empty' => 'Nothing logged here.',
+        'search_stopped' => [
+            'end' => 'Searched to the end.',
+            'matches' => 'Stopped at 2,000 matches. Narrow the search to see the rest.',
+            'time' => 'Stopped after 10 seconds. Narrow the search, or choose an archive.',
+            'size' => 'Stopped after 16 MiB of matching text.',
+        ],
+        'priorities' => [
+            'all' => 'All',
+            '0' => '0 Emergency',
+            '1' => '1 Alert',
+            '2' => '2 Critical',
+            '3' => '3 Error and worse',
+            '4' => '4 Warning and worse',
+            '5' => '5 Notice and worse',
+            '6' => '6 Info and worse',
+            '7' => '7 Everything (debug)',
+        ],
+        'sources' => [
+            'site' => [
+                'nginx-access' => 'Nginx access log',
+                'nginx-error' => 'Nginx error log',
+                'php-error' => 'PHP error log',
+            ],
+            'journal' => [
+                'system' => 'System journal',
+                'kernel' => 'Kernel',
+                'ssh' => 'SSH',
+                'nginx' => 'Nginx service',
+                'php' => 'PHP :version-FPM',
+                'zimam-agent' => 'Zimam agent and jobs',
+                'zimam-panel' => 'Panel queue and scheduler',
+            ],
+            'file' => [
+                'nginx-error' => 'Nginx global error log',
+                'certbot' => 'Certbot',
+                'apt-history' => 'APT history',
+                'unattended-upgrades' => 'Unattended upgrades',
+                'zimam-audit' => 'Zimam audit log',
+            ],
+            'panel' => [
+                'laravel' => 'Panel (Laravel) log',
+            ],
+        ],
+    ],
+
     'php' => [
         'title' => 'PHP versions',
         'empty' => 'No PHP versions reported by the agent yet.',

@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "archives": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "modified": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "modified",
+          "name",
+          "size"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "current": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "modified": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "size": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "modified",
+            "name",
+            "size"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "source": {
+      "enum": [
+        "site.nginx-access",
+        "site.nginx-error",
+        "site.php-error",
+        "journal.system",
+        "journal.kernel",
+        "journal.ssh",
+        "journal.nginx",
+        "journal.zimam-agent",
+        "journal.zimam-panel",
+        "file.nginx-error",
+        "file.certbot",
+        "file.apt-history",
+        "file.unattended-upgrades",
+        "file.zimam-audit",
+        "journal.php-8.2",
+        "journal.php-8.3",
+        "journal.php-8.4",
+        "journal.php-8.5"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "archives",
+    "current",
+    "source"
+  ],
+  "title": "logs.list result",
+  "type": "object"
+}

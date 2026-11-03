@@ -35,6 +35,8 @@ func New(d sysexec.Deps, m *jobs.Manager) Handlers {
 		"agent.version":  agentVersion,
 		"system.status":  systemStatus(d),
 		"system.metrics": systemMetrics(d),
+		"logs.list":      logsList(d),
+		"logs.read":      logsRead(d),
 	}
 	if m == nil {
 		return h

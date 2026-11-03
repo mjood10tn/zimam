@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "back_cursor": {
+      "anyOf": [
+        {
+          "pattern": "^[A-Za-z0-9=;_-]{1,512}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "back_offset": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "entries": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "pattern": "^[A-Za-z0-9=;_-]{1,512}$",
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "time": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "cursor",
+          "message",
+          "priority",
+          "time",
+          "unit"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "forward_cursor": {
+      "anyOf": [
+        {
+          "pattern": "^[A-Za-z0-9=;_-]{1,512}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "forward_offset": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "lines": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "cut": {
+            "type": "boolean"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "cut",
+          "offset",
+          "text"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "search_stopped": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "back_cursor",
+    "back_offset",
+    "entries",
+    "forward_cursor",
+    "forward_offset",
+    "lines",
+    "search_stopped"
+  ],
+  "title": "logs.read result",
+  "type": "object"
+}

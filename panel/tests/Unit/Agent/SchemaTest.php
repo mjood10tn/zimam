@@ -10,6 +10,8 @@ use App\Agent\Commands\E2eSleep;
 use App\Agent\Commands\JobCancel;
 use App\Agent\Commands\JobFollow;
 use App\Agent\Commands\JobStatus;
+use App\Agent\Commands\LogsList;
+use App\Agent\Commands\LogsRead;
 use App\Agent\Commands\PhpDefault;
 use App\Agent\Commands\PhpInstall;
 use App\Agent\Commands\PhpUninstall;
@@ -73,6 +75,8 @@ final class SchemaTest extends TestCase
             new SiteDestroy('shop'),
             new CertIssue('shop'),
             new SecurityCheck('shop'),
+            new LogsList('site.nginx-access', 'shop'),
+            new LogsRead('journal.nginx', 'back', cursor: 's=a;i=1', limit: 50, search: 'error', priority: 3),
         ];
 
         return array_combine(
@@ -135,7 +139,7 @@ final class SchemaTest extends TestCase
     public function testFakeResponsesMatchResultAndEnvelopeSchemas(): void
     {
         foreach (['default' => new FakeAgentClient, 'demo' => FakeAgentClient::demo()] as $which => $fake) {
-            foreach ([new AgentVersion, new SystemStatus, new SystemMetrics] as $command) {
+            foreach ([new AgentVersion, new SystemStatus, new SystemMetrics, new LogsList('file.zimam-audit'), new LogsList('journal.ssh'), new LogsRead('file.zimam-audit'), new LogsRead('journal.ssh'), new LogsRead('file.zimam-audit', search: 'line')] as $command) {
                 $this->assertResult($command->name(), $fake->call($command)->data, "{$which} {$command->name()}");
             }
 

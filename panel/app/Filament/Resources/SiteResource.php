@@ -7,6 +7,7 @@ use App\Filament\Resources\SiteResource\Pages\ListSites;
 use App\Filament\Resources\SiteResource\Pages\SecurityTab;
 use App\Filament\Resources\SiteResource\Pages\ViewSite;
 use App\Livewire\SiteJobs;
+use App\Livewire\SiteLogs;
 use App\Models\Certificate;
 use App\Models\Domain;
 use App\Models\Site;
@@ -20,7 +21,6 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Components\Livewire;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
-use Filament\Schemas\Components\Text;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
@@ -144,7 +144,9 @@ class SiteResource extends Resource
                 Tab::make(__('zimam.sites.tabs.security'))->schema([
                     Livewire::make(SecurityTab::class, fn (Site $record): array => ['site' => $record])->key('site-security'),
                 ]),
-                Tab::make(__('zimam.sites.tabs.logs'))->schema([Text::make(__('zimam.sites.tabs.later'))]),
+                Tab::make(__('zimam.sites.tabs.logs'))->schema([
+                    Livewire::make(SiteLogs::class, fn (Site $record): array => ['site' => $record])->key('site-logs'),
+                ]),
             ]),
         ]);
     }

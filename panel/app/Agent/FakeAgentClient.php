@@ -174,6 +174,8 @@ final class FakeAgentClient implements AgentClient
             $command->name() === 'agent.version' => ['version' => '0.1.0', 'protocols' => [1], 'build' => 'release'],
             $command->name() === 'system.status' => $this->systemStatus,
             $command->name() === 'system.metrics' => $this->metrics(),
+            $command->name() === 'logs.list' => $this->logsList($command->params()),
+            $command->name() === 'logs.read' => $this->logsRead($command->params()),
             $command instanceof JobStatus => $this->advance($command->job),
             $command instanceof JobCancel => $this->cancel($command->job),
             $command instanceof JobFollow => throw new LogicException('job.follow streams: use follow()'),
@@ -669,6 +671,133 @@ final class FakeAgentClient implements AgentClient
         }
 
         return $metrics;
+    }
+
+    /** @var array<string, list<string>> each log's lines, by source (and site), once asked for */
+    private array $logs = [];
+
+    /**
+     * Sets a log's lines: a file source's lines, or a journal source's
+     * messages; by default each has 300 numbered lines.
+     *
+     * @param  list<string>  $lines
+     */
+    public function setLog(string $source, array $lines, ?string $site = null): static
+    {
+        $this->logs[$source.'/'.$site] = $lines;
+
+        return $this;
+    }
+
+    /** @return list<string> */
+    private function sourceLines(array $params): array
+    {
+        $key = $params['source'].'/'.($params['name'] ?? '');
+        $this->logs[$key] ??= array_map(fn (int $i): string => "{$params['source']} line {$i}", range(1, 300));
+
+        return $this->logs[$key];
+    }
+
+    private function validateLogs(array $params): void
+    {
+        $site = str_starts_with($params['source'], 'site.');
+        $journal = str_starts_with($params['source'], 'journal.');
+        $fields = [];
+        if ($site !== isset($params['name'])) {
+            $fields['name'] = $site ? 'is required for a site\'s log' : 'must be left out for a server log';
+        }
+        if (isset($params['archive']) && ($journal || ! preg_match('/^[a-z0-9-]+\.log-[0-9]{8}-[0-9]+\.gz\z/', $params['archive']))) {
+            $fields['archive'] = 'is not a log archive name';
+        }
+        if (isset($params['priority']) && (! $journal || $params['priority'] < 0 || $params['priority'] > 7)) {
+            $fields['priority'] = 'is only for journal logs, 0 to 7';
+        }
+        if (isset($params['limit']) && ($params['limit'] < 0 || $params['limit'] > 1000)) {
+            $fields['limit'] = 'must be between 1 and 1000';
+        }
+        if ($fields !== []) {
+            throw new AgentValidationFailed('Invalid parameters', $fields);
+        }
+    }
+
+    /** @return array<string, mixed> logs.list's data: a file source's current file and one archive */
+    private function logsList(array $params): array
+    {
+        $this->validateLogs($params);
+        if (str_starts_with($params['source'], 'journal.')) {
+            return ['source' => $params['source'], 'current' => null, 'archives' => []];
+        }
+        $size = array_sum(array_map(fn (string $l): int => strlen($l) + 1, $this->sourceLines($params)));
+        $base = match ($params['source']) {
+            'site.nginx-access' => 'access.log',
+            'site.nginx-error' => 'error.log',
+            'site.php-error' => 'php-error.log',
+            'file.zimam-audit' => 'audit.log',
+            default => basename(str_replace('.', '/', $params['source'])).'.log',
+        };
+        $now = self::goTime(CarbonImmutable::now('UTC'));
+
+        return ['source' => $params['source'], 'current' => ['name' => $base, 'size' => $size, 'modified' => $now], 'archives' => [
+            ['name' => "{$base}-20261101-1761955200.gz", 'size' => 2048, 'modified' => $now],
+        ]];
+    }
+
+    /** @return array<string, mixed> logs.read's data, from the fake's own lines, as the agent pages them */
+    private function logsRead(array $params): array
+    {
+        $this->validateLogs($params);
+        $journal = str_starts_with($params['source'], 'journal.');
+        $all = [];
+        $offset = 0;
+        foreach ($this->sourceLines($params) as $i => $text) {
+            $all[] = ['offset' => $offset, 'text' => $text, 'cursor' => 's=fake;i='.($i + 1), 'priority' => $i % 8];
+            $offset += strlen($text) + 1;
+        }
+        $end = $offset;
+        if ($journal && isset($params['priority'])) {
+            $all = array_values(array_filter($all, fn (array $l): bool => $l['priority'] <= $params['priority']));
+        }
+        $limit = $params['limit'] ?? 200;
+        $index = fn (array $l): int => (int) substr($l['cursor'], strlen('s=fake;i='));
+        if (isset($params['search'])) {
+            $from = $journal ? (isset($params['cursor']) ? (int) substr($params['cursor'], strlen('s=fake;i=')) : 0) : ($params['offset'] ?? 0);
+            $picked = array_values(array_filter($all, fn (array $l): bool => ($journal ? $index($l) > $from : $l['offset'] >= $from) && mb_stripos($l['text'], $params['search']) !== false));
+            $stopped = count($picked) >= 2000 ? 'matches' : 'end';
+            $picked = array_slice($picked, 0, 2000);
+        } elseif ($params['direction'] === 'forward') {
+            $from = $journal ? (int) substr($params['cursor'], strlen('s=fake;i=')) : $params['offset'];
+            $picked = array_slice(array_values(array_filter($all, fn (array $l): bool => $journal ? $index($l) > $from : $l['offset'] >= $from)), 0, $limit);
+            $stopped = '';
+        } else {
+            $before = $journal ? (isset($params['cursor']) ? (int) substr($params['cursor'], strlen('s=fake;i=')) : PHP_INT_MAX) : ($params['offset'] ?? $end);
+            $picked = array_slice(array_values(array_filter($all, fn (array $l): bool => $journal ? $index($l) < $before : $l['offset'] < $before)), -$limit);
+            $stopped = '';
+        }
+        $first = $picked[0] ?? null;
+        $last = $picked === [] ? null : $picked[count($picked) - 1];
+        if ($journal) {
+            $time = self::goTime(CarbonImmutable::now('UTC'));
+
+            return [
+                'lines' => [],
+                'entries' => array_map(fn (array $l): array => ['cursor' => $l['cursor'], 'time' => $time, 'priority' => $l['priority'], 'unit' => 'fake.service', 'message' => $l['text']], $picked),
+                'back_offset' => null,
+                'forward_offset' => null,
+                'back_cursor' => $first['cursor'] ?? null,
+                'forward_cursor' => $last['cursor'] ?? ($params['cursor'] ?? null),
+                'search_stopped' => $stopped,
+            ];
+        }
+
+        return [
+            'lines' => array_map(fn (array $l): array => ['offset' => $l['offset'], 'text' => $l['text'], 'cut' => false], $picked),
+            'entries' => [],
+            'back_offset' => $first !== null && $first['offset'] > 0 ? $first['offset'] : null,
+            'forward_offset' => $last === null ? ($params['offset'] ?? $end) : $last['offset'] + strlen($last['text']) + 1,
+            'back_cursor' => null,
+            'forward_cursor' => null,
+            'search_stopped' => $stopped,
+        ];
     }
 
     /** RFC 3339 in UTC, as Go writes a time: fractional digits only when needed. */
