@@ -57,6 +57,12 @@ final class FakeAgentClient implements AgentClient
     /** @var array<string, string> the PHP version of each site's pool, by site name, as succeeded jobs left them */
     private array $pools = [];
 
+    /** How many times system.metrics was answered: its counters move on with each answer. */
+    private int $metricsCalls = 0;
+
+    /** @var list<Closure(array<string, mixed>): array<string, mixed>> */
+    private array $metricsChanges = [];
+
     public function __construct()
     {
         $this->systemStatus = self::serverStatus(demo: false);
@@ -112,6 +118,19 @@ final class FakeAgentClient implements AgentClient
     }
 
     /**
+     * Changes what system.metrics answers from now on: $change gets the data
+     * the fake would answer, counters already moved on, and returns it.
+     *
+     * @param  Closure(array<string, mixed> $metrics): array<string, mixed>  $change
+     */
+    public function changeMetrics(Closure $change): static
+    {
+        $this->metricsChanges[] = $change;
+
+        return $this;
+    }
+
+    /**
      * A job's log lines as far as it has run, "[<time>] <message>" as the
      * agent writes them; none for a job the fake doesn't know.
      *
@@ -140,6 +159,7 @@ final class FakeAgentClient implements AgentClient
         return new AgentResult(match (true) {
             $command->name() === 'agent.version' => ['version' => '0.1.0', 'protocols' => [1], 'build' => 'release'],
             $command->name() === 'system.status' => $this->systemStatus,
+            $command->name() === 'system.metrics' => $this->metrics(),
             $command instanceof JobStatus => $this->advance($command->job),
             $command instanceof JobCancel => $this->cancel($command->job),
             $command instanceof JobFollow => throw new LogicException('job.follow streams: use follow()'),
@@ -503,6 +523,54 @@ final class FakeAgentClient implements AgentClient
             'finished_at' => $job['finished_at'] ? self::goTime($job['finished_at']) : null,
             'log_size' => $job['status'] === 'queued' ? 0 : array_sum(array_map(fn (string $line): int => strlen($line) + 1, $job['log'])),
         ];
+    }
+
+    /**
+     * system.metrics's data (§7.5): a healthy two-CPU server whose counters
+     * move on by five seconds' worth with each answer, about 15% busy and
+     * 50 kB/s in, with FPM monitored for each version in use.
+     *
+     * @return array<string, mixed>
+     */
+    private function metrics(): array
+    {
+        $n = $this->metricsCalls++;
+        $gib = 1024 ** 3;
+        $services = [['unit' => 'nginx.service', 'active_state' => 'active', 'unit_file_state' => 'enabled']];
+        foreach ($this->systemStatus['php']['installed'] as $php) {
+            if ($php['in_use']) {
+                $services[] = ['unit' => "php{$php['version']}-fpm.service", 'active_state' => 'active', 'unit_file_state' => 'enabled'];
+            }
+        }
+        foreach (['zimam-agent.socket', 'zimam-panel-queue.service', 'zimam-panel-scheduler.timer', 'zimam-maintenance.timer', 'certbot.timer', 'ssh.socket'] as $unit) {
+            $services[] = ['unit' => $unit, 'active_state' => 'active', 'unit_file_state' => 'enabled'];
+        }
+        $metrics = [
+            'uptime_seconds' => 1021453.67 + 5 * $n,
+            'load' => ['load1' => 0.42, 'load5' => 0.31, 'load15' => 0.27],
+            'cpu' => [
+                'user' => 1254871 + 110 * $n,
+                'nice' => 3021,
+                'system' => 402987 + 40 * $n,
+                'idle' => 98412377 + 840 * $n,
+                'iowait' => 51234 + 10 * $n,
+                'irq' => 0,
+                'softirq' => 18765,
+                'steal' => 2210,
+            ],
+            'memory' => ['total_bytes' => 4 * $gib, 'available_bytes' => (int) (2.75 * $gib), 'swap_total_bytes' => 2 * $gib, 'swap_free_bytes' => (int) (1.9 * $gib)],
+            'disks' => [
+                ['mount' => '/', 'fs_type' => 'ext4', 'total_bytes' => 40 * $gib, 'used_bytes' => 16 * $gib, 'available_bytes' => 22 * $gib, 'inodes_total' => 2621440, 'inodes_free' => 2401234],
+                ['mount' => '/boot/efi', 'fs_type' => 'vfat', 'total_bytes' => 104857600, 'used_bytes' => 6291456, 'available_bytes' => 98566144, 'inodes_total' => 0, 'inodes_free' => 0],
+            ],
+            'network' => ['rx_bytes' => 52311086811 + 250000 * $n, 'tx_bytes' => 9814555121 + 60000 * $n],
+            'services' => $services,
+        ];
+        foreach ($this->metricsChanges as $change) {
+            $metrics = $change($metrics);
+        }
+
+        return $metrics;
     }
 
     /** RFC 3339 in UTC, as Go writes a time: fractional digits only when needed. */

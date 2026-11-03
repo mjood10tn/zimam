@@ -16,6 +16,7 @@ use App\Agent\Commands\PhpUninstall;
 use App\Agent\Commands\SiteDestroy;
 use App\Agent\Commands\SitePhp;
 use App\Agent\Commands\SiteProvision;
+use App\Agent\Commands\SystemMetrics;
 use App\Agent\Commands\SystemStatus;
 use App\Agent\Exceptions\AgentException;
 use App\Agent\Exceptions\AgentNotFound;
@@ -56,6 +57,7 @@ final class SchemaTest extends TestCase
         $commands = [
             new AgentVersion,
             new SystemStatus,
+            new SystemMetrics,
             new JobStatus(self::JOB),
             new JobFollow(self::JOB, 0),
             new JobCancel(self::JOB),
@@ -124,7 +126,7 @@ final class SchemaTest extends TestCase
     public function testFakeResponsesMatchResultAndEnvelopeSchemas(): void
     {
         foreach (['default' => new FakeAgentClient, 'demo' => FakeAgentClient::demo()] as $which => $fake) {
-            foreach ([new AgentVersion, new SystemStatus] as $command) {
+            foreach ([new AgentVersion, new SystemStatus, new SystemMetrics] as $command) {
                 $this->assertResult($command->name(), $fake->call($command)->data, "{$which} {$command->name()}");
             }
 

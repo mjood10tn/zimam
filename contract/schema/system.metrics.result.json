@@ -1,0 +1,201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "cpu": {
+      "additionalProperties": false,
+      "properties": {
+        "idle": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "iowait": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "irq": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "nice": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "softirq": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "steal": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "system": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "user": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "idle",
+        "iowait",
+        "irq",
+        "nice",
+        "softirq",
+        "steal",
+        "system",
+        "user"
+      ],
+      "type": "object"
+    },
+    "disks": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "available_bytes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "fs_type": {
+            "type": "string"
+          },
+          "inodes_free": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "inodes_total": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "mount": {
+            "type": "string"
+          },
+          "total_bytes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "used_bytes": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "available_bytes",
+          "fs_type",
+          "inodes_free",
+          "inodes_total",
+          "mount",
+          "total_bytes",
+          "used_bytes"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "load": {
+      "additionalProperties": false,
+      "properties": {
+        "load1": {
+          "type": "number"
+        },
+        "load15": {
+          "type": "number"
+        },
+        "load5": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "load1",
+        "load15",
+        "load5"
+      ],
+      "type": "object"
+    },
+    "memory": {
+      "additionalProperties": false,
+      "properties": {
+        "available_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "swap_free_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "swap_total_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "total_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "available_bytes",
+        "swap_free_bytes",
+        "swap_total_bytes",
+        "total_bytes"
+      ],
+      "type": "object"
+    },
+    "network": {
+      "additionalProperties": false,
+      "properties": {
+        "rx_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tx_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "rx_bytes",
+        "tx_bytes"
+      ],
+      "type": "object"
+    },
+    "services": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "active_state": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "unit_file_state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "active_state",
+          "unit",
+          "unit_file_state"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "uptime_seconds": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "cpu",
+    "disks",
+    "load",
+    "memory",
+    "network",
+    "services",
+    "uptime_seconds"
+  ],
+  "title": "system.metrics result",
+  "type": "object"
+}

@@ -3,19 +3,20 @@
 namespace App\Filament\Widgets;
 
 use App\Agent\AgentHealth;
+use App\Agent\MetricsReading;
 use App\Agent\ServerStatus;
 use App\Models\Certificate;
+use App\Support\MetricWarnings;
 use Carbon\CarbonImmutable;
 use Filament\Widgets\Widget;
 
 /**
  * The bulletin opening and the warnings in force (dashboard brief §3, §6):
  * a headline counting them, one sentence naming them, the issued time,
- * then one card per warning. Milestone 1 knows three: agent unreachable
- * (the headline and the banner), reboot required and security updates
- * pending (§7.5). Task 30 adds certificates near or past their end, the
- * first critical card, and so the critical-first order; Task 32 adds disks,
- * memory and services.
+ * then one card per warning, critical first: agent unreachable (the
+ * headline and the banner), reboot required and security updates pending
+ * (§7.5), certificates near or past their end, and the disk, memory and
+ * service warnings the Monitoring page shows (MetricWarnings).
  */
 class Warnings extends Widget
 {
@@ -64,6 +65,10 @@ class Warnings extends Widget
             ];
         }
         array_push($warnings, ...$this->certificateWarnings());
+        $metrics = MetricsReading::current();
+        if ($metrics !== null) {
+            array_push($warnings, ...MetricWarnings::from($metrics->data, $metrics->at));
+        }
         // Critical first; otherwise in the order above.
         usort($warnings, fn (array $a, array $b): int => ($a['severity'] === 'critical' ? 0 : 1) <=> ($b['severity'] === 'critical' ? 0 : 1));
 

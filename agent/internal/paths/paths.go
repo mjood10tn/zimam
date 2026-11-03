@@ -93,6 +93,15 @@ func (p Paths) KeyringRefresh() string { return p.at("var/lib/zimam/keyring-refr
 func (p Paths) RebootRequired() string { return p.at("run/reboot-required") }
 func (p Paths) AptCheck() string       { return p.at("usr/lib/update-notifier/apt-check") }
 
+// What system.metrics reads from /proc (§7.5).
+
+func (p Paths) ProcUptime() string  { return p.at("proc/uptime") }
+func (p Paths) ProcLoadavg() string { return p.at("proc/loadavg") }
+func (p Paths) ProcStat() string    { return p.at("proc/stat") }
+func (p Paths) ProcMeminfo() string { return p.at("proc/meminfo") }
+func (p Paths) ProcMounts() string  { return p.at("proc/self/mounts") }
+func (p Paths) ProcNetDev() string  { return p.at("proc/net/dev") }
+
 // EtcGroup lists each group's members: site.provision reads whether www-data
 // is in a site's group yet (§9.2).
 func (p Paths) EtcGroup() string { return p.at("etc/group") }

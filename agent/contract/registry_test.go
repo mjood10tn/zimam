@@ -22,7 +22,7 @@ var designCommands = []struct {
 }{
 	{"agent.version", KindRead, "", false, true},
 	{"system.status", KindRead, "", false, true},
-	{"system.metrics", KindRead, "", false, false},
+	{"system.metrics", KindRead, "", false, true},
 	{"php.install", KindJob, "php:<version>", true, true},
 	{"php.uninstall", KindJob, "php:<version>", true, true},
 	{"php.default", KindJob, "server", true, true},

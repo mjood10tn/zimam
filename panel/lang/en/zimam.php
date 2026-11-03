@@ -132,6 +132,88 @@ return [
         ],
     ],
 
+    'units' => [
+        'bytes' => ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'],
+    ],
+
+    'monitoring' => [
+        'title' => 'Monitoring',
+        'live' => [
+            'heading' => 'Now',
+            'as_of' => 'Read at :time, every 5 seconds.',
+            'stale' => 'As last read at :time. Waiting for the agent.',
+            'none' => 'No reading from the agent yet.',
+            'measuring' => 'Measuring…',
+            'cpu' => 'CPU',
+            'cpu_value' => ':percent% busy',
+            'load' => 'Load',
+            'load_value' => ':load1 · :load5 · :load15 (1, 5 and 15 minutes)',
+            'memory' => 'Memory',
+            'memory_value' => ':available available of :total',
+            'swap' => 'Swap',
+            'swap_value' => ':used used of :total',
+            'swap_none' => 'None',
+            'network' => 'Network',
+            'network_value' => ':rx in · :tx out',
+            'per_second' => ':size/s',
+            'uptime' => 'Up for',
+            'uptime_value' => '{0} :hours h|{1} 1 day, :hours h|[2,*] :count days, :hours h',
+            'disks' => 'Disks',
+            'disk_value' => ':percent% used, :available free of :total',
+            'inodes_value' => ':percent% of inodes used',
+            'warnings' => 'Warnings',
+            'no_warnings' => 'No warnings.',
+        ],
+        'services' => [
+            'heading' => 'Services',
+            'none' => 'No reading from the agent yet.',
+            'states' => [
+                'active' => 'Active',
+                'inactive' => 'Inactive',
+                'failed' => 'Failed',
+                'activating' => 'Starting',
+                'deactivating' => 'Stopping',
+                'reloading' => 'Reloading',
+            ],
+        ],
+        'charts' => [
+            'cpu' => 'CPU busy (%)',
+            'load' => 'Load',
+            'memory' => 'Memory and swap used (%)',
+            'network' => 'Network (bytes per second)',
+            'disk' => 'Disk used (%)',
+            'series' => [
+                'cpu' => 'CPU',
+                'load1' => '1 minute',
+                'load5' => '5 minutes',
+                'load15' => '15 minutes',
+                'memory' => 'Memory',
+                'swap' => 'Swap',
+                'rx' => 'In',
+                'tx' => 'Out',
+            ],
+            'ranges' => [
+                'hour' => 'Last hour',
+                'day' => 'Last 24 hours',
+                'week' => 'Last 7 days',
+            ],
+        ],
+        'warnings' => [
+            'disk' => [
+                'title' => 'Disk :mount is :percent% full',
+                'detail' => 'Free some space before it fills: old releases, backups or logs. Logs rotate at 200 MB and are capped per site under Settings.',
+            ],
+            'memory' => [
+                'title' => 'Only :percent% of memory is available',
+                'detail' => 'The server may start swapping or stopping processes. Check what uses memory over SSH with top, or move to a larger server.',
+            ],
+            'service' => [
+                'title' => ':unit is :state',
+                'detail' => 'Check it over SSH with sudo systemctl status :unit.',
+            ],
+        ],
+    ],
+
     'server' => [
         'heading' => 'Server',
         'as_of' => 'As last reported at :time.',
