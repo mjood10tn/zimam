@@ -3,6 +3,7 @@
 namespace Tests\Feature\Monitoring;
 
 use App\Agent\AgentClient;
+use App\Agent\Commands\SystemMetrics;
 use App\Agent\Exceptions\AgentUnavailable;
 use App\Agent\FakeAgentClient;
 use App\Models\MetricSample;
@@ -23,7 +24,7 @@ final class SampleMetricsTest extends TestCase
         $this->travelTo(Carbon::parse('2026-11-01 03:41:00', 'UTC'));
         $agent = new FakeAgentClient;
         $this->app->instance(AgentClient::class, $agent);
-        $data = $agent->call(new \App\Agent\Commands\SystemMetrics)->data;
+        $data = $agent->call(new SystemMetrics)->data;
         $agent->respond('system.metrics', $data);
 
         $this->assertSame(0, Artisan::call('zimam:sample-metrics'));

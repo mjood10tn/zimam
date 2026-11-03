@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -9,7 +10,7 @@ use Illuminate\Database\Eloquent\Model;
  * agent reported them, load, memory and swap, each mount's use and each
  * monitored service's state. Written once, pruned after seven days.
  *
- * @property \Carbon\CarbonImmutable $sampled_at
+ * @property CarbonImmutable $sampled_at
  * @property array<string, int> $cpu
  * @property list<array<string, mixed>> $disks
  * @property list<array{unit: string, active_state: string, unit_file_state: string}> $services

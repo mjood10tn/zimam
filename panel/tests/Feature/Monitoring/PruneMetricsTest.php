@@ -2,7 +2,6 @@
 
 namespace Tests\Feature\Monitoring;
 
-use App\Models\MetricSample;
 use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
