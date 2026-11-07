@@ -97,14 +97,34 @@ export async function expectDashboard(page: Page): Promise<void> {
 }
 
 // signInAsAdmin signs in as the admin the setup and recovery specs left,
-// with a TOTP code, and lands on the dashboard.
+// with a TOTP code, and lands on the dashboard. Filament allows 5 sign-in
+// steps a minute, and the password and the code are one each, so specs
+// that sign in one after another can meet "Too many login attempts": then
+// it waits out the minute and starts again, once.
 export async function signInAsAdmin(page: Page): Promise<void> {
   const admin = loadAdmin();
-  await signIn(page, admin.email, admin.password);
-  await expect(page.getByRole('heading', { name: 'Verify your identity' })).toBeVisible();
-  await page.locator('input[autocomplete="one-time-code"]').first().click();
-  await page.keyboard.type(await code(admin.secret));
-  await expectDashboard(page);
+  const throttled = page.getByText('Too many login attempts');
+  for (let attempt = 1; ; attempt++) {
+    await signIn(page, admin.email, admin.password);
+    const verify = page.getByRole('heading', { name: 'Verify your identity' });
+    await expect(verify.or(throttled).first()).toBeVisible();
+    if (!(await throttled.isVisible())) {
+      await page.locator('input[autocomplete="one-time-code"]').first().click();
+      await page.keyboard.type(await code(admin.secret));
+      const outcome = await Promise.race([
+        page.waitForURL(`${panel}/admin`, { timeout: 15_000 }).then(() => 'in', () => 'unknown'),
+        throttled.waitFor({ timeout: 15_000 }).then(() => 'throttled', () => 'unknown'),
+      ]);
+      if (outcome !== 'throttled') {
+        await expectDashboard(page);
+        return;
+      }
+    }
+    if (attempt === 2) {
+      throw new Error('signing in was throttled twice');
+    }
+    await page.waitForTimeout(65_000);
+  }
 }
 
 // scenario runs one of e2e/scenarios/*.sh on this host, its output shown
