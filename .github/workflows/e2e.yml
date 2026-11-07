@@ -64,7 +64,7 @@ jobs:
         run: bash e2e/scripts/browser.sh --project m2-default
       - name: done-when 8 to 10, monitoring, php84's security and the log settings, in the browser
         run: bash e2e/scripts/browser.sh --project m3-settings
-      - name: the caller, protocol, validation, log and symlink probes, and the files they must not change
+      - name: the caller, protocol, validation, log, symlink, job-limit and maintenance probes, and the files they must not change
         run: bash e2e/probes/run.sh
       - name: done-when 11, the audit log
         run: bash e2e/scenarios/audit.sh

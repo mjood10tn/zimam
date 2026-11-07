@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Runs the probes so far (design §14.4): the caller, protocol, validation,
-# log archive name, log symlink and journal paging
-# probes between two fs-hash.sh snapshots, which must be identical, then
-# the site.destroy symlink probe, which compares its own snapshots. The
+# Runs the probes (design §14.4): the caller, protocol, validation, log
+# archive name, log symlink, journal paging and job-limit (OOM) probes
+# between two fs-hash.sh snapshots, which must be identical, then the
+# site.destroy symlink and maintenance probes, which change /etc on purpose
+# and compare their own snapshots. The
 # milestone 2 scenarios have run, so the site user s_php84 exists.
 # Everything that writes /etc, /root or /home happens before the first
 # snapshot: the probe client and fs-hash.sh are copied in, and maintenance
@@ -24,6 +25,7 @@ bash "$(dirname "$0")/validation.sh" || code=1
 bash "$(dirname "$0")/archive-names.sh" || code=1
 bash "$(dirname "$0")/log-symlink.sh" || code=1
 bash "$(dirname "$0")/journal-paging.sh" || code=1
+bash "$(dirname "$0")/oom.sh" || code=1
 in_c zimam-fs-hash >"$E2E_WORK/fs-after.txt"
 
 if diff -u "$E2E_WORK/fs-before.txt" "$E2E_WORK/fs-after.txt"; then
@@ -33,4 +35,5 @@ else
 	code=1
 fi
 bash "$(dirname "$0")/destroy-symlink.sh" || code=1
+bash "$(dirname "$0")/maintenance.sh" || code=1
 exit "$code"

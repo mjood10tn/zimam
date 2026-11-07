@@ -15,7 +15,7 @@ The end-to-end harness (design §14.2): a release built with the `e2e` tag and a
 | The contract suite against the real agent, as `zimam` | `scenarios/m1-contract.sh` | container |
 | The root-only Go tests | `scenarios/m1-roottests.sh` | container |
 | Done-when 3 to 7 in Chromium: install PHP 8.4, create `static`, `php84` and `php85`, issue their certificates, switch `php84` to 8.5 and back under a request loop, make 8.4 the default. The specs call `scenarios/m2-*.sh` for the checks from outside the browser | `scripts/browser.sh --project m2-default` | host |
-| The caller (`nobody`, `s_php84`), protocol and validation probes between two file snapshots, then the `site.destroy` symlink probe with its own | `probes/run.sh` | container |
+| The caller (`nobody`, `s_php84`), protocol, validation, log and job-limit (`e2e.memhog` ends `oom-kill`) probes between two file snapshots, then the `site.destroy` symlink and maintenance (planted links, a 1 KiB cap) probes with their own | `probes/run.sh` | container |
 | Done-when 11: the audit log, for every command so far | `scenarios/audit.sh` | host |
 | Running the installer again repairs, after `zimam-agent version --at-least` (D25) | `scenarios/m1-repair.sh` | host |
 | Logs for a failed run, then tear down | `scripts/collect-logs.sh`, `scripts/down.sh` | host |

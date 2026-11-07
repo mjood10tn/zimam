@@ -11,23 +11,6 @@ source "$(dirname "$0")/lib.sh"
 site=probe-static
 user=s_$site
 
-# run_job <command> <params> submits a job and waits for it to succeed.
-run_job() {
-	local reply job status
-	reply=$(request "$1" "$2")
-	job=$(python3 -I -c 'import json, sys; r = json.load(sys.stdin); assert r["type"] == "accepted"; print(r["job"])' <<<"$reply") ||
-		die "$1 wasn't accepted: $reply"
-	for _ in $(seq 1 120); do
-		status=$(request job.status "{\"job\":\"$job\"}" | python3 -I -c 'import json, sys; d = json.load(sys.stdin)["data"]; print(d["status"], d.get("message") or "")')
-		case $status in
-		succeeded*) return 0 ;;
-		failed* | cancelled*) die "$1 ended $status" ;;
-		esac
-		sleep 2
-	done
-	die "$1 didn't finish within 4 minutes"
-}
-
 in_c zimam-fs-hash >"$E2E_WORK/fs-destroy-before.txt"
 run_job site.provision "{\"name\":\"$site\",\"domain\":\"$site.zimam.test\",\"type\":\"static\"}"
 in_c runuser -u "$user" -- ln -s / "/home/$user/site/escape"

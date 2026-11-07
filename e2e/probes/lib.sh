@@ -38,6 +38,43 @@ request() {
 	printf '%s\n' "{$env_ok,\"command\":\"$1\",\"params\":$2}" | bash "$E2E_ROOT/e2e/scripts/as.sh" zimam "$PROBECLIENT" "$SOCKET"
 }
 
+# submit <command> <params> sends a job and prints its id, or fails with
+# the reply when it isn't accepted.
+submit() {
+	local reply
+	reply=$(request "$1" "$2")
+	python3 -I -c 'import json, sys; r = json.load(sys.stdin); assert r["type"] == "accepted"; print(r["job"])' <<<"$reply" 2>/dev/null || {
+		echo "e2e: $1 wasn't accepted: $reply" >&2
+		return 1
+	}
+}
+
+# job_end <job> [seconds] waits for the job to end (job.status reconciles a
+# dead unit) and prints "<status> <message>", or "unfinished" after the
+# wait (240 s by default).
+job_end() {
+	local job=$1 end=$((SECONDS + ${2:-240})) status
+	while ((SECONDS < end)); do
+		status=$(request job.status "{\"job\":\"$job\"}" | python3 -I -c 'import json, sys; d = json.load(sys.stdin)["data"]; print(d["status"], d.get("message") or "")')
+		case $status in
+		succeeded* | failed* | cancelled*)
+			echo "$status"
+			return 0
+			;;
+		esac
+		sleep 2
+	done
+	echo unfinished
+}
+
+# run_job <command> <params> submits a job and waits for it to succeed.
+run_job() {
+	local job status
+	job=$(submit "$1" "$2") || die "$1 wasn't accepted"
+	status=$(job_end "$job")
+	[[ $status == succeeded* ]] || die "$1 ended $status"
+}
+
 # has_field <prefix> reads an error reply on stdin and succeeds when one of
 # its fields starts with the prefix.
 has_field() {
