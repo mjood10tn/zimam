@@ -11,11 +11,6 @@ source "$(dirname "$0")/lib.sh"
 site=probe-static
 user=s_$site
 
-# request <command> <params> sends one request as zimam and prints the reply.
-request() {
-	printf '%s\n' "{$env_ok,\"command\":\"$1\",\"params\":$2}" | bash "$E2E_ROOT/e2e/scripts/as.sh" zimam "$PROBECLIENT" "$SOCKET"
-}
-
 # run_job <command> <params> submits a job and waits for it to succeed.
 run_job() {
 	local reply job status

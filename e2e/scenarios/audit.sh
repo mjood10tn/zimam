@@ -5,8 +5,10 @@
 # site.provision submissions, outcomes and refusals and its e2e.sleep
 # submission and cancel, and milestone 2's php.install, php.default,
 # site.provision, cert.issue, site.php and site.destroy submissions and
-# outcomes, from the browser scenarios and the symlink probe. It holds no
-# successful routine read, and never a setup link.
+# outcomes, from the browser scenarios and the symlink probe, and
+# milestone 3's site.security, security.check and logs.policy submissions
+# and outcomes, its validation refusals and the retention's maintenance
+# entry. It holds no successful routine read, and never a setup link.
 # shellcheck source=../scripts/common.sh
 source "$(dirname "$0")/../scripts/common.sh"
 
@@ -63,6 +65,24 @@ for command, least in [("site.provision", 23), ("php.install", 3), ("site.php", 
     check(n >= least, f"{command} refused as validation_failed: {n}, want at least {least}")
 check(count(command="e2e.sleep", outcome="accepted") >= 1, "the e2e.sleep submission accepted")
 check(count(command="job.cancel", outcome="ok") >= 1, "job.cancel audited")
+
+# Milestone 3: php84's seven security changes from the browser, one of
+# which met the broken tls.conf and failed; the server's and three sites'
+# checks; the log policy; and the archive retention deleted.
+for command, least in [("site.security", 7), ("security.check", 4), ("logs.policy", 1)]:
+    n = count(command=command, outcome="accepted")
+    check(n >= least, f"{command} accepted: {n}, want at least {least}")
+for command, least in [("site.security", 6), ("security.check", 4), ("logs.policy", 1)]:
+    n = count(command=command, outcome="ok")
+    check(n >= least, f"{command} ok: {n}, want at least {least}")
+n = sum(e["command"] == "site.security" and e["outcome"].startswith("error:") and e["outcome"] != "error:validation_failed"
+        and e.get("job") for e in entries)
+check(n >= 1, f"the site.security job that met the broken tls.conf audited as failed ({n})")
+for command, least in [("site.security", 31), ("logs.read", 7)]:
+    n = count(command=command, outcome="error:validation_failed")
+    check(n >= least, f"{command} refused as validation_failed: {n}, want at least {least}")
+n = sum(e["command"] == "maintenance" and bool((e.get("params") or {}).get("deleted_archives")) for e in entries)
+check(n >= 1, f"maintenance's deletion of the backdated archive audited ({n})")
 
 reads = {"agent.version", "system.status", "system.metrics", "job.status", "job.follow", "logs.list", "logs.read"}
 bad = [e for e in entries if e["command"] in reads and not e["outcome"].startswith("error:")]

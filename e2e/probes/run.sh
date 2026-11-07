@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Runs the probes so far (design §14.4): the caller, protocol and validation
+# Runs the probes so far (design §14.4): the caller, protocol, validation,
+# log archive name, log symlink and journal paging
 # probes between two fs-hash.sh snapshots, which must be identical, then
 # the site.destroy symlink probe, which compares its own snapshots. The
 # milestone 2 scenarios have run, so the site user s_php84 exists.
@@ -20,6 +21,9 @@ code=0
 bash "$(dirname "$0")/callers.sh" || code=1
 bash "$(dirname "$0")/protocol.sh" || code=1
 bash "$(dirname "$0")/validation.sh" || code=1
+bash "$(dirname "$0")/archive-names.sh" || code=1
+bash "$(dirname "$0")/log-symlink.sh" || code=1
+bash "$(dirname "$0")/journal-paging.sh" || code=1
 in_c zimam-fs-hash >"$E2E_WORK/fs-after.txt"
 
 if diff -u "$E2E_WORK/fs-before.txt" "$E2E_WORK/fs-after.txt"; then
