@@ -12,6 +12,8 @@ use App\Models\Site;
 use App\Models\SiteBasicAuthUser;
 use App\Support\IpEntry;
 use Closure;
+use Filament\Actions\Concerns\InteractsWithActions;
+use Filament\Actions\Contracts\HasActions;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
@@ -35,8 +37,9 @@ use Livewire\Component;
  * it. Passwords are hashed here with bcrypt at cost 12, and only the hashes
  * are kept or sent (§5.4).
  */
-class SecurityTab extends Component implements HasSchemas
+class SecurityTab extends Component implements HasActions, HasSchemas
 {
+    use InteractsWithActions;
     use InteractsWithSchemas;
 
     public Site $site;

@@ -116,6 +116,20 @@ final class SecuritySettingsTest extends TestCase
         $this->assertSame('[redacted]', $job->params['password_protection']['users'][0]['password_hash']);
     }
 
+    /**
+     * "Add a user" is the repeater's own action, which the browser mounts
+     * with mountAction: the tab must handle actions, or every click fails
+     * (Task 37's e2e found each one answered 419).
+     */
+    public function testAddUserActionAddsRow(): void
+    {
+        $site = $this->site();
+        Livewire::test(SecurityTab::class, ['site' => $site])
+            ->fillForm(['password_protection' => true, 'users' => []])
+            ->call('mountAction', 'add', [], ['schemaComponent' => 'form.users'])
+            ->assertCount('data.users', 1);
+    }
+
     public function testPasswordsHashedWithBcrypt12(): void
     {
         $site = $this->site();
