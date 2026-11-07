@@ -56,8 +56,16 @@ async function apply(page: Page, s: Settings, outcome: 'succeeded' | 'failed', u
   await page.getByRole('textbox', { name: /^Block these addresses/ }).fill(s.deny);
   await setSwitch(page, 'Password protection', s.password);
   if (user) {
-    await page.getByRole('button', { name: 'Add a user' }).click();
-    await page.getByRole('textbox', { name: /^Username/ }).fill(user.name);
+    // The repeater has just appeared with the switch; a click while
+    // Livewire still renders it can be lost, so click until a row shows.
+    const username = page.getByRole('textbox', { name: /^Username/ });
+    await expect(async () => {
+      if ((await username.count()) === 0) {
+        await page.getByRole('button', { name: 'Add a user' }).click();
+      }
+      await expect(username).toBeVisible({ timeout: 3_000 });
+    }).toPass({ timeout: 30_000 });
+    await username.fill(user.name);
     await page.getByRole('textbox', { name: /^Password/ }).fill(user.password);
   }
   scenario('m3-security.sh', 'mark');
