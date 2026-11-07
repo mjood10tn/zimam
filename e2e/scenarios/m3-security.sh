@@ -2,7 +2,8 @@
 # Done-when 9 (design §2, §9.6, §9.7), outside the browser: the checks of
 # php84's security settings with real requests, from this host over HTTPS
 # and from inside the container, after the panel applied them.
-#   m3-security.sh setup          writes exec.php and hostname.php as s_php84
+#   m3-security.sh setup          writes exec.php and hostname.php as s_php84,
+#                                 and runs maintenance once to count updates
 #   m3-security.sh mark           remembers the newest panel job
 #   m3-security.sh job <status> [command] [count]
 #                                 waits for the jobs since the mark
@@ -72,6 +73,10 @@ setup)
 	printf '%s\n' '<?php echo @file_get_contents("/etc/hostname") === false ? "hostname refused" : "hostname read";' |
 		in_c runuser -u s_php84 -- tee "$public/hostname.php" >/dev/null
 	expect "exec.php's owner" "$(in_c stat -c %U "$public/exec.php")" s_php84
+	# Pending updates are counted by maintenance, every 15 minutes; this
+	# server may be younger than its first run, which security_updates_pending
+	# would report as inconclusive.
+	in_c systemctl start zimam-maintenance.service
 	;;
 mark)
 	jobs_mark >"$E2E_WORK/jobs-mark"
