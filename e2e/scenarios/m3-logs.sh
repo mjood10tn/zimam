@@ -38,6 +38,12 @@ rotate)
 		archives >"$E2E_WORK/archives-before.txt"
 		# A request to find in the archive (e2e/probes/archive-names.sh).
 		in_c curl -sS -o /dev/null -H "Host: php84.zimam.test" "http://127.0.0.1/e2e-archive-probe-$round"
+		for _ in $(seq 1 20); do
+			in_c grep -q "/e2e-archive-probe-$round " "$dir/access.log" && break
+			sleep 0.5
+		done
+		in_c grep -q "/e2e-archive-probe-$round " "$dir/access.log" ||
+			die "the request isn't in access.log: $(in_c ls -l "$dir"; in_c tail -c 300 "$dir/access.log")"
 		in_c truncate -s 201M "$dir/access.log"
 		in_c systemctl start zimam-maintenance.service
 		end=$((SECONDS + 900))
