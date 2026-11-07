@@ -92,7 +92,7 @@ test('done-when 9: every security setting applied from the panel, the checks, an
       scenario('m3-security.sh', 'job', 'succeeded', 'security.check', '4');
       await page.reload();
       await expect(page.getByText('Every check passes.')).toHaveCount(3);
-      const server = page.locator('section', { has: page.getByRole('heading', { name: 'Server' }) });
+      const server = page.getByRole('region', { name: 'Server' });
       await expect(server.locator('dt:has-text("Firewall active") + dd')).toContainText('Fail');
       await expect(server.locator('dt:has-text("Agent socket permissions") + dd')).toContainText('Pass');
       scenario('m3-security.sh', 'checks');

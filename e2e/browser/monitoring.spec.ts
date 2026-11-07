@@ -12,16 +12,17 @@ test('done-when 8: metric samples, their pruning, and live values on the Monitor
 
   await signInAsAdmin(page);
   await page.goto(`${panel}/admin/monitoring`);
-  const readAt = page.getByText(/^Read at \d\d:\d\d:\d\d, every 5 seconds\.$/);
+  // Blade's whitespace surrounds the texts, so the patterns aren't anchored.
+  const readAt = page.getByText(/Read at \d\d:\d\d:\d\d, every 5 seconds\./);
   await expect(readAt).toBeVisible();
   const first = await readAt.innerText();
   // The CPU and network rates come from the stored sample, or from the
   // second reading.
-  await expect(page.getByText(/^\d+% busy$/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/\d+% busy/)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(/ available of /)).toBeVisible();
-  await expect(page.getByText(/ in · .* out$/)).toBeVisible();
+  await expect(page.getByText(/ in · .* out/)).toBeVisible();
   await expect(page.getByText(/% used, .* free of /).first()).toBeVisible();
-  const services = page.locator('section', { has: page.getByRole('heading', { name: 'Services' }) });
+  const services = page.getByRole('region', { name: 'Services' });
   await expect(services.locator('dt:has-text("nginx.service") + dd')).toHaveText('Active');
   // Live: the reading's time moves on without a reload.
   await expect(readAt).not.toHaveText(first, { timeout: 20_000 });
