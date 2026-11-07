@@ -36,6 +36,8 @@ rotate)
 	# (e2e/probes/archive-names.sh) read the second.
 	for round in 1 2; do
 		archives >"$E2E_WORK/archives-before.txt"
+		# A request to find in the archive (e2e/probes/archive-names.sh).
+		in_c curl -sS -o /dev/null -H "Host: php84.zimam.test" "http://127.0.0.1/e2e-archive-probe-$round"
 		in_c truncate -s 201M "$dir/access.log"
 		in_c systemctl start zimam-maintenance.service
 		end=$((SECONDS + 900))

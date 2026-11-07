@@ -38,9 +38,16 @@ else
 fi
 [[ $(audit_lines) == "$before" ]] || fail "the not_found read left an audit entry"
 
-reply=$(request logs.read "$(read_params "$listed")")
-if lines=$(python3 -I -c 'import json, sys; r = json.load(sys.stdin); assert r["type"] == "result" and r["ok"], r; print(len(r["data"]["lines"]))' <<<"$reply"); then
-	pass "logs.read of the listed archive $listed answers $lines lines"
+# The listed archive, read forward from its start: m3-logs.sh's request is
+# its first line. (Its end is 201 MiB of zeros with no newline, which a read
+# back from the end leaves out as an unfinished line.)
+reply=$(request logs.read "{\"source\":\"site.nginx-access\",\"name\":\"php84\",\"archive\":\"$listed\",\"direction\":\"forward\",\"offset\":0,\"limit\":5}")
+if python3 -I -c '
+import json, sys
+r = json.load(sys.stdin)
+assert r["type"] == "result" and r["ok"], r
+assert any("/e2e-archive-probe-2 " in l["text"] for l in r["data"]["lines"]), r["data"]["lines"]' <<<"$reply"; then
+	pass "logs.read of the listed archive $listed finds the request logged before it rotated"
 else
 	fail "logs.read of the listed archive $listed answers ${reply:0:300}"
 fi

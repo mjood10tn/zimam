@@ -76,7 +76,7 @@ for command, least in [("site.security", 6), ("security.check", 4), ("logs.polic
     n = count(command=command, outcome="ok")
     check(n >= least, f"{command} ok: {n}, want at least {least}")
 n = sum(e["command"] == "site.security" and e["outcome"].startswith("error:") and e["outcome"] != "error:validation_failed"
-        and e.get("job") for e in entries)
+        and bool(e.get("job")) for e in entries)
 check(n >= 1, f"the site.security job that met the broken tls.conf audited as failed ({n})")
 for command, least in [("site.security", 31), ("logs.read", 7)]:
     n = count(command=command, outcome="error:validation_failed")
