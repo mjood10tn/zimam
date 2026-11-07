@@ -194,3 +194,33 @@ func TestCapOnlyDeletesArchives(t *testing.T) {
 		t.Errorf("deleted %v, removed %v, err %v", deleted, e.h.removed, err)
 	}
 }
+
+// Archives older than log_retention_days go even under the cap, wherever
+// they are: logrotate's maxage only deletes when the log itself rotates,
+// so an idle site's archives would never age out (§11.3, done-when 10).
+// Current logs stay, however old, and so do links.
+func TestRetentionDeletesOldArchives(t *testing.T) {
+	e := newCapEnv(t, 1<<40)
+	e.d.Config.LogRetentionDays = 1
+	e.root("access.log", 10, 100*time.Hour)
+	e.root("access.log-20261031-1761868800.gz", 10, 72*time.Hour)
+	e.root("access.log-20261102-1762041600.gz", 10, 23*time.Hour)
+	e.home("php-error.log", 10, 100*time.Hour, 0o640)
+	e.home("php-error.log-20261031-1761868800.gz", 10, 25*time.Hour, 0o640)
+	e.home("php-error.log-20261029-1761696000.gz", 10, 120*time.Hour, fs.ModeSymlink|0o777)
+
+	deleted, err := enforceCaps(context.Background(), e.d, e.homes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{e.dir + "/access.log-20261031-1761868800.gz", "/home/s_shop/logs/php-error.log-20261031-1761868800.gz"}
+	if !slices.Equal(deleted, want) {
+		t.Errorf("deleted %v, want %v", deleted, want)
+	}
+	if got := e.rootNames(); !slices.Equal(got, []string{"access.log", "access.log-20261102-1762041600.gz"}) {
+		t.Errorf("root files %v", got)
+	}
+	if want := []string{"s_shop logs/php-error.log-20261031-1761868800.gz"}; !slices.Equal(e.h.removed, want) {
+		t.Errorf("helper removed %v", e.h.removed)
+	}
+}

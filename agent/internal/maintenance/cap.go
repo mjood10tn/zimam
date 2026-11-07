@@ -38,18 +38,22 @@ type logFile struct {
 	archive bool
 }
 
-// enforceCaps keeps each site's logs under site_log_cap_bytes (§11.4): it
-// adds up the site's Nginx logs and archives, read by root from
-// /var/log/zimam/sites/<name>/, and its own logs/, listed by the helper,
-// and while the total is over the cap deletes the oldest archive. Only
-// regular files count, links never; only archives are deleted. It returns
-// the paths it deleted.
+// enforceCaps keeps each site's logs within the log policy (§11.3, §11.4).
+// It lists the site's Nginx logs and archives, read by root from
+// /var/log/zimam/sites/<name>/, and its own logs/, listed by the helper.
+// First it deletes every archive last changed more than log_retention_days
+// ago: logrotate's maxage deletes only when the log itself rotates, so an
+// idle site's archives would never age out. Then, while the total is over
+// site_log_cap_bytes, it deletes the oldest archive. Only regular files
+// count, links never; only archives are deleted. It returns the paths it
+// deleted.
 func enforceCaps(ctx context.Context, d sysexec.Deps, homes Homes) ([]string, error) {
 	all, err := sites.All(d.Paths)
 	if err != nil {
 		return nil, err
 	}
 	capBytes := int64(d.Config.SiteLogCapBytes)
+	expired := d.Now().Add(-time.Duration(d.Config.LogRetentionDays) * 24 * time.Hour)
 	var deleted []string
 	var errs []error
 	for _, st := range all {
@@ -72,10 +76,9 @@ func enforceCaps(ctx context.Context, d sysexec.Deps, homes Homes) ([]string, er
 			}
 			return archives[i].where < archives[j].where
 		})
-		for _, a := range archives {
-			if total <= capBytes {
-				break
-			}
+		// remove deletes one archive and reports whether it went.
+		remove := func(a logFile, why string) bool {
+			var err error
 			if a.name != "" {
 				err = homes.Helper.RemoveTree(ctx, acct, a.name)
 			} else {
@@ -83,11 +86,24 @@ func enforceCaps(ctx context.Context, d sysexec.Deps, homes Homes) ([]string, er
 			}
 			if err != nil {
 				errs = append(errs, fmt.Errorf("deleting %s: %w", a.where, err))
-				continue
+				return false
 			}
-			d.Logf("Deleted %s: site %s's logs were over the %d-byte cap", a.where, st.Name, capBytes)
+			d.Logf("Deleted %s: %s", a.where, why)
 			deleted = append(deleted, a.where)
 			total -= a.size
+			return true
+		}
+		var kept []logFile
+		for _, a := range archives {
+			if !a.mod.Before(expired) || !remove(a, fmt.Sprintf("older than the %d-day retention", d.Config.LogRetentionDays)) {
+				kept = append(kept, a)
+			}
+		}
+		for _, a := range kept {
+			if total <= capBytes {
+				break
+			}
+			remove(a, fmt.Sprintf("site %s's logs were over the %d-byte cap", st.Name, capBytes))
 		}
 	}
 	return deleted, errors.Join(errs...)
