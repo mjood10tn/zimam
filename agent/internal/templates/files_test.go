@@ -132,7 +132,7 @@ func TestSiteLogrotateGolden(t *testing.T) {
     dateformat -%Y%m%d-%s
     sharedscripts
     postrotate
-        /usr/sbin/nginx -s reopen >/dev/null 2>&1 || true
+        /usr/bin/flock -w 120 /run/zimam/locks/reload.lock /usr/bin/systemctl reload nginx >/dev/null 2>&1 || true
     endscript
 }
 

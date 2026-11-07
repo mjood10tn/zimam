@@ -1,4 +1,10 @@
 # Managed by Zimam. Changes here are overwritten.
+{{/* After rotating, Nginx is reloaded, not sent reopen: on reopen its
+workers, as www-data, open the logs again, and they can't enter the
+root-only site log folders (§5.9), so they would keep writing to the
+rotated file. A reload has the master, as root, open them for new workers.
+It waits for the agent's reload lock, so it never reloads a config the
+agent is still testing. */ -}}
 /var/log/zimam/sites/{{safe .Name}}/*.log {
     daily
     maxsize 200M
@@ -11,7 +17,7 @@
     dateformat -%Y%m%d-%s
     sharedscripts
     postrotate
-        /usr/sbin/nginx -s reopen >/dev/null 2>&1 || true
+        /usr/bin/flock -w 120 /run/zimam/locks/reload.lock /usr/bin/systemctl reload nginx >/dev/null 2>&1 || true
     endscript
 }
 
