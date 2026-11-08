@@ -4,38 +4,62 @@
 #   m2-switch.sh start   starts the loop in the background
 #   m2-switch.sh stop    stops it, then checks it: every response was 200,
 #                        both versions answered, and 8.4 answered last
+# In LXD the loop runs on this host. On a VPS it runs on the server, against
+# its own Nginx with the site's name and certificate: from the runner, a
+# new TLS handshake over the internet per request gave about one a second,
+# too few to catch a gap.
 # shellcheck source=../scripts/common.sh
 source "$(dirname "$0")/../scripts/common.sh"
 load_state
 
 dir=$E2E_WORK/switch
 host=php84.$E2E_DOMAIN
+remote=/var/tmp/zimam-e2e-switch
+# One line per request: the HTTP code (000 when curl got no answer), then
+# the body's version.
+# shellcheck disable=SC2016 # expanded by the inner bash
+loop='
+	while [[ ! -e $0/stop ]]; do
+		code=$(curl -sS -m 10 -o "$0/body" -w "%{http_code}" --resolve "$1:443:$2" --cacert "$3" "https://$1/" 2>>"$0/curl.err") || true
+		printf "%s %s\n" "${code:-000}" "$(sed -n "s/.* PHP \([0-9.]*\).*/\1/p" "$0/body" 2>/dev/null)"
+		rm -f "$0/body"
+		sleep 0.05
+	done'
 
 case ${1:-} in
 start)
 	rm -rf "$dir"
 	mkdir -p "$dir"
-	# One line per request: the HTTP code (000 when curl got no answer),
-	# then the body's version.
-	# shellcheck disable=SC2016 # expanded by the inner bash
-	setsid nohup bash -c '
-		while [[ ! -e $0/stop ]]; do
-			code=$(curl -sS -m 10 -o "$0/body" -w "%{http_code}" --resolve "$1:443:$2" --cacert "$3" "https://$1/" 2>>"$0/curl.err") || true
-			printf "%s %s\n" "${code:-000}" "$(sed -n "s/.* PHP \([0-9.]*\).*/\1/p" "$0/body" 2>/dev/null)"
-			rm -f "$0/body"
-			sleep 0.05
-		done' "$dir" "$host" "$CIP" "$E2E_CA" >"$dir/results" 2>"$dir/loop.err" </dev/null &
+	if [[ $E2E_TARGET == vps ]]; then
+		in_c bash -c "rm -rf $remote && mkdir -p $remote"
+		lxc file push -q "$E2E_CA" "$E2E_CONTAINER$remote/ca.pem"
+		in_c bash -c "setsid nohup bash -c $(printf '%q' "$loop") $remote $host 127.0.0.1 $remote/ca.pem \
+			>$remote/results 2>$remote/loop.err </dev/null & echo \$! >$remote/pid"
+		sleep 2
+		in_c test -s "$remote/results" ||
+			die "the request loop isn't answering: $(in_c cat "$remote/loop.err" "$remote/curl.err" 2>/dev/null)"
+		log "the request loop runs on the server (pid $(in_c cat "$remote/pid"))"
+		exit 0
+	fi
+	setsid nohup bash -c "$loop" "$dir" "$host" "$CIP" "$E2E_CA" >"$dir/results" 2>"$dir/loop.err" </dev/null &
 	echo $! >"$dir/pid"
 	sleep 2
 	[[ -s $dir/results ]] || die "the request loop isn't answering: $(cat "$dir/loop.err" "$dir/curl.err" 2>/dev/null)"
 	log "the request loop runs (pid $(cat "$dir/pid"))"
 	;;
 stop)
-	touch "$dir/stop"
-	for _ in $(seq 1 60); do
-		kill -0 "$(cat "$dir/pid")" 2>/dev/null || break
-		sleep 0.5
-	done
+	if [[ $E2E_TARGET == vps ]]; then
+		in_c bash -c "touch $remote/stop; for _ in \$(seq 1 60); do kill -0 \$(cat $remote/pid) 2>/dev/null || break; sleep 0.5; done"
+		in_c cat "$remote/results" >"$dir/results"
+		in_c cat "$remote/curl.err" >"$dir/curl.err" 2>/dev/null || true
+		in_c rm -rf "$remote"
+	else
+		touch "$dir/stop"
+		for _ in $(seq 1 60); do
+			kill -0 "$(cat "$dir/pid")" 2>/dev/null || break
+			sleep 0.5
+		done
+	fi
 	total=$(wc -l <"$dir/results")
 	failed=$(awk '$1 != 200' "$dir/results" | wc -l)
 	if ((failed > 0)); then
