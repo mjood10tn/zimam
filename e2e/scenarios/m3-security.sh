@@ -137,7 +137,11 @@ password)
 	;;
 checks)
 	rows=$(panel_sql 'select coalesce(s.name, "") as site, f."check" as name, f.status, f.detail from security_findings f left join sites s on s.id = f.site_id order by f.id')
-	python3 -I - "$rows" "$E2E_TARGET" <<'PY' || die "FAIL done-when 9: the checks above"
+	# ssh_password_login reports what sshd -T says: the LXD image turns
+	# passwords off, Hetzner's leaves them on even for a server made with a key.
+	passwords=$(in_c sshd -T | awk '$1 == "passwordauthentication" { print $2 }')
+	[[ -n $passwords ]] || die "sshd -T printed no passwordauthentication"
+	python3 -I - "$rows" "$E2E_TARGET" "$passwords" <<'PY' || die "FAIL done-when 9: the checks above"
 import json, sys
 
 rows = json.loads(sys.argv[1])
@@ -145,7 +149,8 @@ site_checks = ["dotfiles_blocked", "config_matches_template", "no_world_writable
                "pool_runs_as_site_user", "home_permissions", "certificate_valid", "https_redirect"]
 # The e2e container has no firewall (install.sh --skip-firewall); a VPS has
 # UFW on. The pending updates and reboot flag depend on the image of the day.
-server = {"firewall_active": {"pass" if sys.argv[2] == "vps" else "fail"}, "ssh_password_login": {"pass"}, "ssh_root_login": {"pass"},
+server = {"firewall_active": {"pass" if sys.argv[2] == "vps" else "fail"},
+          "ssh_password_login": {"warn" if sys.argv[3] == "yes" else "pass"}, "ssh_root_login": {"pass"},
           "security_updates_pending": {"pass", "warn"}, "reboot_required": {"pass", "warn"},
           "stock_www_pools_removed": {"pass"}, "agent_socket_permissions": {"pass"}}
 want = {(site, c): {"pass"} for site in ("static", "php84", "php85") for c in site_checks}
