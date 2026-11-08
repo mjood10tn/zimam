@@ -6,8 +6,9 @@
 source "$(dirname "$0")/../scripts/common.sh"
 load_state
 
-out=$(in_c runuser -u ubuntu -- php -r 'echo PHP_VERSION;') || die "FAIL done-when 6: php didn't run as ubuntu"
-[[ $out == 8.4.* ]] || die "FAIL done-when 6: php as ubuntu runs $out, want 8.4"
+# nobody, as any user: the LXD image's ubuntu user isn't on every server.
+out=$(in_c runuser -u nobody -- php -r 'echo PHP_VERSION;') || die "FAIL done-when 6: php didn't run as nobody"
+[[ $out == 8.4.* ]] || die "FAIL done-when 6: php as nobody runs $out, want 8.4"
 echo "PASS  done-when 6: php over SSH runs $out"
 
 root=$E2E_CA
