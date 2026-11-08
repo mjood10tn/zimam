@@ -127,6 +127,24 @@ final class LogViewerTest extends TestCase
         unlink($path);
     }
 
+    /** A search through 8 MiB of short lines takes linear time, not a pass over the rest per line. */
+    public function testPanelLogSearchOfALargeLogIsFast(): void
+    {
+        $path = tempnam(sys_get_temp_dir(), 'laravel');
+        $line = str_repeat('x', 15)."\n";
+        file_put_contents($path, str_repeat($line, (8 << 20) / 16 - 1)."needle\n");
+
+        $started = microtime(true);
+        $result = (new PanelLog($path))->read(search: 'needle');
+        $seconds = microtime(true) - $started;
+        unlink($path);
+
+        $this->assertSame([['offset' => (8 << 20) - 16, 'text' => 'needle']], $result['lines']);
+        $this->assertSame('end', $result['search_stopped']);
+        // Linear takes a few seconds on a slow machine; the old loop took minutes.
+        $this->assertLessThan(15.0, $seconds, "an 8 MiB search took {$seconds} s");
+    }
+
     /** The Logs page lists the server's sources; a site's Logs tab its three. */
     public function testSourcesListed(): void
     {

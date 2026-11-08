@@ -62,11 +62,12 @@ final class PanelLog
         $data = $to > $from ? (string) fread($h, $to - $from) : '';
         fclose($h);
         $out = [];
-        $at = $from;
-        while (($nl = strpos($data, "\n")) !== false) {
-            $out[] = ['offset' => $at, 'text' => mb_strcut(substr($data, 0, $nl), 0, 16384)];
-            $at += $nl + 1;
-            $data = substr($data, $nl + 1);
+        // Walks the buffer by position: cutting the rest off after each line
+        // would copy it once per line, which stalls on a log of a few MiB.
+        $pos = 0;
+        while (($nl = strpos($data, "\n", $pos)) !== false) {
+            $out[] = ['offset' => $from + $pos, 'text' => mb_strcut(substr($data, $pos, $nl - $pos), 0, 16384)];
+            $pos = $nl + 1;
         }
 
         return $out;
