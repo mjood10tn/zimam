@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Stands in for lxc when the e2e scripts drive a real server (E2E_TARGET=vps,
 # common.sh's lxc()). Only what the scripts use after up.sh:
-#   lxc-ssh exec <container> [--cwd <dir>] -- <command> [args...]
+#   lxc-ssh exec <container> [--cwd <dir>] [--env K=V]... -- <command> [args...]
 #   lxc-ssh file push [-q] [--mode <mode>] <file> <container>/<path>
 # The container name is ignored: the server is E2E_SSH (root@<address>),
 # with the key E2E_SSH_KEY. Arguments are quoted for the remote bash, stdin
@@ -26,20 +26,25 @@ case ${1:-} in
 exec)
 	shift 2
 	cwd=/
+	envs=()
 	while [[ ${1:-} != -- ]]; do
 		case ${1:-} in
 		--cwd)
 			cwd=$2
 			shift 2
 			;;
+		--env)
+			envs+=("$2")
+			shift 2
+			;;
 		*)
-			echo "lxc-ssh: exec takes --cwd only, not ${1:-nothing}" >&2
+			echo "lxc-ssh: exec takes --cwd and --env only, not ${1:-nothing}" >&2
 			exit 2
 			;;
 		esac
 	done
 	shift
-	remote "cd $(printf '%q' "$cwd") && exec $(printf '%q ' "$@")"
+	remote "cd $(printf '%q' "$cwd") && exec env $(printf '%q ' "${envs[@]}" "$@")"
 	;;
 file)
 	[[ ${2:-} == push ]] || {
