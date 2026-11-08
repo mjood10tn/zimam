@@ -40,15 +40,15 @@ export async function settle(page: Page): Promise<void> {
     .catch(() => console.warn(`settle: the page at ${page.url()} hadn't started within 15 s`));
 }
 
-// test is Playwright's, with every fill, selectOption and keyboard.type
-// waiting for settle first. The specs import it from here.
+// test is Playwright's, with every click, check, fill, selectOption and
+// keyboard.type waiting for settle first. The specs import it from here.
 let patched = false;
 export const test = base.extend<{ settled: void }>({
   settled: [
     async ({ page }, use) => {
       if (!patched) {
         const proto = Object.getPrototypeOf(page.locator('body')) as Locator;
-        for (const name of ['fill', 'selectOption', 'pressSequentially'] as const) {
+        for (const name of ['click', 'check', 'fill', 'selectOption', 'pressSequentially'] as const) {
           const original = proto[name] as (...args: unknown[]) => Promise<unknown>;
           Object.defineProperty(proto, name, {
             value: async function (this: Locator, ...args: unknown[]) {
@@ -138,9 +138,18 @@ export async function signIn(page: Page, email: string, password: string): Promi
   await page.getByRole('button', { name: 'Sign in' }).click();
 }
 
+// signOut opens the user menu until it shows Sign out: over a real server's
+// latency, a click that lands while the dashboard is still arriving leaves
+// the menu shut.
 export async function signOut(page: Page): Promise<void> {
-  await page.getByRole('button', { name: 'User menu' }).click();
-  await page.getByRole('menuitem', { name: 'Sign out' }).click();
+  const signOutItem = page.getByRole('menuitem', { name: 'Sign out' });
+  await expect(async () => {
+    if (!(await signOutItem.isVisible())) {
+      await page.getByRole('button', { name: 'User menu' }).click();
+    }
+    await expect(signOutItem).toBeVisible({ timeout: 3_000 });
+  }).toPass({ timeout: 30_000 });
+  await signOutItem.click();
   await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
 }
 
