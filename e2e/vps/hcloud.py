@@ -89,22 +89,19 @@ def pick(arch):
     types = {t["id"]: t for t in all_pages("/server_types", "server_types")
              if t["architecture"] == cpu_arch and t["name"].startswith(prefix) and t["cpu_type"] == "shared"
              and t["cores"] >= 2 and t["memory"] >= 4 and not t.get("deprecated")}
-    available = {}
-    for dc in all_pages("/datacenters", "datacenters"):
-        available.setdefault(dc["location"]["name"], set()).update(dc["server_types"]["available"])
+    # A type lists the locations it is offered in (the old /datacenters
+    # endpoint is gone); whether one has stock shows only when creating.
     choices = []
-    for loc in LOCATIONS:
-        for tid in available.get(loc, set()) & types.keys():
-            t = types[tid]
+    for t in types.values():
+        offered = {l["name"] for l in t.get("locations") or [] if not l.get("deprecation")}
+        offered = offered or {p["location"] for p in t["prices"]}
+        for loc in offered & set(LOCATIONS):
             price = next((float(p["price_hourly"]["gross"]) for p in t["prices"] if p["location"] == loc), 1e9)
             choices.append((LOCATIONS.index(loc), price, t["name"], loc))
     if not choices:
         raise SystemExit(f"no {prefix} type with 2 cores and 4 GB is available in {LOCATIONS}")
-    # The cheapest type in each location, locations in order.
-    best = {}
-    for order, price, name, loc in sorted(choices):
-        best.setdefault(loc, (order, price, name))
-    ordered = sorted((v[0], v[1], v[2], loc) for loc, v in best.items())
+    # Locations in order, the cheapest type first in each.
+    ordered = sorted(choices)
     log(f"image {image}; candidates: " + ", ".join(f"{n} in {l} (€{p:.4f}/h)" for _, p, n, l in ordered))
     return image, [(name, loc) for _, _, name, loc in ordered]
 
