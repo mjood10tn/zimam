@@ -64,9 +64,9 @@ jobs:
         run: bash e2e/scripts/browser.sh --project m2-default
       - name: done-when 8 to 10, monitoring, php84's security and the log settings, in the browser
         run: bash e2e/scripts/browser.sh --project m3-settings
-      - name: the caller, protocol, validation, log, symlink, job-limit and maintenance probes, and the files they must not change
-        run: bash e2e/probes/run.sh
-      - name: done-when 11, the audit log
+      - name: done-when 12, every root-escalation probe in one pass between two identical snapshots
+        run: bash e2e/probes/run-all.sh
+      - name: done-when 11, the audit re-check (every command, the redaction, the cli:root runs, certbot renew)
         run: bash e2e/scenarios/audit.sh
       - name: running the installer again repairs, after the version check
         run: bash e2e/scenarios/m1-repair.sh

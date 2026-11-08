@@ -5,7 +5,7 @@
 # and its failed unit must be reset once the job records it. Task 2 found
 # MemoryMax enforced inside LXD once swap is off for the unit, so this runs
 # on every e2e run. It writes only under /var/lib/zimam/jobs,
-# /var/log/zimam/jobs and /run, so run.sh runs it between its snapshots.
+# /var/log/zimam/jobs and /run, so run-all.sh runs it between its snapshots.
 # shellcheck source=lib.sh
 source "$(dirname "$0")/lib.sh"
 

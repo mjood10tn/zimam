@@ -2,7 +2,7 @@
 # Validation probes (design §14.4), sent as zimam for milestone 2's
 # commands: bad site names, domains and PHP versions each answer
 # validation_failed before anything runs, and leave exactly one
-# error:validation_failed audit entry. run.sh runs them between its two
+# error:validation_failed audit entry. run-all.sh runs them between its two
 # file snapshots.
 # shellcheck source=lib.sh
 source "$(dirname "$0")/lib.sh"

@@ -4,7 +4,7 @@
 # traversal are refused as validation_failed, with one audit entry each; a
 # well-formed name that isn't in php84's listing is not_found, and reads
 # nothing. The archive milestone 3's rotation made is read, to show the
-# refusals aren't all a read can do. run.sh runs these between its two
+# refusals aren't all a read can do. run-all.sh runs these between its two
 # file snapshots.
 # shellcheck source=lib.sh
 source "$(dirname "$0")/lib.sh"

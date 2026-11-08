@@ -8,8 +8,8 @@
 # delete only regular archives in a site's own log folders, the planted one
 # among them, every one listed in its audit entry; fs-hash.sh's proof, every
 # site's log folders and the links with their targets must otherwise be as
-# they were. logs.policy rewrites /etc, so run.sh runs this after its
-# snapshots, and the old policy is sent back at the end.
+# they were. logs.policy rewrites /etc, so the old policy is sent back at
+# the end, which run-all.sh's snapshots check; it runs this probe last.
 # shellcheck source=lib.sh
 source "$(dirname "$0")/lib.sh"
 

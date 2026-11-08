@@ -2,9 +2,9 @@
 # The site.destroy symlink probe (design §14.4), as zimam through the agent:
 # provision the throwaway site probe-static, plant site/escape -> / as its
 # user, then destroy it. Taken before the provision and after the destroy,
-# the file snapshots must match, but for the account files' backups that
-# useradd and userdel rewrite (/etc/passwd- and its kind), and the home
-# must be gone: the delete never left the home.
+# the file snapshots must match (fs-hash.sh leaves out the account files'
+# backups that useradd and userdel rewrite), and the home must be gone:
+# the delete never left the home.
 # shellcheck source=lib.sh
 source "$(dirname "$0")/lib.sh"
 
@@ -30,18 +30,7 @@ if in_c id "$user" >/dev/null 2>&1; then
 else
 	pass "the user $user is gone"
 fi
-changed=$(python3 -I - "$E2E_WORK/fs-destroy-before.txt" "$E2E_WORK/fs-destroy-after.txt" <<'PY'
-import re, sys
-
-before, after = (set(open(p).read().splitlines()) for p in sys.argv[1:])
-allowed = re.compile(r"^/etc/(passwd|group|shadow|gshadow|subuid|subgid)-$")
-for line in sorted(before ^ after):
-    path = line.split("\t", 1)[0] if "\t" in line else line.split("  ", 1)[1]
-    if not allowed.match(path):
-        print(("- " if line in before else "+ ") + line)
-PY
-)
-if [[ -z $changed ]]; then
+if changed=$(diff "$E2E_WORK/fs-destroy-before.txt" "$E2E_WORK/fs-destroy-after.txt"); then
 	pass "nothing outside /home/$user changed ($(wc -l <"$E2E_WORK/fs-destroy-before.txt") lines compared)"
 else
 	fail "site.destroy changed files outside the home:"

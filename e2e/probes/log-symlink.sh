@@ -3,7 +3,7 @@
 # error log with a link to /etc/shadow, and plants an archive-named link
 # too. Read as zimam through the agent, the PHP error log answers an error
 # and never shadow's content, and the planted archive isn't listed. The
-# links live in the home's logs/, which fs-hash.sh leaves out, so run.sh
+# links live in the home's logs/, which fs-hash.sh leaves out, so run-all.sh
 # runs this between its two file snapshots; the real log is put back.
 # shellcheck source=lib.sh
 source "$(dirname "$0")/lib.sh"
