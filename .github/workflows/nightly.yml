@@ -1,0 +1,92 @@
+name: nightly
+
+# Long fuzz runs (design §14.1, D1). ci.yml runs every target for 10s on each
+# push; here each one runs for 10 minutes. A failing input is uploaded: fix the
+# cause, and commit the input under its package's testdata/fuzz/ as a
+# regression case.
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: How long each target runs (a go test -fuzztime value)
+        default: 10m
+
+permissions:
+  contents: read
+
+jobs:
+  list:
+    runs-on: ubuntu-26.04
+    defaults:
+      run:
+        working-directory: agent
+    outputs:
+      targets: ${{ steps.list.outputs.targets }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - name: list every Fuzz target
+        id: list
+        # `go test -list` prints each package's matching names, then
+        # "ok <package>". The matrix gets one {pkg, name} per target.
+        run: |
+          listing="$(go test -list '^Fuzz' ./...)"
+          targets="$(awk '
+            $1 ~ /^Fuzz/ { names[n++] = $1; next }
+            $1 == "ok" { for (i = 0; i < n; i++) printf "%s %s\n", $2, names[i]; n = 0 }
+          ' <<<"$listing" | jq -R -s -c 'split("\n") | map(select(. != "") | split(" ") | {pkg: .[0], name: .[1]})')"
+          if [ "$(jq length <<<"$targets")" -eq 0 ]; then
+            echo "no Fuzz targets found" >&2
+            exit 1
+          fi
+          jq -r '.[] | "\(.name) (\(.pkg))"' <<<"$targets"
+          echo "targets=$targets" >>"$GITHUB_OUTPUT"
+
+  fuzz:
+    needs: list
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.list.outputs.targets) }}
+    name: ${{ matrix.target.name }}
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - name: fuzz
+        env:
+          PKG: ${{ matrix.target.pkg }}
+          NAME: ${{ matrix.target.name }}
+          FUZZTIME: ${{ inputs.fuzztime || '10m' }}
+        run: go test -run='^$' -fuzz="^${NAME}\$" -fuzztime="$FUZZTIME" "$PKG"
+      - name: collect the failing input
+        if: failure()
+        # go test writes a failing input to testdata/fuzz/<target>/ in the
+        # package's directory, the only new files a run leaves there.
+        run: |
+          mkdir -p ../fuzz-failure
+          git ls-files --others --exclude-standard -- '*/testdata/fuzz/*' | while read -r f; do
+            mkdir -p "../fuzz-failure/$(dirname "$f")"
+            cp "$f" "../fuzz-failure/$f"
+            echo "failing input: agent/$f"
+            cat "$f"
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: fuzz-failure-${{ matrix.target.name }}
+          path: fuzz-failure/
+          if-no-files-found: ignore
