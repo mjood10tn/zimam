@@ -114,14 +114,15 @@ check(count(command="job.cancel", outcome="ok") >= 1, "job.cancel audited")
 bad = [e for e in entries if e["command"] in reads and not e["outcome"].startswith("error:")]
 check(not bad, f"no successful read audited ({len(bad)} found)")
 
-# Every accepted job has exactly one outcome entry, ok or error:<code>.
+# Every accepted job has exactly one outcome entry, ok or error:<code>; a
+# cancelled job's is the job.cancel that stopped it (jobs.auditOutcome).
 outcomes = {}
 for e in entries:
-    if e.get("job") and e["outcome"] != "accepted" and e["command"] != "job.cancel":
+    if e.get("job") and e["outcome"] != "accepted" and (e["command"] != "job.cancel" or e["outcome"] == "ok"):
         outcomes.setdefault(e["job"], []).append(e)
 accepted = [e for e in entries if e["outcome"] == "accepted"]
 missing = [f'{e["command"]} {e["job"]}' for e in accepted
-           if [o["command"] for o in outcomes.get(e["job"], [])] != [e["command"]]]
+           if [o["command"] for o in outcomes.get(e["job"], [])] not in ([e["command"]], ["job.cancel"])]
 check(accepted and not missing, f"each of {len(accepted)} accepted jobs has one outcome entry"
       + (f"; not: {missing[:10]}" if missing else ""))
 ids = {e["job"] for e in accepted}
