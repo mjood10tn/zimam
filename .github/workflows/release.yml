@@ -1,6 +1,6 @@
 name: release
 
-# A vX.Y.Z tag releases everything together (design §3), in three jobs.
+# A vX.Y.Z tag releases everything together (design §3), in four jobs.
 # - panel builds the panel tarball. It runs Composer, npm and the code they
 #   install, so it gets no secret.
 # - build holds the signing key. Every secret a job uses sits in its runner's
@@ -8,6 +8,9 @@ name: release
 #   commit, and restores no cache. It builds the agents and install.sh
 #   itself, takes nothing from panel but the tarball (hashed, never
 #   unpacked), signs, and runs every gate.
+# - vps runs vps.yml: every e2e scenario and probe on fresh Hetzner Cloud
+#   servers, amd64 and arm64 (design §14.3). It gets HCLOUD_TOKEN only,
+#   never the signing key, since it runs Composer and npm.
 # - publish, the one job with write access, creates the GitHub release once
 #   every gate has passed.
 on:
@@ -111,8 +114,15 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+  vps:
+    uses: ./.github/workflows/vps.yml
+    permissions:
+      contents: read
+    secrets:
+      HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+
   publish:
-    needs: build
+    needs: [build, vps]
     runs-on: ubuntu-26.04
     permissions:
       contents: write

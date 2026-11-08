@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Stands in for lxc when the e2e scripts drive a real server (E2E_TARGET=vps,
+# common.sh's lxc()). Only what the scripts use after up.sh:
+#   lxc-ssh exec <container> [--cwd <dir>] -- <command> [args...]
+#   lxc-ssh file push [-q] [--mode <mode>] <file> <container>/<path>
+# The container name is ignored: the server is E2E_SSH (root@<address>),
+# with the key E2E_SSH_KEY. Arguments are quoted for the remote bash, stdin
+# and the exit code pass through, and one master connection serves every
+# call (the probes make hundreds).
+set -Eeuo pipefail
+
+: "${E2E_SSH:?E2E_SSH is root@<server>}"
+work=${E2E_WORK:-/tmp/zimam-e2e}
+opts=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$work/known_hosts"
+	-o ControlMaster=auto -o "ControlPath=$work/ssh-%C" -o ControlPersist=15m
+	-o ServerAliveInterval=15 -o ConnectTimeout=20 -o LogLevel=ERROR)
+[[ -z ${E2E_SSH_KEY:-} ]] || opts+=(-i "$E2E_SSH_KEY" -o IdentitiesOnly=yes)
+
+# remote <command line> runs one line of bash on the server.
+remote() {
+	# shellcheck disable=SC2029 # the line is built to run on the server
+	ssh "${opts[@]}" "$E2E_SSH" "$1"
+}
+
+case ${1:-} in
+exec)
+	shift 2
+	cwd=/
+	while [[ ${1:-} != -- ]]; do
+		case ${1:-} in
+		--cwd)
+			cwd=$2
+			shift 2
+			;;
+		*)
+			echo "lxc-ssh: exec takes --cwd only, not ${1:-nothing}" >&2
+			exit 2
+			;;
+		esac
+	done
+	shift
+	remote "cd $(printf '%q' "$cwd") && exec $(printf '%q ' "$@")"
+	;;
+file)
+	[[ ${2:-} == push ]] || {
+		echo "lxc-ssh: file ${2:-} isn't supported" >&2
+		exit 2
+	}
+	shift 2
+	mode=0644
+	while [[ ${1:-} == -* ]]; do
+		case $1 in
+		-q) shift ;;
+		--mode)
+			mode=$2
+			shift 2
+			;;
+		*)
+			echo "lxc-ssh: file push takes -q and --mode only, not $1" >&2
+			exit 2
+			;;
+		esac
+	done
+	src=$1 dest=/${2#*/}
+	remote "t=\$(mktemp) && cat >\"\$t\" && install -m $(printf '%q' "$mode") \"\$t\" $(printf '%q' "$dest") && rm -f \"\$t\"" <"$src"
+	;;
+*)
+	echo "lxc-ssh: ${1:-no command} isn't supported" >&2
+	exit 2
+	;;
+esac

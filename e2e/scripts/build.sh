@@ -4,7 +4,8 @@
 #   - a throwaway release key, and an e2e release whose base URL is this
 #     host on the LXD bridge;
 #   - the panel with its dev dependencies, for the contract suite;
-#   - the probe client and the root-only test binaries.
+#   - the probe client and the root-only test binaries, for E2E_GOARCH
+#     (the server's architecture; this host's by default).
 # Needs state.env from up.sh, for the bridge address.
 # shellcheck source=common.sh
 source "$(dirname "$0")/common.sh"
@@ -33,7 +34,8 @@ git -C "$E2E_ROOT" archive --format=tar HEAD:panel | tar -x -C "$w/contract-test
 	php artisan key:generate
 )
 
-log "the probe client and the root-only tests"
+log "the probe client and the root-only tests, for ${E2E_GOARCH:-this host}"
+[[ -z ${E2E_GOARCH:-} ]] || export GOARCH=$E2E_GOARCH
 (cd "$E2E_ROOT/e2e/probeclient" && CGO_ENABLED=0 go build -trimpath -o "$w/bin/probeclient" .)
 (
 	cd "$E2E_ROOT/agent" || exit

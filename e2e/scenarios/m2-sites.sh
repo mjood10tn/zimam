@@ -8,7 +8,7 @@ load_state
 
 # get <name> prints the site's body over HTTP, from this host.
 get() {
-	curl -fsS -m 10 --resolve "$1.zimam.test:80:$CIP" "http://$1.zimam.test/"
+	curl -fsS -m 10 --resolve "$1.$E2E_DOMAIN:80:$CIP" "http://$1.$E2E_DOMAIN/"
 }
 
 body=$(get static) || die "FAIL done-when 4: static didn't answer"

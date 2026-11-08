@@ -1,11 +1,12 @@
 // Chromium on this host drives the real panel in the container (design
-// §14.2, D12). The test names resolve to the container, and Pebble's issuing
-// root is trusted through the NSS database (e2e/scripts/browser.sh). The
+// §14.2, D12), or on a real server (E2E_TARGET=vps). The test names resolve
+// to it (CIP), and the run's root (Pebble's issuing root, or Let's Encrypt's
+// staging roots) is trusted through the NSS database (e2e/scripts/browser.sh). The
 // recovery spec reuses the admin the setup spec creates, and the milestone
 // 2 specs the one recovery leaves, so they run in that order, one at a
 // time.
 import { defineConfig, devices } from '@playwright/test';
-import { readState, work } from './support.ts';
+import { domain, readState, work } from './support.ts';
 
 const { CIP } = readState();
 
@@ -22,7 +23,7 @@ export default defineConfig({
     ...devices['Desktop Chrome'],
     actionTimeout: 15_000,
     navigationTimeout: 30_000,
-    launchOptions: { args: [`--host-resolver-rules=MAP *.zimam.test ${CIP}`] },
+    launchOptions: { args: [`--host-resolver-rules=MAP *.${domain} ${CIP}`] },
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },

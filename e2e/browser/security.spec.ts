@@ -6,7 +6,7 @@
 // with its settings as they were: HTTPS forced, nothing else on.
 import { writeFileSync } from 'node:fs';
 import { expect, type Page, test } from '@playwright/test';
-import { panel, password, readState, scenario, signInAsAdmin, untilText, work } from './support.ts';
+import { domain, panel, password, readState, scenario, signInAsAdmin, target, untilText, work } from './support.ts';
 
 const minutes = 60_000;
 
@@ -36,7 +36,7 @@ async function setSwitch(page: Page, name: string, on: boolean): Promise<void> {
 // page's URL.
 async function openSecurityTab(page: Page): Promise<string> {
   await page.goto(`${panel}/admin/sites`);
-  await page.getByRole('row').filter({ hasText: 'php84.zimam.test' }).getByText('php84', { exact: true }).click();
+  await page.getByRole('row').filter({ hasText: `php84.${domain}` }).getByText('php84', { exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/sites\/\d+$/);
   await page.getByRole('tab', { name: 'Security' }).click();
   await expect(page.getByRole('button', { name: 'Save security settings' })).toBeEnabled();
@@ -76,7 +76,10 @@ async function apply(page: Page, s: Settings, outcome: 'succeeded' | 'failed', u
 
 test('done-when 9: every security setting applied from the panel, the checks, and a broken config', async ({ page }) => {
   test.setTimeout(30 * minutes);
-  const { BRIDGE } = readState();
+  // This host as the server sees it: the LXD bridge, or the runner's
+  // public address on a VPS.
+  const { BRIDGE, CLIENT } = readState();
+  const client = CLIENT ?? BRIDGE;
   scenario('m3-security.sh', 'setup');
   await signInAsAdmin(page);
 
@@ -101,18 +104,18 @@ test('done-when 9: every security setting applied from the panel, the checks, an
       await page.reload();
       await expect(page.getByText('Every check passes.')).toHaveCount(3);
       const server = page.getByRole('region', { name: 'Server' });
-      await expect(server.locator('dt:has-text("Firewall active") + dd')).toContainText('Fail');
+      await expect(server.locator('dt:has-text("Firewall active") + dd')).toContainText(target === 'vps' ? 'Pass' : 'Fail');
       await expect(server.locator('dt:has-text("Agent socket permissions") + dd')).toContainText('Pass');
       scenario('m3-security.sh', 'checks');
     });
 
     await test.step('the deny list', async () => {
-      await apply(page, { ...baseline, deny: BRIDGE }, 'succeeded');
+      await apply(page, { ...baseline, deny: client }, 'succeeded');
       scenario('m3-security.sh', 'deny');
     });
 
     await test.step('the allow list', async () => {
-      await apply(page, { ...baseline, allow: BRIDGE }, 'succeeded');
+      await apply(page, { ...baseline, allow: client }, 'succeeded');
       scenario('m3-security.sh', 'allow');
     });
 

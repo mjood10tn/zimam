@@ -10,10 +10,10 @@ out=$(in_c runuser -u ubuntu -- php -r 'echo PHP_VERSION;') || die "FAIL done-wh
 [[ $out == 8.4.* ]] || die "FAIL done-when 6: php as ubuntu runs $out, want 8.4"
 echo "PASS  done-when 6: php over SSH runs $out"
 
-root=$E2E_WORK/pebble-root.pem
+root=$E2E_CA
 for site in php84:8.4 php85:8.5; do
 	name=${site%%:*} v=${site#*:}
-	body=$(curl -fsS -m 10 --resolve "$name.zimam.test:443:$CIP" --cacert "$root" "https://$name.zimam.test/") ||
+	body=$(curl -fsS -m 10 --resolve "$name.$E2E_DOMAIN:443:$CIP" --cacert "$root" "https://$name.$E2E_DOMAIN/") ||
 		die "FAIL done-when 6: $name didn't answer"
 	[[ $body == "Zimam site $name is ready. PHP $v."* ]] || die "FAIL done-when 6: $name answered: $body"
 	echo "PASS  done-when 6: $name still runs PHP $v"

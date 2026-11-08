@@ -2,7 +2,8 @@
 # Sourced by the end-to-end scripts: names, the work directory and the
 # helpers they share. Settings come from the environment, so the same
 # scripts run on a GitHub runner and on a local VM that hosts LXD
-# (README.md).
+# (README.md), and against a real server over SSH (E2E_TARGET=vps,
+# e2e/vps/README.md).
 set -Eeuo pipefail
 
 E2E_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -11,9 +12,27 @@ E2E_CONTAINER=${E2E_CONTAINER:-zimam-e2e}
 E2E_IMAGE=${E2E_IMAGE:-ubuntu:26.04}
 E2E_VERSION=${E2E_VERSION:-0.0.0-e2e}
 E2E_PORT=8080
-E2E_PANEL=panel.zimam.test
-# The names the milestones use; challtestsrv answers them with the container.
-E2E_NAMES=(panel.zimam.test static.zimam.test php84.zimam.test php85.zimam.test)
+# lxd: an LXD container on this host, with Pebble. vps: a real server that
+# e2e/vps/create.sh made, reached over SSH (E2E_SSH, its user@address),
+# with Let's Encrypt staging and the server's firewall on.
+E2E_TARGET=${E2E_TARGET:-lxd}
+# The domain every test name sits under: challtestsrv answers zimam.test
+# with the container; on a VPS, sslip.io answers <ip-with-dashes>.sslip.io.
+E2E_DOMAIN=${E2E_DOMAIN:-zimam.test}
+E2E_PANEL=panel.$E2E_DOMAIN
+E2E_NAMES=("$E2E_PANEL" "static.$E2E_DOMAIN" "php84.$E2E_DOMAIN" "php85.$E2E_DOMAIN")
+# A setup link, as the installer and `panel setup-link` print it.
+E2E_SETUP_LINK="^https://${E2E_PANEL//./\\.}/setup/[A-Za-z0-9_-]{43}\$"
+# The root the test clients trust, and how the installer reaches the ACME
+# server and the firewall: browser.sh fetches this Pebble run's root; on a
+# VPS, create.sh writes Let's Encrypt's staging roots, pinned in vps.yml.
+if [[ $E2E_TARGET == vps ]]; then
+	E2E_CA=$E2E_WORK/staging-roots.pem
+	E2E_INSTALL_FLAGS="--acme-server https://acme-staging-v02.api.letsencrypt.org/directory"
+else
+	E2E_CA=$E2E_WORK/pebble-root.pem
+	E2E_INSTALL_FLAGS="--acme-server https://pebble:14000/dir --acme-ca-bundle /root/pebble-ca.pem --skip-firewall"
+fi
 
 log() { printf '== %s\n' "$*" >&2; }
 die() {
@@ -30,9 +49,14 @@ as_root() {
 	fi
 }
 
-# lxc finds the snap's lxc even before /snap/bin is on PATH.
+# lxc finds the snap's lxc even before /snap/bin is on PATH. On a VPS,
+# e2e/vps/lxc-ssh stands in for it: its exec and file push go over SSH.
 lxc() {
-	as_root "$(type -P lxc || echo /snap/bin/lxc)" "$@"
+	if [[ $E2E_TARGET == vps ]]; then
+		E2E_WORK=$E2E_WORK "$E2E_ROOT/e2e/vps/lxc-ssh" "$@"
+	else
+		as_root "$(type -P lxc || echo /snap/bin/lxc)" "$@"
+	fi
 }
 
 # in_c runs a command in the container as root.
@@ -40,12 +64,17 @@ in_c() {
 	lxc exec "$E2E_CONTAINER" -- "$@"
 }
 
-# load_state reads what up.sh found: BRIDGE (this host on the LXD bridge)
-# and CIP (the container's address).
+# load_state reads what up.sh found: BRIDGE (this host on the LXD bridge,
+# where the container gets the release) and CIP (the container's address).
+# On a VPS, create.sh writes them: BRIDGE is 127.0.0.1, since the release is
+# served on the server itself; CIP and CIP6 are its public addresses, and
+# CLIENT is this host's address as the server sees it. CLIENT is BRIDGE in
+# LXD.
 load_state() {
 	[[ -f $E2E_WORK/state.env ]] || die "no $E2E_WORK/state.env: run e2e/scripts/up.sh first"
 	# shellcheck source=/dev/null
 	source "$E2E_WORK/state.env"
+	CLIENT=${CLIENT:-$BRIDGE}
 }
 
 # The panel's PHP binary, from its queue unit: plain php is the server's

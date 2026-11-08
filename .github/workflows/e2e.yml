@@ -23,7 +23,7 @@ jobs:
             set -eu
             apt-get update -qq
             DEBIAN_FRONTEND=noninteractive apt-get install -y -qq shellcheck >/dev/null
-            shellcheck e2e/scripts/*.sh e2e/scenarios/*.sh e2e/probes/*.sh'
+            shellcheck e2e/scripts/*.sh e2e/scenarios/*.sh e2e/probes/*.sh e2e/vps/*.sh e2e/vps/lxc-ssh'
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: agent/go.mod

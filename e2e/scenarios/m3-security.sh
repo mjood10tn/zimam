@@ -20,8 +20,8 @@
 source "$(dirname "$0")/../scripts/common.sh"
 load_state
 
-host=php84.zimam.test
-root=$E2E_WORK/pebble-root.pem
+host=php84.$E2E_DOMAIN
+root=$E2E_CA
 public=/home/s_php84/site/current/public
 token=/var/www/zimam-acme/.well-known/acme-challenge/zimam-e2e-token
 creds=$E2E_WORK/basic-auth # user:password, written by the browser spec
@@ -119,11 +119,11 @@ off)
 	expect "hostname.php with PHP not kept in the site's folder" "$(body)" "hostname read"
 	;;
 deny)
-	expect "this host ($BRIDGE) on the deny list" "$(code https /)" 403
+	expect "this host ($CLIENT) on the deny list" "$(code https /)" 403
 	expect "the container (127.0.0.1), not on the deny list" "$(inside /)" 200
 	;;
 allow)
-	expect "this host ($BRIDGE), alone on the allow list" "$(code https /)" 200
+	expect "this host ($CLIENT), alone on the allow list" "$(code https /)" 200
 	expect "the container (127.0.0.1), not on the allow list" "$(inside /)" 403
 	;;
 password)
@@ -137,15 +137,15 @@ password)
 	;;
 checks)
 	rows=$(panel_sql 'select coalesce(s.name, "") as site, f."check" as name, f.status, f.detail from security_findings f left join sites s on s.id = f.site_id order by f.id')
-	python3 -I - "$rows" <<'PY' || die "FAIL done-when 9: the checks above"
+	python3 -I - "$rows" "$E2E_TARGET" <<'PY' || die "FAIL done-when 9: the checks above"
 import json, sys
 
 rows = json.loads(sys.argv[1])
 site_checks = ["dotfiles_blocked", "config_matches_template", "no_world_writable_files", "php_version_supported",
                "pool_runs_as_site_user", "home_permissions", "certificate_valid", "https_redirect"]
-# The e2e container has no firewall (install.sh --skip-firewall); its
-# pending updates and reboot flag depend on the image of the day.
-server = {"firewall_active": {"fail"}, "ssh_password_login": {"pass"}, "ssh_root_login": {"pass"},
+# The e2e container has no firewall (install.sh --skip-firewall); a VPS has
+# UFW on. The pending updates and reboot flag depend on the image of the day.
+server = {"firewall_active": {"pass" if sys.argv[2] == "vps" else "fail"}, "ssh_password_login": {"pass"}, "ssh_root_login": {"pass"},
           "security_updates_pending": {"pass", "warn"}, "reboot_required": {"pass", "warn"},
           "stock_www_pools_removed": {"pass"}, "agent_socket_permissions": {"pass"}}
 want = {(site, c): {"pass"} for site in ("static", "php84", "php85") for c in site_checks}

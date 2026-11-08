@@ -1,11 +1,12 @@
 // Milestone 2's sites (design §2, §9, §10), through the panel as the admin:
 // done-when 4 creates a static site and two PHP sites on different
-// versions, done-when 7 issues their certificates from Pebble, and
+// versions, done-when 7 issues their certificates (from Pebble, or Let's
+// Encrypt staging on a VPS), and
 // done-when 5 switches php84 to PHP 8.5 and back while a request loop runs
 // over HTTPS. The checks from outside the browser are the scenarios' (e2e/
 // scenarios/m2-*.sh). The sites stay, for milestone 3.
 import { expect, type Page, test } from '@playwright/test';
-import { panel, scenario, signInAsAdmin, untilText } from './support.ts';
+import { domain, panel, scenario, signInAsAdmin, untilText } from './support.ts';
 
 const minutes = 60_000;
 
@@ -14,7 +15,7 @@ const minutes = 60_000;
 async function create(page: Page, name: string, php: string | null): Promise<string> {
   await page.goto(`${panel}/admin/sites/create`);
   await page.getByRole('textbox', { name: /^Name/ }).fill(name);
-  await page.getByRole('textbox', { name: /^Domain/ }).fill(`${name}.zimam.test`);
+  await page.getByRole('textbox', { name: /^Domain/ }).fill(`${name}.${domain}`);
   if (php === null) {
     await page.locator('label[for="form.type-static"]').click();
   } else {
@@ -58,7 +59,7 @@ test('done-when 4, 7 and 5: three sites, their certificates, and a switch withou
     scenario('m2-sites.sh');
   });
 
-  await test.step('done-when 7: certificates from Pebble, and HTTPS everywhere', async () => {
+  await test.step('done-when 7: certificates, and HTTPS everywhere', async () => {
     for (const name of ['static', 'php84', 'php85']) {
       await issueCertificate(page, urls[name]);
     }

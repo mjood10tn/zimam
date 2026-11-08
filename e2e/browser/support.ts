@@ -9,7 +9,11 @@ import { expect, type Page } from '@playwright/test';
 import { generate } from 'otplib';
 
 export const work = process.env.E2E_WORK ?? '/tmp/zimam-e2e';
-export const panel = 'https://panel.zimam.test';
+// The domain the test names sit under, and where the panel runs: an LXD
+// container, or a real server (E2E_TARGET=vps, e2e/scripts/common.sh).
+export const domain = process.env.E2E_DOMAIN ?? 'zimam.test';
+export const target = process.env.E2E_TARGET ?? 'lxd';
+export const panel = `https://panel.${domain}`;
 
 export function readState(): Record<string, string> {
   const text = readFileSync(`${work}/state.env`, 'utf8');
@@ -32,7 +36,7 @@ export function newSetupLink(): string {
   const asSh = fileURLToPath(new URL('../scripts/as.sh', import.meta.url));
   const out = execFileSync('bash', [asSh, 'root', 'zimam-agent', 'panel', 'setup-link'], { encoding: 'utf8' });
   const link = out.split('\n')[0];
-  expect(link).toMatch(/^https:\/\/panel\.zimam\.test\/setup\/[A-Za-z0-9_-]{43}$/);
+  expect(link).toMatch(new RegExp(`^${panel.replace(/[.]/g, '\\.')}/setup/[A-Za-z0-9_-]{43}$`));
   expect(out).toContain('Panel IP allowlist: ');
   return link;
 }

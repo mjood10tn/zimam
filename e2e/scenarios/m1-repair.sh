@@ -10,14 +10,14 @@ load_state
 installed=$(in_c /usr/local/sbin/zimam-agent version)
 [[ $installed == "$E2E_VERSION" ]] || die "FAIL repair: the installed agent reports $installed, not $E2E_VERSION"
 cmd="curl -fsSL http://$BRIDGE:$E2E_PORT/latest/download/install.sh | bash -s -- --panel-domain $E2E_PANEL"
-cmd+=" --acme-server https://pebble:14000/dir --acme-ca-bundle /root/pebble-ca.pem --skip-firewall --yes"
+cmd+=" $E2E_INSTALL_FLAGS --yes"
 log "$cmd"
 code=0
 in_c bash -c "$cmd" >"$E2E_WORK/repair.out" 2>"$E2E_WORK/repair.err" || code=$?
 cat "$E2E_WORK/repair.err" >&2
 [[ $code == 0 ]] || die "FAIL repair: the installer exited $code"
 last=$(tail -n 1 "$E2E_WORK/repair.out")
-[[ $last =~ ^https://panel\.zimam\.test/setup/[A-Za-z0-9_-]{43}$ ]] ||
+[[ $last =~ $E2E_SETUP_LINK ]] ||
 	die "FAIL repair: the installer's last line isn't a setup link: $last"
 grep -q 'panel-release: already done' "$E2E_WORK/repair.err" ||
 	die "FAIL repair: bootstrap installed the panel release again"

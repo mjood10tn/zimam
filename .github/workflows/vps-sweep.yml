@@ -1,0 +1,30 @@
+name: vps-sweep
+
+# Deletes Hetzner Cloud servers and SSH keys labelled zimam-vps that a
+# vps.yml run left behind (e2e/vps/README.md): daily, and by hand. API
+# calls only; no server is created.
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: Delete what is older than this many hours
+        default: '3'
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: sweep
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          HOURS: ${{ inputs.hours || '3' }}
+        run: bash e2e/vps/sweep.sh "$HOURS"

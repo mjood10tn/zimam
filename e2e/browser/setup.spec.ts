@@ -35,6 +35,6 @@ test('the setup link creates the admin, who must set up 2FA, and signing in agai
   await expectDashboard(page);
 
   // The link was single use. (page.goto, not page.request: only the
-  // browser resolves the test names and trusts Pebble's root.)
+  // browser resolves the test names and trusts the run's root.)
   expect((await page.goto(link))?.status()).toBe(404);
 });

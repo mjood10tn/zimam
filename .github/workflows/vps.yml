@@ -1,0 +1,109 @@
+name: vps
+
+# The real-server run (design §14.3): every e2e scenario and probe against a
+# fresh Hetzner Cloud server per architecture (D2), installed from an e2e
+# release against Let's Encrypt staging with UFW on, its names from
+# sslip.io. release.yml calls it before publishing; it can also be started
+# by hand. See e2e/vps/README.md. HCLOUD_TOKEN reaches only the steps that
+# create and delete the server, never the build or the tests.
+on:
+  workflow_call:
+    secrets:
+      HCLOUD_TOKEN:
+        required: true
+  workflow_dispatch:
+    inputs:
+      keep_server:
+        description: Leave the servers for the sweep instead of deleting them (to test vps-sweep.yml)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  # SHA-256 of https://letsencrypt.org/certs/staging/letsencrypt-stg-root-x1.pem
+  # and -x2.pem, checked on 2026-11-08; the test clients trust only these.
+  STAGING_ROOT_SHA256: |
+    3a5e1171e5f5c2d41522d438f225602e4236a68fb29c32399a95921a4ae80e73
+    497c36c1b50c0daff30870d5908c9b97af29223d5510c5e6c24957d0cc502fb8
+
+jobs:
+  vps:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 90
+    env:
+      E2E_GOARCH: ${{ matrix.arch }}
+      E2E_VPS_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.3'
+          extensions: intl, mbstring, pdo_sqlite, sqlite3, zip
+          tools: composer
+          coverage: none
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: |
+            panel/package-lock.json
+            e2e/browser/package-lock.json
+      - name: work directory
+        run: echo "E2E_WORK=$RUNNER_TEMP/zimam-e2e" >>"$GITHUB_ENV"
+      - name: create the server, wait for SSH and sslip.io
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: |
+          bash e2e/vps/create.sh
+          cat "$E2E_WORK/vps.env" >>"$GITHUB_ENV"
+      - name: build the e2e release, the contract copy and the probe tools
+        run: bash e2e/scripts/build.sh
+      - name: serve the release on the server
+        run: bash e2e/scripts/serve-release.sh
+      - name: install with curl | bash, Let's Encrypt staging, UFW on
+        run: bash e2e/scripts/install.sh
+      - name: done-when 1, the setup link
+        run: bash e2e/scenarios/m1-install.sh
+      - name: done-when 2 and recovery, in the browser
+        run: bash e2e/scripts/browser.sh --project recovery
+      - name: the contract suite against the real agent
+        run: bash e2e/scenarios/m1-contract.sh
+      - name: the root-only Go tests
+        run: bash e2e/scenarios/m1-roottests.sh
+      - name: done-when 3 to 7, PHP versions, sites, certificates and the switch, in the browser
+        run: bash e2e/scripts/browser.sh --project m2-default
+      - name: done-when 8 to 10, monitoring, php84's security and the log settings, in the browser
+        run: bash e2e/scripts/browser.sh --project m3-settings
+      - name: done-when 12, every root-escalation probe in one pass between two identical snapshots
+        run: bash e2e/probes/run-all.sh
+      - name: done-when 11, the audit re-check
+        run: bash e2e/scenarios/audit.sh
+      - name: IPv4 over real DNS, and IPv6 on the server
+        run: bash e2e/vps/ipv6.sh
+      - name: running the installer again repairs, after the version check
+        run: bash e2e/scenarios/m1-repair.sh
+      - name: collect logs
+        if: failure()
+        run: bash e2e/scripts/collect-logs.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: vps-logs-${{ matrix.arch }}
+          path: ${{ runner.temp }}/zimam-e2e/logs
+      - name: delete the server
+        if: always() && !inputs.keep_server
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: bash e2e/vps/destroy.sh

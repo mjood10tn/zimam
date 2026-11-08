@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Done-when 5 (design §2, §9.5): a loop requests https://php84.zimam.test/
+# Done-when 5 (design §2, §9.5): a loop requests https://php84.$E2E_DOMAIN/
 # every 50 ms while the panel switches php84 to PHP 8.5 and back.
 #   m2-switch.sh start   starts the loop in the background
 #   m2-switch.sh stop    stops it, then checks it: every response was 200,
@@ -9,7 +9,7 @@ source "$(dirname "$0")/../scripts/common.sh"
 load_state
 
 dir=$E2E_WORK/switch
-host=php84.zimam.test
+host=php84.$E2E_DOMAIN
 
 case ${1:-} in
 start)
@@ -24,7 +24,7 @@ start)
 			printf "%s %s\n" "${code:-000}" "$(sed -n "s/.* PHP \([0-9.]*\).*/\1/p" "$0/body" 2>/dev/null)"
 			rm -f "$0/body"
 			sleep 0.05
-		done' "$dir" "$host" "$CIP" "$E2E_WORK/pebble-root.pem" >"$dir/results" 2>"$dir/loop.err" </dev/null &
+		done' "$dir" "$host" "$CIP" "$E2E_CA" >"$dir/results" 2>"$dir/loop.err" </dev/null &
 	echo $! >"$dir/pid"
 	sleep 2
 	[[ -s $dir/results ]] || die "the request loop isn't answering: $(cat "$dir/loop.err" "$dir/curl.err" 2>/dev/null)"
