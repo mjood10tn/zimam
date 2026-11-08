@@ -5,8 +5,8 @@
 // done-when 5 switches php84 to PHP 8.5 and back while a request loop runs
 // over HTTPS. The checks from outside the browser are the scenarios' (e2e/
 // scenarios/m2-*.sh). The sites stay, for milestone 3.
-import { expect, type Page, test } from '@playwright/test';
-import { domain, panel, scenario, signInAsAdmin, untilText } from './support.ts';
+import { expect, type Page } from '@playwright/test';
+import { domain, panel, scenario, signInAsAdmin, untilText, test } from './support.ts';
 
 const minutes = 60_000;
 

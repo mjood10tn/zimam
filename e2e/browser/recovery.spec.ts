@@ -1,8 +1,8 @@
 // Recovery (design §4): `sudo zimam-agent panel setup-link` prints a new
 // link and invalidates the old one. With an admin, the link resets its
 // email, password and 2FA, and the next sign-in must set up 2FA again.
-import { expect, test } from '@playwright/test';
-import { enrol, expectDashboard, loadAdmin, newSetupLink, password, saveAdmin, signIn, signOut } from './support.ts';
+import { expect } from '@playwright/test';
+import { enrol, expectDashboard, loadAdmin, newSetupLink, password, saveAdmin, signIn, signOut, test } from './support.ts';
 
 test('a new setup link from SSH resets access and 2FA', async ({ page }) => {
   const admin = loadAdmin();

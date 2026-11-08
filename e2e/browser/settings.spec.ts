@@ -3,8 +3,8 @@
 // retention set to 1 day in Settings deletes an archive backdated 3 days,
 // and nothing else. The checks from outside the browser are e2e/scenarios/
 // m3-logs.sh's.
-import { expect, test } from '@playwright/test';
-import { panel, scenario, signInAsAdmin } from './support.ts';
+import { expect } from '@playwright/test';
+import { panel, scenario, signInAsAdmin, test } from './support.ts';
 
 test('done-when 10: rotation at 200 MB, and retention set in Settings', async ({ page }) => {
   test.setTimeout(30 * 60_000);

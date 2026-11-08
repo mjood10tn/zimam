@@ -1,8 +1,8 @@
 // Milestone 2's PHP versions (design §2, §8), through the panel as the
 // admin: done-when 3 installs a second version, and done-when 6, after the
 // sites exist, makes it the default.
-import { expect, type Page, test } from '@playwright/test';
-import { panel, scenario, signInAsAdmin } from './support.ts';
+import { expect, type Page } from '@playwright/test';
+import { panel, scenario, signInAsAdmin, test } from './support.ts';
 
 // row is the PHP versions table's row for a version.
 function row(page: Page, version: string) {

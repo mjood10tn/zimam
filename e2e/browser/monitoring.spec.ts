@@ -2,8 +2,8 @@
 // as the admin: the Monitoring page shows live values from system.metrics,
 // read again every 5 seconds. The checks of the stored samples and their
 // pruning are e2e/scenarios/m3-monitoring.sh's.
-import { expect, test } from '@playwright/test';
-import { panel, scenario, signInAsAdmin } from './support.ts';
+import { expect } from '@playwright/test';
+import { panel, scenario, signInAsAdmin, test } from './support.ts';
 
 test('done-when 8: metric samples, their pruning, and live values on the Monitoring page', async ({ page }) => {
   test.setTimeout(10 * 60_000);

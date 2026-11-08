@@ -2,8 +2,8 @@
 // email and password, and after the first sign-in the panel makes you set
 // up 2FA. Then signing in again asks for a code.
 import { readFileSync } from 'node:fs';
-import { expect, test } from '@playwright/test';
-import { code, enrol, expectDashboard, panel, password, saveAdmin, signIn, signOut, work } from './support.ts';
+import { expect } from '@playwright/test';
+import { code, enrol, expectDashboard, panel, password, saveAdmin, signIn, signOut, work, test } from './support.ts';
 
 test('the setup link creates the admin, who must set up 2FA, and signing in again asks for a code', async ({ page }) => {
   const link = readFileSync(`${work}/setup-link`, 'utf8').trim();

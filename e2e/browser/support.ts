@@ -5,7 +5,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { expect, type Page } from '@playwright/test';
+import { test as base, expect, type Locator, type Page } from '@playwright/test';
 import { generate } from 'otplib';
 
 export const work = process.env.E2E_WORK ?? '/tmp/zimam-e2e';
@@ -19,6 +19,57 @@ export function readState(): Record<string, string> {
   const text = readFileSync(`${work}/state.env`, 'utf8');
   return Object.fromEntries(text.trim().split('\n').map((line) => line.split('=', 2) as [string, string]));
 }
+
+// settle waits until the page's Livewire components and its eagerly loaded
+// Alpine components (Filament's x-load, such as the password field's
+// reveal button) have started. Filament fetches those after the page's
+// load event, and starting one resets its field: over a real server's
+// latency (vps.yml), a field filled before then lost its value. It gives up
+// after 15 s and lets the action run anyway.
+export async function settle(page: Page): Promise<void> {
+  await page
+    .waitForFunction(
+      () =>
+        [...document.querySelectorAll('[wire\\:id]')].every((el) => '__livewire' in el) &&
+        [...document.querySelectorAll('[x-load]')]
+          .filter((el) => ['', 'eager'].includes(el.getAttribute('x-load') ?? ''))
+          .every((el) => '_x_dataStack' in el),
+      null,
+      { timeout: 15_000 },
+    )
+    .catch(() => console.warn(`settle: the page at ${page.url()} hadn't started within 15 s`));
+}
+
+// test is Playwright's, with every fill, selectOption and keyboard.type
+// waiting for settle first. The specs import it from here.
+let patched = false;
+export const test = base.extend<{ settled: void }>({
+  settled: [
+    async ({ page }, use) => {
+      if (!patched) {
+        const proto = Object.getPrototypeOf(page.locator('body')) as Locator;
+        for (const name of ['fill', 'selectOption', 'pressSequentially'] as const) {
+          const original = proto[name] as (...args: unknown[]) => Promise<unknown>;
+          Object.defineProperty(proto, name, {
+            value: async function (this: Locator, ...args: unknown[]) {
+              await settle(this.page());
+              return original.apply(this, args);
+            },
+          });
+        }
+        patched = true;
+      }
+      const keyboard = page.keyboard;
+      const type = keyboard.type.bind(keyboard);
+      keyboard.type = async (text: string, options?: { delay?: number }) => {
+        await settle(page);
+        return type(text, options);
+      };
+      await use();
+    },
+    { auto: true },
+  ],
+});
 
 export type Admin = { email: string; password: string; secret: string; recoveryCodes: string[] };
 

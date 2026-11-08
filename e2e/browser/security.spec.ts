@@ -5,8 +5,8 @@
 // meets a broken Nginx config fails without touching the site. php84 ends
 // with its settings as they were: HTTPS forced, nothing else on.
 import { writeFileSync } from 'node:fs';
-import { expect, type Page, test } from '@playwright/test';
-import { domain, panel, password, readState, scenario, signInAsAdmin, target, untilText, work } from './support.ts';
+import { expect, type Page } from '@playwright/test';
+import { domain, panel, password, readState, scenario, signInAsAdmin, target, untilText, work, test } from './support.ts';
 
 const minutes = 60_000;
 
