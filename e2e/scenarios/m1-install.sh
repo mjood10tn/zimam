@@ -25,8 +25,9 @@ restore() {
 	in_c runuser -u zimam -- sh -c "cd $panel && ln -sfn '$current' cur.tmp && mv -T cur.tmp current && rm -rf x" || true
 }
 trap restore EXIT
+# Only the status matters here; the run's root is fetched later, by browser.sh.
 status() {
-	curl -sS -m 10 -o /dev/null -w '%{http_code}' --resolve "$E2E_PANEL:443:$CIP" --cacert "$E2E_CA" "https://$E2E_PANEL/$1"
+	curl -sS -m 10 -o /dev/null -w '%{http_code}' -k --resolve "$E2E_PANEL:443:$CIP" "https://$E2E_PANEL/$1"
 }
 code=$(status "$asset") || die "FAIL isolation: the panel didn't answer for /$asset"
 [ "$code" = 200 ] || die "FAIL isolation: the panel answered $code for /$asset"
