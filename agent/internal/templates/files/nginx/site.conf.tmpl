@@ -46,11 +46,13 @@ location overrides. */ -}}
     include /etc/nginx/zimam/{{safe .Name}}/security.conf;
 
     root /home/s_{{safe .Name}}/site/current/public;
-{{- /* www-data is in every site's group (§9.2), so a link from this site's
-files to another site's, or to /etc/nginx/zimam, would be served. Nginx
-follows a link below the root only when the link and its target have the
-same owner; the root's own path, current included, isn't checked. */}}
-    disable_symlinks if_not_owner from=$document_root;
+{{- /* www-data is in every site's group (§9.2) and reads every htpasswd,
+so a link the site owns must not reach another owner's files: not below the
+root, and not in the root's own path either, since the site owns current and
+public and can repoint them. Nginx checks every component from / and follows
+a link only when it and its target have the same owner; current ->
+releases/<r> is the site's own. */}}
+    disable_symlinks if_not_owner;
 {{- if .PHPVersion}}
     index index.php index.html;
 {{- else}}

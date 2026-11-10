@@ -49,6 +49,10 @@ server {
 
 {{define "nginx/panel.conf app"}}
     root /home/zimam/panel/current/public;
+{{- /* zimam owns current and public, and www-data is in every site's
+group: a link only works when it and its target have the same owner, so a
+compromised panel can't serve a site's files. */}}
+    disable_symlinks if_not_owner;
     index index.php index.html;
     autoindex off;
 {{template "nginx/panel.conf acme"}}
