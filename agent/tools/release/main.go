@@ -304,6 +304,18 @@ func verify(args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 	}
+	// release.yml publishes every file in the directory, so it must hold
+	// nothing the signed manifest doesn't list.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if _, listed := m.Artifacts[name]; !listed && name != "manifest.json" && name != "manifest.json.sig" {
+			return fmt.Errorf("%s is in the release directory but not in the manifest", name)
+		}
+	}
 	fmt.Fprintf(stdout, "release %s and its %d artifacts verified\n", m.Version, len(m.Artifacts))
 	return nil
 }

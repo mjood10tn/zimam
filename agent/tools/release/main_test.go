@@ -321,6 +321,10 @@ func TestVerifyCommand(t *testing.T) {
 			writeFile(t, name, strings.Replace(string(data), "0.1.0", "0.1.1", 1))
 		},
 		"missing signature": func(dir string) { os.Remove(filepath.Join(dir, "manifest.json.sig")) },
+		// publish uploads every file in the directory, so one the manifest
+		// doesn't list would ship unsigned.
+		"extra file":      func(dir string) { writeFile(t, filepath.Join(dir, "install-extra.sh"), "#!/bin/sh\n") },
+		"extra directory": func(dir string) { os.Mkdir(filepath.Join(dir, "sub"), 0o755) },
 	} {
 		dir, public := dist(t)
 		tamper(dir)
