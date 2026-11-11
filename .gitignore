@@ -8,6 +8,9 @@
 .DS_Store
 Thumbs.db
 
+# Editor files
+/.idea/
+
 # Release builds (.github/scripts/build-release.sh)
 /dist/
 
