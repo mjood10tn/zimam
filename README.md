@@ -18,11 +18,11 @@
 ---
 
 > [!WARNING]
-> **Zimam is early software.** v0.1.0 is the first release. It proves the core end to end: install, sites, PHP versions, certificates, monitoring, security settings and logs. Many features a production panel needs are still missing (see [Not yet](#not-yet)). Releases are signed with a development key, and the agent has not yet been reviewed by an outside security reviewer. Try it on a fresh server you can throw away, not on one that matters.
+> **Zimam is early software.** v0.1.0 is the first release. It proves the core end to end: install, sites, PHP versions, certificates, monitoring, security settings and logs. Many features a production panel needs are still missing (see [Not yet](#not-yet)). Releases are signed with a development key. Try it on a fresh server you can throw away, not on one that matters.
 
 ## What is Zimam?
 
-Zimam (زِمَام, Arabic for "reins") is for solo developers who run their own VPS and want something like Forge or Ploi without a hosted service in the middle. You install it on a clean Ubuntu 26.04 server with one command. You then manage the server from a web panel: PHP versions, sites, HTTPS certificates, security settings, monitoring and logs.
+Zimam (زِمَام, Arabic for "reins") is for solo developers who run their own VPS. You install it on a clean Ubuntu 26.04 server with one command. You then manage the server from a web panel: PHP versions, sites, HTTPS certificates, security settings, monitoring and logs.
 
 It has two parts:
 
@@ -110,7 +110,7 @@ Open the link within 60 minutes, then set your email and password. After your fi
 | --- | --- |
 | `--panel-domain <fqdn>` | Required. The panel's domain; it must already point at this server. |
 | `--email <address>` | Email for the Let's Encrypt account. |
-| `--php <x.y>` | Default PHP version for sites and the `php` command. Defaults to the newest supported version (8.5). |
+| `--php <x.y>` | Default PHP version for sites and the `php` command. Defaults to the newest supported version. |
 | `--version <x.y.z>` | Release to install. Defaults to the latest. |
 | `--skip-firewall` | Configure UFW but don't enable it. |
 | `--yes` | Never prompt. |
