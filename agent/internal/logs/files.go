@@ -12,7 +12,6 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
-	"strings"
 	"syscall"
 	"time"
 
@@ -225,7 +224,10 @@ func readPlain(ctx context.Context, open func(int64) (io.ReadCloser, int64, erro
 			return contract.LogsReadResult{}, err
 		}
 		defer rc.Close()
-		lines, end := scanLines(io.LimitReader(rc, window), min(from, size), n, -1, true)
+		lines, end := scanLines(ctx, io.LimitReader(rc, window), min(from, size), n, -1, true)
+		if err := ctx.Err(); err != nil {
+			return contract.LogsReadResult{}, err
+		}
 		return fileResult(lines, end), nil
 	}
 	rc, size, err := open(0)
@@ -243,7 +245,10 @@ func readPlain(ctx context.Context, open func(int64) (io.ReadCloser, int64, erro
 		return contract.LogsReadResult{}, err
 	}
 	defer rc.Close()
-	lines, _ := scanLines(io.LimitReader(rc, before-start), start, -1, before, start == 0)
+	lines, _ := scanLines(ctx, io.LimitReader(rc, before-start), start, -1, before, start == 0)
+	if err := ctx.Err(); err != nil {
+		return contract.LogsReadResult{}, err
+	}
 	if len(lines) > n {
 		lines = lines[len(lines)-n:]
 	}
@@ -269,15 +274,19 @@ func readStream(ctx context.Context, open func() (io.Reader, func() error, error
 	}
 	if p.Search != "" {
 		matches, next, stopped := search(ctx, r, base, p.Search)
+		if err := ctx.Err(); err != nil {
+			return contract.LogsReadResult{}, err
+		}
 		res := fileResult(matches, next)
 		res.SearchStopped = stopped
 		return res, nil
 	}
 	n := p.Limit.Lines()
+	canceled := func() bool { return ctx.Err() != nil }
 	if p.Direction == contract.LogForward {
 		var lines []contract.FileLogLine
 		end := int64(0)
-		forEachLine(r, base, func(l contract.FileLogLine, next int64) bool {
+		forEachLine(r, base, canceled, func(l contract.FileLogLine, next int64) bool {
 			end = next
 			if l.Offset < from {
 				return true
@@ -285,6 +294,9 @@ func readStream(ctx context.Context, open func() (io.Reader, func() error, error
 			lines = append(lines, l)
 			return len(lines) < n
 		})
+		if err := ctx.Err(); err != nil {
+			return contract.LogsReadResult{}, err
+		}
 		if len(lines) == 0 {
 			end = max(end, from)
 		}
@@ -292,7 +304,7 @@ func readStream(ctx context.Context, open func() (io.Reader, func() error, error
 	}
 	var ring []contract.FileLogLine
 	end := int64(0)
-	forEachLine(r, base, func(l contract.FileLogLine, next int64) bool {
+	forEachLine(r, base, canceled, func(l contract.FileLogLine, next int64) bool {
 		if from >= 0 && next > from {
 			return false
 		}
@@ -303,6 +315,9 @@ func readStream(ctx context.Context, open func() (io.Reader, func() error, error
 		}
 		return true
 	})
+	if err := ctx.Err(); err != nil {
+		return contract.LogsReadResult{}, err
+	}
 	return fileResult(ring, end), nil
 }
 
@@ -332,29 +347,42 @@ type offsetReader struct {
 func (o *offsetReader) Read(b []byte) (int, error) { return o.r.Read(b) }
 
 // forEachLine calls fn with each complete line from r, which starts at
-// offset base, and the offset after it, until fn answers false. A last line
-// without its newline is left for a later read. Longer lines are cut.
-func forEachLine(r io.Reader, base int64, fn func(l contract.FileLogLine, next int64) bool) {
+// offset base, and the offset after it, until fn answers false or stop
+// answers true (checked before every read). A last line without its newline
+// is left for a later read. At most maxLineBytes of a line are kept and
+// marked cut; the rest is read and dropped, so a long line costs no more
+// memory than a short one.
+func forEachLine(r io.Reader, base int64, stop func() bool, fn func(l contract.FileLogLine, next int64) bool) {
 	br := bufio.NewReaderSize(r, 64<<10)
 	off := base
 	for {
-		raw, err := br.ReadSlice('\n')
-		var long []byte
-		for errors.Is(err, bufio.ErrBufferFull) {
-			long = append(long, raw...)
-			raw, err = br.ReadSlice('\n')
+		var text []byte
+		var n int64
+		cut := false
+		for {
+			if stop != nil && stop() {
+				return
+			}
+			chunk, err := br.ReadSlice('\n')
+			n += int64(len(chunk))
+			if err == nil {
+				chunk = chunk[:len(chunk)-1]
+			}
+			if room := maxLineBytes - len(text); len(chunk) > room {
+				text, cut = append(text, chunk[:max(room, 0)]...), true
+			} else {
+				text = append(text, chunk...)
+			}
+			if errors.Is(err, bufio.ErrBufferFull) {
+				continue
+			}
+			if err != nil {
+				return // EOF or a line still being written
+			}
+			break
 		}
-		line := append(long, raw...)
-		if err != nil {
-			return // EOF or a line still being written
-		}
-		next := off + int64(len(line))
-		text := strings.TrimSuffix(string(line), "\n")
-		l := contract.FileLogLine{Offset: off, Text: text}
-		if len(text) > maxLineBytes {
-			l.Text, l.Cut = text[:maxLineBytes], true
-		}
-		if !fn(l, next) {
+		next := off + n
+		if !fn(contract.FileLogLine{Offset: off, Text: string(text), Cut: cut}, next) {
 			return
 		}
 		off = next
@@ -365,11 +393,11 @@ func forEachLine(r io.Reader, base int64, fn func(l contract.FileLogLine, next i
 // n < 0), ending at or before stop (no stop if stop < 0). Unless atStart,
 // the first, partial line of the window is dropped. It answers the lines
 // and the offset after the last one.
-func scanLines(r io.Reader, base int64, n int, stop int64, atStart bool) ([]contract.FileLogLine, int64) {
+func scanLines(ctx context.Context, r io.Reader, base int64, n int, stop int64, atStart bool) ([]contract.FileLogLine, int64) {
 	var lines []contract.FileLogLine
 	end := base
 	first := !atStart
-	forEachLine(r, base, func(l contract.FileLogLine, next int64) bool {
+	forEachLine(r, base, func() bool { return ctx.Err() != nil }, func(l contract.FileLogLine, next int64) bool {
 		if first {
 			first = false
 			end = next
@@ -452,11 +480,14 @@ func search(ctx context.Context, r io.Reader, base int64, q contract.LogSearch) 
 	start := searchClock()
 	var matches []contract.FileLogLine
 	next, stopped := base, "end"
-	forEachLine(r, base, func(l contract.FileLogLine, after int64) bool {
+	timedOut := func() bool {
 		if ctx.Err() != nil || searchClock().Sub(start) >= searchTimeout {
 			stopped = "time"
-			return false
+			return true
 		}
+		return false
+	}
+	forEachLine(r, base, timedOut, func(l contract.FileLogLine, after int64) bool {
 		next = after
 		if q.Match(l.Text) {
 			matches = append(matches, l)

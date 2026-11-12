@@ -6,11 +6,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -417,5 +420,184 @@ func TestPhpErrorThroughHelper(t *testing.T) {
 	os.Symlink("/etc/passwd", filepath.Join(dir, "access.log"))
 	if res, err := Read(context.Background(), e.e, contract.LogsReadParams{Source: "site.nginx-access", Name: "shop", Direction: contract.LogBack}); err == nil || len(res.Lines) != 0 {
 		t.Errorf("a symlinked access.log was read: %+v", res)
+	}
+}
+
+// repeatReader serves n copies of b with no newline; delay sleeps per read.
+type repeatReader struct {
+	n     int64
+	b     byte
+	delay time.Duration
+	reads int
+	onRd  func(reads int)
+}
+
+func (r *repeatReader) Read(p []byte) (int, error) {
+	if r.n <= 0 {
+		return 0, io.EOF
+	}
+	if r.delay > 0 {
+		time.Sleep(r.delay)
+	}
+	n := int(min(int64(len(p)), r.n))
+	for i := range p[:n] {
+		p[i] = r.b
+	}
+	r.n -= int64(n)
+	r.reads++
+	if r.onRd != nil {
+		r.onRd(r.reads)
+	}
+	return n, nil
+}
+
+// peakHeapGrowth runs fn and answers how far HeapAlloc rose over a
+// post-GC baseline, sampled while fn runs.
+func peakHeapGrowth(fn func()) uint64 {
+	var ms runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&ms)
+	base := ms.HeapAlloc
+	var peak atomic.Uint64
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		var s runtime.MemStats
+		for {
+			runtime.ReadMemStats(&s)
+			if s.HeapAlloc > peak.Load() {
+				peak.Store(s.HeapAlloc)
+			}
+			select {
+			case <-stop:
+				return
+			case <-time.After(2 * time.Millisecond):
+			}
+		}
+	}()
+	fn()
+	close(stop)
+	<-done
+	if p := peak.Load(); p > base {
+		return p - base
+	}
+	return 0
+}
+
+const heapBudget = 8 << 20
+
+func TestForEachLineBoundsALongLine(t *testing.T) {
+	lines := 0
+	r := &repeatReader{n: 64 << 20, b: 'B'}
+	growth := peakHeapGrowth(func() {
+		forEachLine(r, 0, nil, func(contract.FileLogLine, int64) bool { lines++; return true })
+	})
+	if lines != 0 {
+		t.Errorf("%d lines from a stream with no newline", lines)
+	}
+	if growth > heapBudget {
+		t.Errorf("heap grew %d bytes, want under %d", growth, heapBudget)
+	}
+}
+
+func TestForEachLineCutsAndKeepsOffsets(t *testing.T) {
+	in := strings.Repeat("A", 100<<10) + "\nx\n"
+	var got []contract.FileLogLine
+	var nexts []int64
+	forEachLine(strings.NewReader(in), 0, nil, func(l contract.FileLogLine, next int64) bool {
+		got = append(got, l)
+		nexts = append(nexts, next)
+		return true
+	})
+	if len(got) != 2 {
+		t.Fatalf("%d lines, want 2", len(got))
+	}
+	if !got[0].Cut || len(got[0].Text) != maxLineBytes || got[0].Offset != 0 {
+		t.Errorf("first line cut=%v len=%d offset=%d", got[0].Cut, len(got[0].Text), got[0].Offset)
+	}
+	if got[1].Offset != 100*1024+1 || got[1].Text != "x" || got[1].Cut || nexts[1] != 100*1024+3 {
+		t.Errorf("second line %+v next %d", got[1], nexts[1])
+	}
+}
+
+func TestForEachLineExactLengthAndCRLF(t *testing.T) {
+	exact := strings.Repeat("E", maxLineBytes)
+	in := exact + "\r\nab\r\nlast"
+	var got []contract.FileLogLine
+	forEachLine(strings.NewReader(in), 10, nil, func(l contract.FileLogLine, _ int64) bool {
+		got = append(got, l)
+		return true
+	})
+	if len(got) != 2 {
+		t.Fatalf("%d lines, want 2 (a last line without a newline is not emitted)", len(got))
+	}
+	// The \r is part of the line: this one is maxLineBytes+1 long, so it is cut as today.
+	if !got[0].Cut || len(got[0].Text) != maxLineBytes || got[0].Offset != 10 {
+		t.Errorf("first %d bytes cut=%v offset=%d", len(got[0].Text), got[0].Cut, got[0].Offset)
+	}
+	if got[1].Text != "ab\r" || got[1].Offset != 10+maxLineBytes+2 {
+		t.Errorf("second %q at %d", got[1].Text, got[1].Offset)
+	}
+	// Exactly maxLineBytes bytes, newline included in no count, is not cut.
+	got = nil
+	forEachLine(strings.NewReader(exact+"\n"), 0, nil, func(l contract.FileLogLine, _ int64) bool {
+		got = append(got, l)
+		return true
+	})
+	if len(got) != 1 || got[0].Cut || got[0].Text != exact {
+		t.Errorf("exact-length line: %d lines, cut=%v", len(got), len(got) == 1 && got[0].Cut)
+	}
+}
+
+func TestReadPlantedArchiveBoundedMemory(t *testing.T) {
+	e := newEnv(t)
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := io.Copy(zw, &repeatReader{n: 64 << 20, b: 'B'}); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	const name = "php-error.log-20991231-9999999999.gz"
+	e.h.files["logs/php-error.log"] = []byte("x\n")
+	e.h.files["logs/"+name] = buf.Bytes()
+	for _, p := range []contract.LogsReadParams{
+		{Source: "site.php-error", Name: "shop", Archive: name, Direction: contract.LogBack},
+		{Source: "site.php-error", Name: "shop", Archive: name, Direction: contract.LogBack, Search: "needle"},
+	} {
+		growth := peakHeapGrowth(func() { read(t, e.e, p) })
+		if growth > heapBudget {
+			t.Errorf("search=%q: heap grew %d bytes, want under %d", p.Search, growth, heapBudget)
+		}
+	}
+}
+
+func TestSearchStopsInsideALongLine(t *testing.T) {
+	old := searchTimeout
+	searchTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { searchTimeout = old })
+	r := &repeatReader{n: 64 << 20, b: 'B', delay: 2 * time.Millisecond}
+	begin := time.Now()
+	_, _, stopped := search(context.Background(), r, 0, "needle")
+	if took := time.Since(begin); took > 500*time.Millisecond || stopped != "time" {
+		t.Errorf("stopped %q after %v, want \"time\" within 500ms", stopped, took)
+	}
+}
+
+func TestReadReturnsContextError(t *testing.T) {
+	e := newEnv(t)
+	e.write(e.e.D.Paths.AuditLog(), numbered(10))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, p := range []contract.LogsReadParams{
+		{Source: "file.zimam-audit", Direction: contract.LogBack},
+		{Source: "file.zimam-audit", Direction: contract.LogForward, Offset: off(0)},
+		{Source: "file.zimam-audit", Direction: contract.LogBack, Search: "line"},
+	} {
+		res, err := Read(ctx, e.e, p)
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("%+v: err = %v with %d lines, want context.Canceled", p, err, len(res.Lines))
+		}
 	}
 }
