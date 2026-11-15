@@ -173,6 +173,15 @@ func (r hookRunner) Run(ctx context.Context, c sysexec.Cmd) (sysexec.Result, err
 		r.env.appendGroup(fmt.Sprintf("%s:x:%s:\n", c.Args[2], c.Args[1]))
 	case "/usr/sbin/useradd":
 		// useradd -M -d home -s shell -u N -g N name
+		// The uid lock must still be held while useradd runs: another
+		// holder can't take it. (flock conflicts across descriptors, even
+		// in one process.)
+		lctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		if unlock, err := sysexec.Lock(lctx, r.env.p.UIDLock()); err == nil {
+			unlock()
+			r.env.t.Errorf("useradd ran without the uid lock held")
+		}
+		cancel()
 		name := c.Args[len(c.Args)-1]
 		r.env.users[name] = true
 		r.env.appendPasswd(fmt.Sprintf("%s:x:%s:%s::/home/%s:/usr/sbin/nologin\n", name, c.Args[slices.Index(c.Args, "-u")+1], c.Args[slices.Index(c.Args, "-g")+1], name))
