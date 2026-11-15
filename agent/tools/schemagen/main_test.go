@@ -286,9 +286,10 @@ func TestSecretFieldsMarked(t *testing.T) {
 	}
 	// test.secret: token, users.*.password_hash, keys.*.secret, backup.secret
 	// in its params, and keys.*.secret in its result; site.security:
-	// password_protection.users.*.password_hash.
-	if checked != 6 {
-		t.Errorf("checked %d secret fields, want 6", checked)
+	// password_protection.users.*.password_hash; site.env.read: content in
+	// its result; site.env.write: content in its params.
+	if checked != 8 {
+		t.Errorf("checked %d secret fields, want 8", checked)
 	}
 }
 

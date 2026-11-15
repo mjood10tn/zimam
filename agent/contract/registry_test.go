@@ -9,7 +9,8 @@ import (
 	"testing"
 )
 
-// designCommands is the §5.3 table: every command the design names, with its
+// designCommands is the §5.3 table, then the commands the v0.2.0 plan adds:
+// every command the design names, with its
 // kind, job subject ("" for –; <…> stands for a value from the params) and
 // whether it is audited. registered marks the commands the agent registers
 // so far; the task that adds a command's descriptor sets it.
@@ -38,6 +39,13 @@ var designCommands = []struct {
 	{"job.status", KindRead, "", false, true},
 	{"job.follow", KindRead, "", false, true},
 	{"job.cancel", KindDirect, "", true, true},
+	// v0.2.0's deploy commands (the plan's "New agent commands" table).
+	{"site.repo", KindJob, "site:<name>", true, true},
+	{"site.deploy", KindJob, "site:<name>", true, true},
+	{"site.rollback", KindJob, "site:<name>", true, true},
+	{"site.releases", KindRead, "", false, true},
+	{"site.env.read", KindRead, "", true, true},
+	{"site.env.write", KindJob, "site:<name>", true, true},
 }
 
 // subjectPattern turns a §5.3 subject such as "site:<name>" or
@@ -51,8 +59,8 @@ func subjectPattern(s string) *regexp.Regexp {
 }
 
 func TestDescriptorsMatchDesign(t *testing.T) {
-	if len(designCommands) != 18 {
-		t.Fatalf("the table has %d rows, want all 18 of §5.3", len(designCommands))
+	if len(designCommands) != 24 {
+		t.Fatalf("the table has %d rows, want all 18 of §5.3 and v0.2.0's 6", len(designCommands))
 	}
 	rows := map[string]int{}
 	for i, row := range designCommands {

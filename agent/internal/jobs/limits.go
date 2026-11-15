@@ -20,6 +20,11 @@ var limits = map[string]Limits{
 	"security.check": {MemoryMax: "512M", RuntimeMaxSec: 600},
 	"php.default":    {MemoryMax: "256M", RuntimeMaxSec: 120},
 	"logs.policy":    {MemoryMax: "256M", RuntimeMaxSec: 120},
+	// v0.2.0's job commands (the plan's "New agent commands" table).
+	"site.repo":      {MemoryMax: "512M", RuntimeMaxSec: 600},
+	"site.deploy":    {MemoryMax: "2G", RuntimeMaxSec: 1800},
+	"site.rollback":  {MemoryMax: "512M", RuntimeMaxSec: 300},
+	"site.env.write": {MemoryMax: "256M", RuntimeMaxSec: 120},
 }
 
 // LimitsFor returns a job command's limits. Every job command has them; a

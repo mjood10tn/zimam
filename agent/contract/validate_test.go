@@ -347,12 +347,12 @@ func TestBuild(t *testing.T) {
 }
 
 func TestLogSource(t *testing.T) {
-	valid := []LogSource{"journal.php-8.4", "journal.php-8.2"}
+	valid := []LogSource{"journal.php-8.4", "journal.php-8.2", "site.laravel"}
 	for _, s := range fixedLogSources {
 		valid = append(valid, LogSource(s))
 	}
 	checkValues(t, valid, []LogSource{"journal.php-8.1", "/var/log/syslog", "", "journal.php-", "site.", "journal.php-8.4\n"})
-	if !LogSource("site.php-error").IsSite() || LogSource("journal.system").IsSite() {
+	if !LogSource("site.php-error").IsSite() || !LogSource("site.laravel").IsSite() || LogSource("journal.system").IsSite() {
 		t.Error("IsSite is wrong")
 	}
 }

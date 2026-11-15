@@ -44,26 +44,31 @@ func init() {
 // SiteType is what a site serves (§9.2).
 type SiteType string
 
+// A Laravel site is a PHP site with a shared .env and storage/ (R02-D8).
 const (
-	SiteStatic SiteType = "static"
-	SitePHP    SiteType = "php"
+	SiteStatic  SiteType = "static"
+	SitePHP     SiteType = "php"
+	SiteLaravel SiteType = "laravel"
 )
 
-var siteTypes = []SiteType{SiteStatic, SitePHP}
+var siteTypes = []SiteType{SiteStatic, SitePHP, SiteLaravel}
 
 func (t SiteType) Validate() error {
 	if !slices.Contains(siteTypes, t) {
-		return errors.New("must be static or php")
+		return errors.New("must be static, php or laravel")
 	}
 	return nil
 }
+
+// RunsPHP reports whether the site has a PHP version and a PHP-FPM pool.
+func (t SiteType) RunsPHP() bool { return t == SitePHP || t == SiteLaravel }
 
 func (SiteType) JSONSchema() Schema {
 	return Schema{"type": "string", "enum": siteTypes}
 }
 
-// SiteProvisionParams is site.provision's params (§5.3). A PHP site needs a
-// PHP version; a static site has none, so the key is left out.
+// SiteProvisionParams is site.provision's params (§5.3). A PHP or Laravel
+// site needs a PHP version; a static site has none, so the key is left out.
 type SiteProvisionParams struct {
 	Name       SiteName   `json:"name"`
 	Domain     Domain     `json:"domain"`
@@ -77,9 +82,9 @@ func (p *SiteProvisionParams) Validate() error {
 	f.Check("domain", p.Domain)
 	f.Check("type", p.Type)
 	switch {
-	case p.Type == SitePHP && p.PHPVersion == "":
+	case p.Type.RunsPHP() && p.PHPVersion == "":
 		f["php_version"] = "is required for a PHP site"
-	case p.Type == SitePHP:
+	case p.Type.RunsPHP():
 		f.Check("php_version", p.PHPVersion)
 	case p.PHPVersion != "":
 		f["php_version"] = "must be left out for a static site"

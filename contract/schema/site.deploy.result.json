@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "commit": {
+      "pattern": "^[0-9a-f]{40}$",
+      "type": "string"
+    },
+    "name": {
+      "not": {
+        "enum": [
+          "zimam",
+          "panel",
+          "default",
+          "acme"
+        ]
+      },
+      "pattern": "^[a-z][a-z0-9-]{0,22}[a-z0-9]$",
+      "type": "string"
+    },
+    "release": {
+      "pattern": "^[0-9]{14}-[0-9a-f]{7}$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "commit",
+    "name",
+    "release"
+  ],
+  "title": "site.deploy result",
+  "type": "object"
+}

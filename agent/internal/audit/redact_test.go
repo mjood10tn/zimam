@@ -107,3 +107,16 @@ func TestRedactMapIsRedacted(t *testing.T) {
 		t.Errorf("Redact(map) = %#v, want \"[redacted]\"", got)
 	}
 }
+
+// A .env read and a .env write never reach the audit log in the clear
+// (R02-D10).
+func TestRedactEnvContent(t *testing.T) {
+	const env = "APP_KEY=base64:dummy\n"
+	if got, want := Redact(contract.SiteEnvReadResult{Content: env}), map[string]any{"content": "[redacted]"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Redact(site.env.read result) = %#v, want %#v", got, want)
+	}
+	got := Redact(&contract.SiteEnvWriteParams{Name: "shop", Content: env})
+	if want := map[string]any{"name": contract.SiteName("shop"), "content": "[redacted]"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Redact(site.env.write params) = %#v, want %#v", got, want)
+	}
+}

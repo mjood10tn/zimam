@@ -31,7 +31,8 @@
     "type": {
       "enum": [
         "static",
-        "php"
+        "php",
+        "laravel"
       ],
       "type": "string"
     }

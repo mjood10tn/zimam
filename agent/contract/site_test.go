@@ -44,6 +44,33 @@ func TestPHPRequiresVersion(t *testing.T) {
 	}
 }
 
+// A Laravel site is a PHP site (R02-D8): it needs a PHP version too.
+func TestLaravelRequiresVersion(t *testing.T) {
+	p := SiteProvisionParams{Name: "shop", Domain: "shop.example.com", Type: SiteLaravel}
+	if f := provisionFields(t, p); f["php_version"] == "" {
+		t.Errorf("fields = %v, want php_version required for a Laravel site", f)
+	}
+	p.PHPVersion = "7.4"
+	if f := provisionFields(t, p); f["php_version"] == "" {
+		t.Errorf("fields = %v, want 7.4 refused", f)
+	}
+	p.PHPVersion = "8.4"
+	if f := provisionFields(t, p); f != nil {
+		t.Errorf("a Laravel site on PHP 8.4: %v", f)
+	}
+}
+
+func TestSiteType(t *testing.T) {
+	checkValues(t,
+		[]SiteType{SiteStatic, SitePHP, SiteLaravel},
+		[]SiteType{"", "wordpress", "Laravel", "laravel\n"})
+	for typ, want := range map[SiteType]bool{SiteStatic: false, SitePHP: true, SiteLaravel: true} {
+		if typ.RunsPHP() != want {
+			t.Errorf("%s: RunsPHP = %v, want %v", typ, !want, want)
+		}
+	}
+}
+
 func TestProvisionParamsCheckEveryField(t *testing.T) {
 	f := provisionFields(t, SiteProvisionParams{Name: "Shop", Domain: "shop", Type: "wordpress"})
 	for _, field := range []string{"name", "domain", "type"} {

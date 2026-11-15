@@ -198,7 +198,7 @@ func (JobID) JSONSchema() Schema {
 type LogSource string
 
 var fixedLogSources = []string{
-	"site.nginx-access", "site.nginx-error", "site.php-error",
+	"site.nginx-access", "site.nginx-error", "site.php-error", "site.laravel",
 	"journal.system", "journal.kernel", "journal.ssh", "journal.nginx",
 	"journal.zimam-agent", "journal.zimam-panel",
 	"file.nginx-error", "file.certbot", "file.apt-history",

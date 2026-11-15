@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "branch": {
+      "not": {
+        "pattern": "^[-/]|\\.\\.|//|(^|/)\\.|[/.]$|\\.lock(/|$)"
+      },
+      "pattern": "^[A-Za-z0-9._/-]{1,200}$",
+      "type": "string"
+    },
+    "fingerprint": {
+      "type": "string"
+    },
+    "name": {
+      "not": {
+        "enum": [
+          "zimam",
+          "panel",
+          "default",
+          "acme"
+        ]
+      },
+      "pattern": "^[a-z][a-z0-9-]{0,22}[a-z0-9]$",
+      "type": "string"
+    },
+    "public_key": {
+      "type": "string"
+    },
+    "repository": {
+      "not": {
+        "pattern": "\\.git$|/\\.\\.?$"
+      },
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "branch",
+    "fingerprint",
+    "name",
+    "public_key",
+    "repository"
+  ],
+  "title": "site.repo result",
+  "type": "object"
+}

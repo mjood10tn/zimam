@@ -22,6 +22,11 @@ func TestLimitsMatchDesign(t *testing.T) {
 		"security.check": {MemoryMax: "512M", RuntimeMaxSec: 600},
 		"php.default":    {MemoryMax: "256M", RuntimeMaxSec: 120},
 		"logs.policy":    {MemoryMax: "256M", RuntimeMaxSec: 120},
+		// v0.2.0's job commands (the plan's "New agent commands" table).
+		"site.repo":      {MemoryMax: "512M", RuntimeMaxSec: 600},
+		"site.deploy":    {MemoryMax: "2G", RuntimeMaxSec: 1800},
+		"site.rollback":  {MemoryMax: "512M", RuntimeMaxSec: 300},
+		"site.env.write": {MemoryMax: "256M", RuntimeMaxSec: 120},
 	}
 	for name, w := range want {
 		if got, ok := LimitsFor(name); !ok || got != w {
@@ -31,7 +36,7 @@ func TestLimitsMatchDesign(t *testing.T) {
 	for name := range limits {
 		// e2e builds add their test-only commands (D22).
 		if _, ok := want[name]; !ok && !strings.HasPrefix(name, "e2e.") {
-			t.Errorf("%s has limits but isn't in §5.7", name)
+			t.Errorf("%s has limits but isn't in §5.7 or the v0.2.0 plan", name)
 		}
 	}
 }
