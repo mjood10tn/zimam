@@ -11,6 +11,7 @@ use App\Livewire\SiteLogs;
 use App\Models\Certificate;
 use App\Models\Domain;
 use App\Models\Site;
+use App\Support\DisplayTime;
 use BackedEnum;
 use Closure;
 use Filament\Forms\Components\Select;
@@ -121,7 +122,7 @@ class SiteResource extends Resource
                     TextEntry::make('certificate')
                         ->label(__('zimam.sites.fields.certificate'))
                         ->state(fn (Site $record): string => match ($record->certificate?->status) {
-                            Certificate::ISSUED => __('zimam.sites.certificate.issued', ['date' => $record->certificate->expires_at?->setTimezone(config('app.timezone'))->format('j M Y')]),
+                            Certificate::ISSUED => __('zimam.sites.certificate.issued', ['date' => DisplayTime::format($record->certificate->expires_at, 'j M Y')]),
                             Certificate::ISSUING => __('zimam.sites.certificate.issuing'),
                             Certificate::FAILED => __('zimam.sites.certificate.failed'),
                             default => __('zimam.sites.certificate.none'),

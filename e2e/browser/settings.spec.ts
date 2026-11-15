@@ -27,3 +27,44 @@ test('done-when 10: rotation at 200 MB, and retention set in Settings', async ({
     scenario('m3-logs.sh', 'retention');
   });
 });
+
+// R01-D19: the panel's display time zone. The panel stores UTC and shows a
+// job's time three hours later with Asia/Riyadh; the zone is put back to
+// UTC afterwards, also when a check fails, so later specs see UTC.
+test('Settings: the display time zone moves the times the panel shows', async ({ page }) => {
+  test.setTimeout(10 * 60_000);
+  const stamp = /([A-Z][a-z]{2}) (\d{1,2}), (\d{4}) (\d{2}):(\d{2}):(\d{2})/;
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  let current = 'UTC';
+  const setZone = async (zone: string) => {
+    await page.goto(`${panel}/admin/settings`);
+    await page.getByRole('combobox', { name: /^Time zone/ }).first().click();
+    await page.keyboard.type(zone);
+    await page.getByRole('option', { name: zone, exact: true }).click();
+    await page.getByRole('button', { name: 'Save settings' }).click();
+    if (zone !== current) await expect(page.getByText('The time zone is saved')).toBeVisible();
+    current = zone;
+    await page.reload();
+    await expect(page.getByRole('combobox', { name: /^Time zone/ }).first()).toContainText(zone);
+  };
+  // The first job's "Finished" time as the page shows it, in milliseconds.
+  const finished = async (): Promise<number> => {
+    await page.goto(`${panel}/admin/agent-jobs`);
+    await page.locator('table tbody tr').first().click();
+    const entry = page.locator('.fi-in-entry').filter({ hasText: 'Finished' }).first();
+    await expect(entry).toContainText(stamp);
+    const m = stamp.exec((await entry.textContent()) ?? '');
+    if (m === null) throw new Error('no finished time on the job page');
+    return Date.UTC(Number(m[3]), months.indexOf(m[1]), Number(m[2]), Number(m[4]), Number(m[5]), Number(m[6]));
+  };
+
+  await signInAsAdmin(page);
+  try {
+    await setZone('UTC');
+    const utc = await finished();
+    await setZone('Asia/Riyadh');
+    expect((await finished()) - utc).toBe(3 * 60 * 60_000);
+  } finally {
+    await setZone('UTC');
+  }
+});

@@ -6,6 +6,7 @@ use App\Agent\AgentHealth;
 use App\Agent\MetricsReading;
 use App\Agent\ServerStatus;
 use App\Models\Certificate;
+use App\Support\DisplayTime;
 use App\Support\MetricWarnings;
 use Carbon\CarbonImmutable;
 use Filament\Widgets\Widget;
@@ -142,10 +143,10 @@ class Warnings extends Widget
             : __('zimam.dashboard.lede.cached', ['time' => self::time($status->issuedAt), 'sentence' => lcfirst($sentence)]);
     }
 
-    /** Server time: seconds for the bulletin, which refreshes every 10 s; minutes for checks. */
+    /** Time in the panel's display zone: seconds for the bulletin, which refreshes every 10 s; minutes for checks. */
     public static function time(CarbonImmutable $at, string $format = 'H:i:s'): string
     {
-        return $at->setTimezone(config('app.timezone'))->format($format);
+        return DisplayTime::format($at, $format);
     }
 
     private static function word(int $number): string

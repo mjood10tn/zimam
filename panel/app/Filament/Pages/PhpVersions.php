@@ -94,7 +94,7 @@ class PhpVersions extends Page implements HasTable
                     }),
                 TextColumn::make('eol_date')
                     ->label(__('zimam.php.columns.eol'))
-                    ->date()
+                    ->date(timezone: 'UTC')
                     ->color(fn (PhpVersion $record): ?string => $record->eol_date?->isPast() ? 'danger' : null),
             ])
             ->recordActions([

@@ -15,6 +15,8 @@ class PanelSettings
     /** The audit log's own retention, a year (D24). */
     public const AUDIT_RETENTION_DAYS = 365;
 
+    public const DISPLAY_TIMEZONE = 'UTC';
+
     public const SITE_LOG_CAP_BYTES = 5 * 1024 * 1024 * 1024;
 
     public function logRetentionDays(): int
@@ -50,6 +52,22 @@ class PanelSettings
     public function setPanelIpAllowlist(array $entries): void
     {
         $this->set('panel_ip_allowlist', array_values($entries));
+    }
+
+    public function displayTimezone(): string
+    {
+        $zone = (string) $this->get('display_timezone', self::DISPLAY_TIMEZONE);
+
+        return in_array($zone, \DateTimeZone::listIdentifiers(), true) ? $zone : self::DISPLAY_TIMEZONE;
+    }
+
+    /** The zone the panel shows times in; the panel keeps storing UTC. */
+    public function setDisplayTimezone(string $zone): void
+    {
+        if (! in_array($zone, \DateTimeZone::listIdentifiers(), true)) {
+            throw new \InvalidArgumentException('Unknown time zone.');
+        }
+        $this->set('display_timezone', $zone);
     }
 
     private function get(string $key, mixed $default): mixed

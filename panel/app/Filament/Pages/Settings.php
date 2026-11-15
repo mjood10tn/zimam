@@ -13,6 +13,7 @@ use App\Support\IpEntry;
 use BackedEnum;
 use Closure;
 use Filament\Forms\Components\Checkbox;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
@@ -21,6 +22,7 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Support\Exceptions\Halt;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\IpUtils;
 
 /**
@@ -65,6 +67,7 @@ class Settings extends Page
             'site_log_cap_gib' => intdiv($s->siteLogCapBytes(), self::GIB),
             'ip_allowlist' => implode("\n", $s->panelIpAllowlist()),
             'confirm_lockout' => false,
+            'display_timezone' => $s->displayTimezone(),
         ]);
     }
 
@@ -81,6 +84,14 @@ class Settings extends Page
                 TextInput::make('site_log_cap_gib')->label(__('zimam.settings.site_log_cap'))
                     ->helperText(__('zimam.settings.help.site_log_cap'))
                     ->required()->integer()->minValue(1)->maxValue(100)->suffix('GiB'),
+            ]),
+            Section::make(__('zimam.settings.display'))->schema([
+                Select::make('display_timezone')->label(__('zimam.settings.display_timezone'))
+                    ->helperText(__('zimam.settings.help.display_timezone'))
+                    ->options(self::timezoneOptions())
+                    ->searchable()
+                    ->required()
+                    ->rule(Rule::in(\DateTimeZone::listIdentifiers())),
             ]),
             Section::make(__('zimam.settings.access'))->schema([
                 Textarea::make('ip_allowlist')->label(__('zimam.settings.ip_allowlist'))
@@ -106,10 +117,28 @@ class Settings extends Page
         ]);
     }
 
+    /** @return array<string, array<string, string>> zone names grouped by region */
+    private static function timezoneOptions(): array
+    {
+        $options = [];
+        foreach (\DateTimeZone::listIdentifiers() as $zone) {
+            $region = str_contains($zone, '/') ? strstr($zone, '/', true) : __('zimam.settings.other_zones');
+            $options[$region][$zone] = $zone;
+        }
+
+        return $options;
+    }
+
     public function save(): void
     {
         $state = $this->form->getState();
         $settings = app(PanelSettings::class);
+
+        // A plain panel setting: no agent call, no password confirmation.
+        if ($state['display_timezone'] !== $settings->displayTimezone()) {
+            $settings->setDisplayTimezone((string) $state['display_timezone']);
+            Notification::make()->title(__('zimam.settings.timezone_saved'))->success()->send();
+        }
 
         $entries = IpEntry::lines($state['ip_allowlist'] ?? '');
         $ip = (string) request()->getClientIp();
