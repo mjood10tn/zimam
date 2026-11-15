@@ -141,6 +141,10 @@ type hookRunner struct {
 
 func (r hookRunner) Run(ctx context.Context, c sysexec.Cmd) (sysexec.Result, error) {
 	cmd := strings.Join(append([]string{c.Path}, c.Args...), " ")
+	if fn, ok := r.env.onRun[cmd]; ok {
+		delete(r.env.onRun, cmd)
+		defer fn()
+	}
 	if stderr, ok := r.env.failOnce[cmd]; ok {
 		delete(r.env.failOnce, cmd)
 		r.FakeRunner.Run(ctx, c) // recorded like any call
@@ -266,13 +270,16 @@ type env struct {
 	procs int
 	// certbotFails, when set, is what a failing certbot certonly prints.
 	certbotFails string
+	// onRun runs a function once, after a command, "path args...", has run
+	// and before it answers.
+	onRun map[string]func()
 }
 
 var testNow = time.Date(2026, 11, 3, 9, 0, 0, 0, time.UTC)
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
-	e := &env{t: t, p: paths.Paths{Root: t.TempDir()}, run: sysexec.NewFakeRunner(), help: newFakeHelper(), users: map[string]bool{}, failOnce: map[string]string{}}
+	e := &env{t: t, p: paths.Paths{Root: t.TempDir()}, run: sysexec.NewFakeRunner(), help: newFakeHelper(), users: map[string]bool{}, failOnce: map[string]string{}, onRun: map[string]func(){}}
 	cfg := config.New("panel.example.com", "8.4", "8.4")
 	if err := config.Save(e.p, cfg); err != nil {
 		t.Fatal(err)

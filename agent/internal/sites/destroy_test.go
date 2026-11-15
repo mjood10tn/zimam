@@ -244,3 +244,55 @@ func TestDestroyTakesTheLogrotateLock(t *testing.T) {
 		t.Error("the rules are left")
 	}
 }
+
+// siteNames is what a logs.policy job renders rules for: every site with a
+// state file.
+func siteNames(t *testing.T, e *env) []contract.SiteName {
+	all, err := All(e.p)
+	if err != nil {
+		t.Error(err)
+	}
+	var names []contract.SiteName
+	for _, st := range all {
+		names = append(names, st.Name)
+	}
+	return names
+}
+
+// A logs.policy job that runs while a site is destroyed must not write
+// rules for it: a rules file naming a deleted user breaks logrotate -d on
+// every later write. The lock is held from removing the site's rules to
+// removing its state file, so a policy job either runs before (and the
+// rules go after it) or finds the site gone.
+func TestPolicyDuringDestroyWritesNoRulesForTheSite(t *testing.T) {
+	e := provisioned(t)
+	seen := make(chan []contract.SiteName, 1)
+	e.onRun[userdelCmd] = func() {
+		go func() {
+			err := logpolicy.WithLock(context.Background(), e.p, func() error {
+				seen <- siteNames(t, e)
+				return nil
+			})
+			if err != nil {
+				t.Error(err)
+			}
+		}()
+		// Give the policy job time to run if the lock is free.
+		select {
+		case names := <-seen:
+			seen <- names
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+	if _, err := e.destroy(); err != nil {
+		t.Fatalf("Destroy: %v", err)
+	}
+	select {
+	case names := <-seen:
+		if slices.Contains(names, "shop") {
+			t.Errorf("a policy job during the destroy rendered rules for shop (sites %v)", names)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the policy job never got the lock")
+	}
+}

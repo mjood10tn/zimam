@@ -14,6 +14,7 @@ import (
 	"zimam/agent/contract"
 	"zimam/agent/internal/config"
 	"zimam/agent/internal/logpolicy"
+	"zimam/agent/internal/sysexec"
 	"zimam/agent/internal/templates"
 )
 
@@ -360,5 +361,40 @@ func TestPolicyAndProvisionShareTheLogrotateLock(t *testing.T) {
 	b, err := os.ReadFile(e.p.SiteLogrotateConf("shop"))
 	if err != nil || !strings.Contains(string(b), "maxage 7\n") {
 		t.Errorf("rules = %q, %v; want maxage 7", b, err)
+	}
+}
+
+// A logs.policy job waiting for the lock while a site is provisioned must
+// find the new site when it gets the lock, or it drops the site's rules.
+// So the step that saves the state file still holds the lock: when the
+// provision logs that the site is ready, right after saving it, the lock
+// is held and the state file is there.
+func TestPolicyWaitingOnProvisionSeesTheSite(t *testing.T) {
+	e := newEnv(t)
+	checked := false
+	logf := e.d.Logf
+	e.d.Logf = func(format string, args ...any) {
+		logf(format, args...)
+		if !strings.HasPrefix(format, "Site %s is ready") {
+			return
+		}
+		checked = true
+		unlock, ok, err := sysexec.TryLock(e.p.LogrotateLock())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok {
+			unlock()
+			t.Error("the provision let go of the logrotate lock before saving the state file; a policy job waiting for it misses the site")
+		}
+		if !exists(e.p.SiteState("shop")) {
+			t.Error("the site is ready without its state file")
+		}
+	}
+	if _, err := e.provision(static); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	if !checked {
+		t.Fatal("the provision never logged that the site is ready")
 	}
 }

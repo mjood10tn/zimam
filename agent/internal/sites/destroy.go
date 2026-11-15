@@ -111,12 +111,14 @@ func Destroy(ctx context.Context, d sysexec.Deps, h Helper, lookup Lookup, name 
 		return contract.SiteNameResult{}, err
 	}
 	if userExists {
-		// Step 3: nothing of the site user may run while its home goes.
-		if err := killAll(ctx, d, username); err != nil {
+		// Step 3: nothing of the site user may run while its home goes. Its
+		// cron and at jobs go first, so cron can't start a process after
+		// the kill that makes userdel fail, and none runs as whoever gets
+		// this uid.
+		if err := removeSchedules(ctx, d, username); err != nil {
 			return contract.SiteNameResult{}, err
 		}
-		// Its cron and at jobs would otherwise run as whoever gets this uid.
-		if err := removeSchedules(ctx, d, username); err != nil {
+		if err := killAll(ctx, d, username); err != nil {
 			return contract.SiteNameResult{}, err
 		}
 		// Step 4: the helper empties the home as the site user, inside an
@@ -138,34 +140,42 @@ func Destroy(ctx context.Context, d sysexec.Deps, h Helper, lookup Lookup, name 
 			return contract.SiteNameResult{}, err
 		}
 	}
-	if err := logpolicy.WithLock(ctx, p, func() error { return removeFile(p.SiteLogrotateConf(name)) }); err != nil {
-		return contract.SiteNameResult{}, err
-	}
-	if exists(p.LetsEncryptCert("zimam-" + string(name))) {
-		d.Logf("Deleting %s's certificate", name)
-		if _, err := d.Run.Run(ctx, sysexec.Cmd{Path: certbot, Args: []string{"delete", "--cert-name", "zimam-" + string(name), "--non-interactive"}}); err != nil {
-			return contract.SiteNameResult{}, err
+	// From the site's log rules to its state file, the logrotate lock is
+	// held: a policy job that ran in between would find the state file and
+	// write the rules again, naming a user about to be deleted, and
+	// logrotate -d fails on such a file for every later writer. Nothing in
+	// here takes the lock again.
+	err = logpolicy.WithLock(ctx, p, func() error {
+		if err := removeFile(p.SiteLogrotateConf(name)); err != nil {
+			return err
 		}
-	}
-	if err := removeFile(p.CertRecord(string(name))); err != nil {
-		return contract.SiteNameResult{}, err
-	}
-	if userExists {
-		d.Logf("Deleting the user %s", username)
-		if _, err := d.Run.Run(ctx, sysexec.Cmd{Path: userdel, Args: []string{username}}); err != nil {
-			return contract.SiteNameResult{}, err
+		if exists(p.LetsEncryptCert("zimam-" + string(name))) {
+			d.Logf("Deleting %s's certificate", name)
+			if _, err := d.Run.Run(ctx, sysexec.Cmd{Path: certbot, Args: []string{"delete", "--cert-name", "zimam-" + string(name), "--non-interactive"}}); err != nil {
+				return err
+			}
 		}
-	}
-	// userdel removes the user's own group when nobody else is in it; with
-	// www-data in it, the group is left for groupdel.
-	if ok, err := groupExists(p.EtcGroup(), username); err != nil {
-		return contract.SiteNameResult{}, err
-	} else if ok {
-		if _, err := d.Run.Run(ctx, sysexec.Cmd{Path: groupdel, Args: []string{username}}); err != nil {
-			return contract.SiteNameResult{}, err
+		if err := removeFile(p.CertRecord(string(name))); err != nil {
+			return err
 		}
-	}
-	if err := removeFile(p.SiteState(name)); err != nil {
+		if userExists {
+			d.Logf("Deleting the user %s", username)
+			if _, err := d.Run.Run(ctx, sysexec.Cmd{Path: userdel, Args: []string{username}}); err != nil {
+				return err
+			}
+		}
+		// userdel removes the user's own group when nobody else is in it;
+		// with www-data in it, the group is left for groupdel.
+		if ok, err := groupExists(p.EtcGroup(), username); err != nil {
+			return err
+		} else if ok {
+			if _, err := d.Run.Run(ctx, sysexec.Cmd{Path: groupdel, Args: []string{username}}); err != nil {
+				return err
+			}
+		}
+		return removeFile(p.SiteState(name))
+	})
+	if err != nil {
 		return contract.SiteNameResult{}, err
 	}
 	d.Logf("Site %s is deleted", name)

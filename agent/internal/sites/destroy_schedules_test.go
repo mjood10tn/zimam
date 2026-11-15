@@ -39,7 +39,9 @@ const atJobs = "3\tFri Nov 14 10:00:00 2026 a s_shop\n" +
 	"6\tFri Nov 14 13:00:00 2026 b s_shop\n" +
 	"7\tFri Nov 14 14:00:00 2026 a s_sho\n"
 
-func TestDestroyRemovesCrontabBeforeUserdel(t *testing.T) {
+// The schedules go before the processes are killed, so cron can't start one
+// in between that makes userdel fail with "currently used by process".
+func TestDestroyRemovesCrontabBeforeKillAndUserdel(t *testing.T) {
 	e := provisioned(t)
 	install(t, e.p.Crontab())
 	e.run.Add(scriptOut(crontabCmd, ""))
@@ -48,9 +50,9 @@ func TestDestroyRemovesCrontabBeforeUserdel(t *testing.T) {
 		t.Fatalf("Destroy: %v", err)
 	}
 	got := e.callsSince(n)
-	ci, ki, ui := slices.Index(got, crontabCmd), slices.Index(got, pgrepCmd), slices.Index(got, userdelCmd)
-	if ci < 0 || ci < ki || ci > ui {
-		t.Errorf("crontab -r must run after the processes are killed and before userdel:\n%s", strings.Join(got, "\n"))
+	ci, ki, ui := slices.Index(got, crontabCmd), slices.Index(got, pkillCmd), slices.Index(got, userdelCmd)
+	if ci < 0 || ki < 0 || ci > ki || ci > ui {
+		t.Errorf("crontab -r must run before the processes are killed and before userdel:\n%s", strings.Join(got, "\n"))
 	}
 }
 

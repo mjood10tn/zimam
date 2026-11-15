@@ -187,6 +187,10 @@ func createSiteUser(ctx context.Context, d sysexec.Deps, username string) error 
 		return err
 	}
 	d.Logf("Creating the user %s", username)
-	_, err = d.Run.Run(ctx, sysexec.Cmd{Path: useradd, Args: []string{"-M", "-d", "/home/" + username, "-s", "/usr/sbin/nologin", "-u", id, "-g", id, username}})
-	return err
+	if _, err := d.Run.Run(ctx, sysexec.Cmd{Path: useradd, Args: []string{"-M", "-d", "/home/" + username, "-s", "/usr/sbin/nologin", "-u", id, "-g", id, username}}); err != nil {
+		return err
+	}
+	// v0.1.0's destroy left a deleted site's crontab and at jobs under its
+	// name; they would now run as this site.
+	return removeSchedules(ctx, d, username)
 }

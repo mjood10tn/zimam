@@ -137,19 +137,24 @@ func Provision(ctx context.Context, d sysexec.Deps, h Helper, lookup Lookup, p c
 	}
 	// The retention comes from agent.json read inside the lock, not from
 	// d.Config: a policy job that ran while this one waited has changed it.
+	// The state file is saved inside the lock too, so a policy job waiting
+	// for it finds the site and keeps its rules.
 	if err := logpolicy.WithLock(ctx, d.Paths, func() error {
 		cfg, err := config.Load(d.Paths)
 		if err != nil {
 			return err
 		}
-		return logpolicy.ApplySite(ctx, d, p.Name, cfg.LogRetentionDays)
+		if err := logpolicy.ApplySite(ctx, d, p.Name, cfg.LogRetentionDays); err != nil {
+			return err
+		}
+		if err := Save(d.Paths, st); err != nil {
+			return err
+		}
+		d.Logf("Site %s is ready at http://%s/", p.Name, p.Domain)
+		return nil
 	}); err != nil {
 		return contract.SiteProvisionResult{}, err
 	}
-	if err := Save(d.Paths, st); err != nil {
-		return contract.SiteProvisionResult{}, err
-	}
-	d.Logf("Site %s is ready at http://%s/", p.Name, p.Domain)
 	return contract.SiteProvisionResult{Name: p.Name, TemplateVersion: templates.Version}, nil
 }
 
