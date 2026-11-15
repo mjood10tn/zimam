@@ -4,6 +4,7 @@ package deploy
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -105,8 +106,8 @@ func TestBackgroundedScriptProcessEndsWithJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out, err := exec.Command("/usr/bin/pgrep", "-u", user, "-a").Output(); err == nil {
-		t.Errorf("processes of %s are left after the deploy:\n%s", user, out)
+	if left := processesOf(t, user); left != "" {
+		t.Errorf("processes of %s are left after the deploy:\n%s", user, left)
 	}
 	if res.Commit != sha {
 		t.Errorf("result %+v, want commit %s", res, sha)
@@ -127,5 +128,27 @@ func TestBackgroundedScriptProcessEndsWithJob(t *testing.T) {
 	out, err := exec.Command("/usr/bin/stat", "-c", "%U", filepath.Join(rel, "public/index.html"), filepath.Join(a.Home, MirrorDir)).Output()
 	if err != nil || strings.Count(string(out), user) != 2 {
 		t.Errorf("owners %q (%v), want %s", out, err, user)
+	}
+}
+
+// processesOf lists user's processes, "" when there are none. pgrep exits 1
+// for none; any other failure fails the test, so a missing pgrep can't pass
+// for an empty list. A killed process may stay a zombie for a moment, so it
+// looks again for up to 3 s.
+func processesOf(t *testing.T, user string) string {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		out, err := exec.Command("/usr/bin/pgrep", "-u", user, "-a").Output()
+		var exit *exec.ExitError
+		switch {
+		case errors.As(err, &exit) && exit.ExitCode() == 1:
+			return ""
+		case err != nil:
+			t.Fatalf("pgrep -u %s: %v", user, err)
+		case time.Now().After(deadline):
+			return string(out)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
