@@ -80,8 +80,11 @@ jobs:
       # the same key and built as a later version. Its work directory and
       # container replace the main run's for the steps after, collect-logs
       # and tear down included.
-      - name: free the main run's container for the upgrade
-        run: bash e2e/scripts/down.sh
+      # The main run's builds go too, its logs stay: the runner's disk is small.
+      - name: free the main run's container and builds for the upgrade
+        run: |
+          bash e2e/scripts/down.sh
+          rm -rf "${E2E_WORK:?}"/{dist,panel-dist,contract-test,contract-test.tar.gz,bin,www}
       - name: the upgrade's work directory and container
         run: |
           echo "E2E_WORK=$RUNNER_TEMP/zimam-upgrade" >>"$GITHUB_ENV"

@@ -74,8 +74,11 @@ bootstrap_steps() {
 import json, sys
 steps = set()
 for line in sys.stdin:
-    e = json.loads(line)
-    if e["actor"] == "cli:root" and e["command"] == "bootstrap" and e["outcome"] == "ok":
+    try:
+        e = json.loads(line)
+    except ValueError:
+        continue
+    if e.get("actor") == "cli:root" and e.get("command") == "bootstrap" and e.get("outcome") == "ok":
         steps.add((e.get("params") or {}).get("step"))
 print(" ".join(sorted(s for s in steps if s)))'
 }
@@ -127,10 +130,11 @@ if [[ $installed == "$new" ]]; then
 else
 	fail "upgrade: zimam-agent version reports $installed, not $new"
 fi
-if grep -q 'panel-release: already done' "$E2E_WORK/install.upgrade.err"; then
-	fail "upgrade: bootstrap kept the panel release of $old"
+current=$(in_c readlink /home/zimam/panel/current) || current=none
+if [[ $current == "releases/$new" ]]; then
+	pass "upgrade: the panel's current release is $new"
 else
-	pass "upgrade: bootstrap installed the panel release of $new"
+	fail "upgrade: the panel's current points at $current, not releases/$new"
 fi
 check_sites "on $new"
 code=$(curl -sS -m 10 -o /dev/null -w '%{http_code}' --cacert "$E2E_CA" --resolve "$E2E_PANEL:443:$CIP" "https://$E2E_PANEL/admin/login") || code=none
@@ -159,8 +163,18 @@ else
 fi
 errors=$(in_c sed -n "$((mark + 1)),${end}p" /var/log/zimam/audit.log | python3 -I -c '
 import json, sys
-print(sum(1 for line in sys.stdin if (e := json.loads(line))["actor"] == "cli:root" and e["outcome"] != "ok"))')
-if [[ $errors == 0 ]]; then
+n = 0
+for line in sys.stdin:
+    try:
+        e = json.loads(line)
+    except ValueError:
+        n += 1
+        continue
+    n += e.get("actor") == "cli:root" and e.get("outcome") != "ok"
+print(n)') || errors="unreadable"
+if ((end <= mark)); then
+	fail "audit: the upgrade added no audit entry (lines $mark to $end)"
+elif [[ $errors == 0 ]]; then
 	pass "audit: no cli:root entry of the upgrade failed"
 else
 	fail "audit: $errors cli:root entries of the upgrade failed: $(audit_since "$mark")"
