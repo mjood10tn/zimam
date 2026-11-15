@@ -494,7 +494,9 @@ func (lr *lineReader) next() (line Line, ok bool, err error) {
 }
 
 // chmod gives the regular file or directory name its mode exactly, whatever
-// the umask. It never follows a symlink, even one that stays in the home:
+// the umask. It opens name to change it, so it needs read permission on
+// it, which the owner of a file in its own home can always give itself;
+// a file or directory without it fails with EACCES. It never follows a symlink, even one that stays in the home:
 // os.Root follows one inside the home even with O_NOFOLLOW, so name is
 // looked at with Lstat first, and what was opened must be that same file.
 // Anything but a regular file or a directory is refused. O_NONBLOCK keeps a

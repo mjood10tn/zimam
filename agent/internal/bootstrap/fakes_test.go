@@ -422,7 +422,7 @@ func (h *fakeHelper) ExtractTar(ctx context.Context, a helper.Account, dest stri
 			continue
 		}
 		b, _ := io.ReadAll(tr)
-		h.nodes[name] = &node{mode: 0o640, content: b}
+		h.nodes[name] = &node{mode: helper.ExtractedFileMode(hdr.Mode), content: b}
 	}
 }
 
@@ -480,7 +480,11 @@ func panelTarball(t *testing.T) []byte {
 		}
 	}
 	for name, body := range map[string]string{"artisan": "<?php\n", "public/index.php": "<?php\n", "database/migrations/0001_init.php": "<?php\n"} {
-		if err := tw.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body))}); err != nil {
+		mode := int64(0o644)
+		if name == "artisan" {
+			mode = 0o755 // as in the panel's repository
+		}
+		if err := tw.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: mode, Size: int64(len(body))}); err != nil {
 			t.Fatal(err)
 		}
 		tw.Write([]byte(body))

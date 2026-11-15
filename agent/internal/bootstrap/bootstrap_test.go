@@ -266,6 +266,13 @@ func TestDirectoriesModes(t *testing.T) {
 			t.Errorf("helper wrote %s as %+v, want a file %v", name, n, mode)
 		}
 	}
+	// The release keeps artisan's execute bit (spike amendment A4).
+	rel := "panel/releases/" + testVersion + "/"
+	for name, mode := range map[string]fs.FileMode{"artisan": 0o750, "public/index.php": 0o640} {
+		if n := w.help.node(rel + name); n == nil || n.dir || n.mode != mode {
+			t.Errorf("extract-tar made %s as %+v, want a file %v", name, n, mode)
+		}
+	}
 }
 
 func TestRefusesSymlinkedDirectory(t *testing.T) {

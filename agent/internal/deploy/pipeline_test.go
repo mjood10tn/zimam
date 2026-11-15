@@ -43,6 +43,12 @@ type localHelper struct {
 	hook func(a helper.Account, r helper.ExecRequest) (code int, handled bool)
 	// failRemove makes RemoveTree of a name fail.
 	failRemove map[string]error
+	// failSwap makes SymlinkSwap of a link fail; swapThenFail makes it swap,
+	// then report an error, as a cancel or a failed directory sync can.
+	failSwap, swapThenFail map[string]error
+	// failExec makes an Exec fail without a result, by "<program> <first
+	// argument>", as a helper that died would.
+	failExec map[string]error
 }
 
 func (h *localHelper) record(op string, args ...string) {
@@ -52,8 +58,12 @@ func (h *localHelper) record(op string, args ...string) {
 }
 
 // serve runs one helper operation in a's home and decodes its JSON line.
-func (h *localHelper) serve(a helper.Account, op string, stdin io.Reader, out any, args ...string) error {
+func (h *localHelper) serve(ctx context.Context, a helper.Account, op string, stdin io.Reader, out any, args ...string) error {
 	h.record(op, args...)
+	// The real client fails at once on a cancelled context.
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("as-user %s: %w", op, err)
+	}
 	root, err := os.OpenRoot(a.Home)
 	if err != nil {
 		return err
@@ -78,31 +88,41 @@ func (h *localHelper) serve(a helper.Account, op string, stdin io.Reader, out an
 
 func octal(m fs.FileMode) string { return fmt.Sprintf("%o", m) }
 
-func (h *localHelper) Mkdir(_ context.Context, a helper.Account, name string, mode fs.FileMode) error {
-	return h.serve(a, "mkdir", nil, nil, name, octal(mode))
+func (h *localHelper) Mkdir(ctx context.Context, a helper.Account, name string, mode fs.FileMode) error {
+	return h.serve(ctx, a, "mkdir", nil, nil, name, octal(mode))
 }
 
-func (h *localHelper) Write(_ context.Context, a helper.Account, name string, mode fs.FileMode, content io.Reader) error {
-	return h.serve(a, "write", content, nil, name, octal(mode))
+func (h *localHelper) Write(ctx context.Context, a helper.Account, name string, mode fs.FileMode, content io.Reader) error {
+	return h.serve(ctx, a, "write", content, nil, name, octal(mode))
 }
 
-func (h *localHelper) Stat(_ context.Context, a helper.Account, name string) (helper.FileInfo, error) {
+func (h *localHelper) Stat(ctx context.Context, a helper.Account, name string) (helper.FileInfo, error) {
 	var fi helper.FileInfo
-	err := h.serve(a, "stat", nil, &fi, name)
+	err := h.serve(ctx, a, "stat", nil, &fi, name)
 	return fi, err
 }
 
-func (h *localHelper) List(_ context.Context, a helper.Account, dir string) (helper.Listing, error) {
+func (h *localHelper) List(ctx context.Context, a helper.Account, dir string) (helper.Listing, error) {
 	var l helper.Listing
-	err := h.serve(a, "list", nil, &l, dir)
+	err := h.serve(ctx, a, "list", nil, &l, dir)
 	return l, err
 }
 
-func (h *localHelper) SymlinkSwap(_ context.Context, a helper.Account, link, target string) error {
-	return h.serve(a, "symlink-swap", nil, nil, link, target)
+func (h *localHelper) SymlinkSwap(ctx context.Context, a helper.Account, link, target string) error {
+	h.mu.Lock()
+	fail, after := h.failSwap[link], h.swapThenFail[link]
+	h.mu.Unlock()
+	if fail != nil {
+		h.record("symlink-swap", link, target, "(fails)")
+		return fail
+	}
+	if err := h.serve(ctx, a, "symlink-swap", nil, nil, link, target); err != nil {
+		return err
+	}
+	return after
 }
 
-func (h *localHelper) RemoveTree(_ context.Context, a helper.Account, name string) error {
+func (h *localHelper) RemoveTree(ctx context.Context, a helper.Account, name string) error {
 	h.mu.Lock()
 	err := h.failRemove[name]
 	h.mu.Unlock()
@@ -110,15 +130,17 @@ func (h *localHelper) RemoveTree(_ context.Context, a helper.Account, name strin
 		h.record("remove-tree", name, "(fails)")
 		return err
 	}
-	return h.serve(a, "remove-tree", nil, nil, name)
+	return h.serve(ctx, a, "remove-tree", nil, nil, name)
 }
 
-func (h *localHelper) Chmod(_ context.Context, a helper.Account, name string, mode fs.FileMode) error {
-	return h.serve(a, "chmod", nil, nil, name, octal(mode))
+func (h *localHelper) Chmod(ctx context.Context, a helper.Account, name string, mode fs.FileMode) error {
+	return h.serve(ctx, a, "chmod", nil, nil, name, octal(mode))
 }
 
-func (h *localHelper) ExtractTar(_ context.Context, a helper.Account, dest string, tarball io.Reader, lim helper.ExtractLimits) error {
-	return h.serve(a, "extract-tar", tarball, nil, dest, fmt.Sprint(lim.MaxBytes), fmt.Sprint(lim.MaxEntries))
+func (h *localHelper) ExtractTar(ctx context.Context, a helper.Account, dest string, tarball io.Reader, lim helper.ExtractLimits) error {
+	// The real helper reads a pipe: whatever stopped the client's stdin, it
+	// sees only an early end.
+	return h.serve(ctx, a, "extract-tar", eofOnError{tarball}, nil, dest, fmt.Sprint(lim.MaxBytes), fmt.Sprint(lim.MaxEntries))
 }
 
 func (h *localHelper) Exec(ctx context.Context, a helper.Account, r helper.ExecRequest) (int, error) {
@@ -141,9 +163,20 @@ func (h *localHelper) Exec(ctx context.Context, a helper.Account, r helper.ExecR
 	}
 	h.reqs = append(h.reqs, saved)
 	hook := h.hook
+	var failed error
+	if len(r.Args) > 0 {
+		failed = h.failExec[r.Program+" "+r.Args[0]]
+	}
 	h.mu.Unlock()
+	if failed != nil {
+		return 0, failed
+	}
 	if hook != nil {
 		if code, ok := hook(a, r); ok {
+			// As the real client: a cancel wins over the program's exit.
+			if err := ctx.Err(); err != nil {
+				return 0, err
+			}
 			return code, nil
 		}
 	}
@@ -1027,4 +1060,16 @@ func TestDeployOfSiteWithoutRepoIsConflict(t *testing.T) {
 	if len(h.ops) != 0 {
 		t.Errorf("Run touched the home: %q", h.ops)
 	}
+}
+
+// eofOnError turns a read error into an early end, as a process reading a
+// pipe sees it.
+type eofOnError struct{ r io.Reader }
+
+func (e eofOnError) Read(p []byte) (int, error) {
+	n, err := e.r.Read(p)
+	if err != nil && err != io.EOF {
+		err = io.EOF
+	}
+	return n, err
 }

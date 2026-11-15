@@ -18,9 +18,9 @@ type ExtractLimits struct {
 
 // extractTarGz unpacks a gzip tarball into dest inside root. It allows only
 // directories, regular files and relative symlinks that stay inside the
-// archive. Directories are 0750 and files 0640, or 0750 with an
-// execute bit (fileMode). Absolute paths, "..", hard links and device files are refused,
-// and os.Root contains anything the checks miss.
+// archive. Directories are 0750 and files 0640, or 0750 with an execute
+// bit (ExtractedFileMode). Absolute paths, "..", hard links and device
+// files are refused, and os.Root contains anything the checks miss.
 //
 // linkStaysInside reads a target from where the link's name says it is, so
 // a member under an earlier symlink member is refused: through d -> ".",
@@ -64,7 +64,7 @@ func extractTarGz(root *os.Root, dest string, r io.Reader, lim ExtractLimits) er
 				return errors.New("archive is too large")
 			}
 			total += h.Size
-			f, err := root.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fileMode(h.Mode))
+			f, err := root.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, ExtractedFileMode(h.Mode))
 			if err != nil {
 				return err
 			}
@@ -112,10 +112,11 @@ func linkStaysInside(member, target string) error {
 	return nil
 }
 
-// fileMode is what a regular file extracts as (spike amendment A4): 0750
-// when its tar mode has any execute bit, so a repository's scripts still
-// run, and 0640 otherwise. No other bit of the archive's mode comes through.
-func fileMode(tarMode int64) os.FileMode {
+// ExtractedFileMode is what a regular file extracts as (spike amendment
+// A4): 0750 when its tar mode has any execute bit, so a repository's
+// scripts still run, and 0640 otherwise. No other bit of the archive's
+// mode comes through.
+func ExtractedFileMode(tarMode int64) os.FileMode {
 	if tarMode&0o111 != 0 {
 		return 0o750
 	}

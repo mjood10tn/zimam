@@ -120,7 +120,7 @@ func Run(ctx context.Context, d sysexec.Deps, h DeployHelper, lookup sites.Looku
 	}
 	id := releaseID(now, sha)
 	rel := releasesDir + "/" + string(id)
-	previous, err := b.liveRelease()
+	previous, err := b.liveRelease(ctx)
 	if err != nil {
 		return contract.SiteDeployResult{}, err
 	}
@@ -138,9 +138,26 @@ func Run(ctx context.Context, d sysexec.Deps, h DeployHelper, lookup sites.Looku
 	}
 
 	d.Logf("Making %s live", id)
+	// after collects what fails once the release is live.
+	var after []error
 	if err := h.SymlinkSwap(ctx, a, currentLink, "releases/"+string(id)); err != nil {
-		b.discard(rel, previous)
-		return contract.SiteDeployResult{}, err
+		// A swap can fail after its rename landed: a cancel seen late, or a
+		// failed sync of site/. Only current itself says whether the new
+		// release is live, and a live one must never be removed.
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+		now, serr := b.liveRelease(sctx)
+		cancel()
+		switch {
+		case serr == nil && now == string(id):
+			d.Logf("Swapping current reported an error, but current points at %s: it is live", id)
+			after = append(after, fmt.Errorf("swapping current reported: %w", err))
+		case serr == nil && now == previous:
+			b.discard(rel, previous)
+			return contract.SiteDeployResult{}, err
+		default:
+			d.Logf("Where current points is unknown after the failed swap; ~/%s stays for the next deploy's prune", rel)
+			return contract.SiteDeployResult{}, errors.Join(err, serr)
+		}
 	}
 	res := contract.SiteDeployResult{Name: p.Name, Release: id, Commit: sha}
 	if prev := contract.ReleaseID(previous); prev.Validate() == nil {
@@ -157,16 +174,20 @@ func Run(ctx context.Context, d sysexec.Deps, h DeployHelper, lookup sites.Looku
 	kept := keptReleases(st.Releases, st.Keep(), string(id), previous)
 	st.Releases = keepListed(st.Releases, kept)
 	if err := sites.Save(d.Paths, st); err != nil {
-		return res, fmt.Errorf("release %s is live, but recording it failed: %w", id, err)
+		// Without the record, a prune could remove what the state still lists.
+		return res, liveBut(id, append(after, fmt.Errorf("recording it failed: %w", err)))
 	}
 	if st.Type.RunsPHP() {
 		d.Logf("Marking PHP %s's pools for a graceful reload by the next maintenance run", st.PHPVersion)
 		if err := php.MarkReload(d.Paths, st.PHPVersion); err != nil {
-			return res, fmt.Errorf("release %s is live, but marking PHP %s for a reload failed: %w", id, st.PHPVersion, err)
+			after = append(after, fmt.Errorf("marking PHP %s for a reload failed: %w", st.PHPVersion, err))
 		}
 	}
 	if err := prune(ctx, d, h, a, st.Keep(), kept); err != nil {
-		return res, fmt.Errorf("release %s is live, but pruning old releases failed: %w", id, err)
+		after = append(after, fmt.Errorf("pruning old releases failed: %w", err))
+	}
+	if len(after) > 0 {
+		return res, liveBut(id, after)
 	}
 	d.Logf("Site %s now serves %s at %s", p.Name, sha, id)
 	return res, nil
@@ -196,38 +217,49 @@ func (b *build) git(d sysexec.Deps, dir string, capture io.Writer, max int64, ar
 	return err
 }
 
-// fetch is steps 2 and 3: it returns the commit to deploy.
-func (b *build) fetch() (contract.CommitSHA, error) {
-	if err := b.ensureRepo(); err != nil {
-		return "", err
-	}
-	branch := b.st.Branch
-	b.d.Logf("Fetching %s from %s", branch, b.st.Repository)
-	// --refmap= ignores origin's configured refspec, so git updates only the
-	// branch, never a refs/remotes/origin/ copy of it (A2).
-	// git says "couldn't find remote ref" for a branch the repository
-	// lacks; that becomes a clear error rather than git's.
-	missing := false
-	d := b.d
+// watching is d with a Logf that also reports whether a line contained
+// text, so a git failure can be told apart by what git said.
+func watching(d sysexec.Deps, text string) (sysexec.Deps, *bool) {
+	seen := new(bool)
+	logf := d.Logf
 	d.Logf = func(format string, args ...any) {
 		line := fmt.Sprintf(format, args...)
-		if strings.Contains(line, "couldn't find remote ref") {
-			missing = true
+		if strings.Contains(line, text) {
+			*seen = true
 		}
-		b.d.Logf("%s", line)
+		logf("%s", line)
 	}
+	return d, seen
+}
+
+// fetch is steps 2 and 3: it returns the commit to deploy.
+func (b *build) fetch() (contract.CommitSHA, error) {
+	branch := b.st.Branch
 	ref := "refs/heads/" + string(branch)
+	if err := b.ensureRepo(ref); err != nil {
+		return "", err
+	}
+	b.d.Logf("Fetching %s from %s", branch, b.st.Repository)
+	// --refmap= ignores origin's configured refspec, so git updates only the
+	// branch, never a refs/remotes/origin/ copy of it (A2). git says
+	// "couldn't find remote ref" for a branch the repository lacks; that
+	// becomes a clear error rather than git's.
+	d, missing := watching(b.d, "couldn't find remote ref")
 	if err := b.git(d, MirrorDir, nil, 0, "fetch", "--prune", "--no-tags", "--refmap=", "origin", "+"+ref+":"+ref); err != nil {
-		if missing {
+		if *missing {
 			return "", &contract.AgentError{Code: contract.ErrNotFound, Message: fmt.Sprintf("Branch %s isn't in %s.", branch, b.st.Repository)}
 		}
 		return "", err
 	}
 	if b.p.Commit != nil {
 		c := *b.p.Commit
-		err := b.git(b.d, MirrorDir, nil, 0, "merge-base", "--is-ancestor", string(c), ref)
+		// Exit 1 is "not an ancestor"; 128 with this message is a commit
+		// the branch's history doesn't hold. Anything else is git failing,
+		// not the caller's mistake.
+		d, unknown := watching(b.d, "Not a valid commit name")
+		err := b.git(d, MirrorDir, nil, 0, "merge-base", "--is-ancestor", string(c), ref)
 		var exit *sysexec.ExitError
-		if errors.As(err, &exit) {
+		if errors.As(err, &exit) && (exit.Code == 1 || (exit.Code == 128 && *unknown)) {
 			msg := fmt.Sprintf("Commit %s isn't on the branch %s.", c, branch)
 			return "", &contract.AgentError{Code: contract.ErrValidationFailed, Message: msg, Fields: contract.FieldErrors{"commit": msg}}
 		}
@@ -249,11 +281,15 @@ func (b *build) fetch() (contract.CommitSHA, error) {
 
 // ensureRepo makes site/repo.git on the first deploy: an empty bare
 // repository with GitHub as origin, never a mirror clone (A2). A failure
-// half way drops it, so the next deploy starts again.
-func (b *build) ensureRepo() error {
+// half way drops it, so the next deploy starts again. An existing one is
+// repaired first (repairRepo).
+func (b *build) ensureRepo(ref string) error {
 	ok, err := present(b.ctx, b.h, b.a, MirrorDir)
-	if err != nil || ok {
+	if err != nil {
 		return err
+	}
+	if ok {
+		return b.repairRepo(ref)
 	}
 	b.d.Logf("Making the site's repository ~/%s, with %s as origin", MirrorDir, b.st.Repository)
 	err = b.git(b.d, "", nil, 0, "init", "--quiet", "--bare", MirrorDir)
@@ -271,10 +307,47 @@ func (b *build) ensureRepo() error {
 	return nil
 }
 
+// maxRemoteURL caps what git config prints for origin's URL.
+const maxRemoteURL = 4 << 10
+
+// repairRepo undoes what a killed or older run can leave in site/repo.git:
+// the branch's lock file (or packed-refs') from a fetch killed half way,
+// which is stale because the site's job lock keeps every other git of this
+// repository out; and an origin that is missing or points elsewhere.
+func (b *build) repairRepo(ref string) error {
+	for _, lock := range []string{MirrorDir + "/" + ref + ".lock", MirrorDir + "/packed-refs.lock"} {
+		stale, err := present(b.ctx, b.h, b.a, lock)
+		if err != nil {
+			return err
+		}
+		if stale {
+			b.d.Logf("Removing ~/%s, left by a fetch that didn't finish", lock)
+			if err := b.h.RemoveTree(b.ctx, b.a, lock); err != nil {
+				return err
+			}
+		}
+	}
+	want := RemoteURL(b.st.Repository)
+	var out bytes.Buffer
+	err := b.git(b.d, MirrorDir, &out, maxRemoteURL, "config", "--get", "remote.origin.url")
+	var exit *sysexec.ExitError
+	switch {
+	case errors.As(err, &exit) && exit.Code == 1: // no origin
+		b.d.Logf("The site's repository has no origin; adding %s", want)
+		return b.git(b.d, MirrorDir, nil, 0, "remote", "add", "origin", want)
+	case err != nil:
+		return err
+	case strings.TrimSuffix(out.String(), "\n") != want:
+		b.d.Logf("Pointing the site's repository's origin at %s", want)
+		return b.git(b.d, MirrorDir, nil, 0, "remote", "set-url", "origin", want)
+	}
+	return nil
+}
+
 // liveRelease is the name of the release current points at, such as
 // "initial" or a release id, or "" when current points elsewhere.
-func (b *build) liveRelease() (string, error) {
-	fi, err := b.h.Stat(b.ctx, b.a, currentLink)
+func (b *build) liveRelease(ctx context.Context) (string, error) {
+	fi, err := b.h.Stat(ctx, b.a, currentLink)
 	if errors.Is(err, fs.ErrNotExist) {
 		return "", nil
 	}
@@ -327,6 +400,11 @@ func (b *build) export(rel string, sha contract.CommitSHA) error {
 	switch {
 	case errors.As(gitErr, &exit):
 		return gitErr // git failed by itself; extract-tar only saw it stop
+	case extractErr != nil && gitErr != nil:
+		// Either may be the cause: extract-tar refusing a member stops git
+		// (a failed capture write), and a helper that died ends the archive
+		// early for extract-tar. Both are named.
+		return fmt.Errorf("exporting %s: %w", sha, errors.Join(extractErr, gitErr))
 	case extractErr != nil:
 		return fmt.Errorf("exporting %s: %w", sha, extractErr)
 	}
@@ -456,4 +534,9 @@ func (b *build) discard(rel, live string) {
 	if err := b.h.RemoveTree(ctx, b.a, rel); err != nil {
 		b.d.Logf("Removing ~/%s failed (%v); the next deploy removes it", rel, err)
 	}
+}
+
+// liveBut reports failures after the swap: the deploy's release is live.
+func liveBut(id contract.ReleaseID, errs []error) error {
+	return fmt.Errorf("release %s is live, but %w", id, errors.Join(errs...))
 }
