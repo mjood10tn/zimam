@@ -176,6 +176,12 @@ func parseMode(s string) (fs.FileMode, error) {
 // stderr, and returns the exit code.
 func Serve(root *os.Root, op string, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	o, ok := operations[op]
+	if op == "exec" {
+		// exec writes frames to stdout before its result line (exec.go).
+		o, ok = operation{1, func(root *os.Root, a []string, stdin io.Reader) (any, error) {
+			return runExec(root, a[0], stdin, stdout)
+		}}, true
+	}
 	if !ok {
 		fmt.Fprintf(stderr, "%s: unknown operation %q\n", usage, op)
 		return exitUsage

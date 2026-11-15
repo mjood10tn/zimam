@@ -8,9 +8,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // These tests need root and a real user: the e2e container runs them
@@ -106,4 +108,60 @@ func TestRootHelperCantReadRootFile(t *testing.T) {
 	if err == nil || len(res.Data) != 0 || !strings.Contains(err.Error(), "permission denied") {
 		t.Errorf("Read(root-secret) = %q, %v; want permission denied", res.Data, err)
 	}
+}
+
+func TestExecRunsAsSiteUser(t *testing.T) {
+	a, c := rootSetup(t)
+	var lines []string
+	code, err := c.Exec(context.Background(), a, ExecRequest{
+		Program: "deploy-script",
+		Stdin:   strings.NewReader("id -u\nid -g\necho x > /etc/zimam-test\n"),
+		Log:     func(l string) { lines = append(lines, l) },
+	})
+	if err != nil || code == 0 {
+		t.Fatalf("Exec = %q, %d, %v; want a non-zero exit", lines, code, err)
+	}
+	if len(lines) != 3 || lines[0] != strconv.Itoa(int(a.UID)) || lines[1] != strconv.Itoa(int(a.GID)) ||
+		!strings.Contains(lines[2], "Permission denied") {
+		t.Errorf("output = %q; want uid %d, gid %d and permission denied", lines, a.UID, a.GID)
+	}
+	if _, err := os.Stat("/etc/zimam-test"); err == nil {
+		os.Remove("/etc/zimam-test")
+		t.Error("the site user wrote /etc/zimam-test")
+	}
+}
+
+func TestRootExecCancelLeavesNoProcess(t *testing.T) {
+	a, c := rootSetup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{}, 1)
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.Exec(ctx, a, ExecRequest{
+			Program: "deploy-script",
+			Stdin:   strings.NewReader("sleep 600 &\nsleep 600 &\necho started\nwait\n"),
+			Log:     func(string) { started <- struct{}{} },
+		})
+		done <- err
+	}()
+	select {
+	case <-started:
+	case err := <-done:
+		t.Fatalf("Exec ended early: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the script didn't start within 10s")
+	}
+	cancel()
+	if err := <-done; err == nil {
+		t.Error("Exec after cancel = nil error")
+	}
+	for range 20 {
+		out, _ := exec.Command("/usr/bin/pgrep", "-u", rootTestUser).Output()
+		if len(strings.TrimSpace(string(out))) == 0 {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	out, _ := exec.Command("/usr/bin/ps", "-u", rootTestUser, "-o", "pid,stat,cmd").CombinedOutput()
+	t.Errorf("processes of %s left after cancel:\n%s", rootTestUser, out)
 }
