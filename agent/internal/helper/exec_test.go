@@ -234,18 +234,59 @@ func TestExecEnvIsOnlyAllowlist(t *testing.T) {
 
 func TestExecUmaskAndFDs(t *testing.T) {
 	c, a := testClient(t)
-	lines, code, err := script(t, context.Background(), c, a, "umask\nls /proc/$$/fd | sort -n | tr '\\n' ' '; echo\n")
-	if err != nil || code != 0 || len(lines) != 2 {
+	lines, code, err := script(t, context.Background(), c, a, "umask\n"+listFDs)
+	if err != nil || code != 0 || len(lines) < 2 {
 		t.Fatalf("script = %q, %d, %v", lines, code, err)
 	}
 	if lines[0] != "0027" {
 		t.Errorf("umask = %q, want 0027", lines[0])
 	}
-	for _, fd := range strings.Fields(lines[1]) {
-		if n, _ := strconv.Atoi(fd); n > 2 && n != 255 { // bash keeps 255 for itself
-			t.Errorf("open descriptors = %q; want only 0-2", lines[1])
-			break
+	if extra := extraFDs(t, lines[1:]); len(extra) > 0 {
+		t.Errorf("open descriptors %q in %q; want only 0-2", extra, lines[1:])
+	}
+}
+
+// listFDs prints the script's own open descriptors between "fds" and "end".
+// ls runs as a simple command, not in a pipeline: bash holds no pipe of its
+// own while it runs.
+const listFDs = "echo fds; ls /proc/$$/fd; echo end\n"
+
+// extraFDs returns the descriptors above 2 in each listFDs block of lines,
+// besides 255, which bash keeps for itself.
+func extraFDs(t *testing.T, lines []string) []string {
+	t.Helper()
+	var extra []string
+	in, blocks := false, 0
+	for _, l := range lines {
+		switch {
+		case l == "fds":
+			in = true
+		case l == "end":
+			in, blocks = false, blocks+1
+		case in:
+			if n, err := strconv.Atoi(l); err != nil || (n > 2 && n != 255) {
+				extra = append(extra, l)
+			}
 		}
+	}
+	if blocks == 0 {
+		t.Fatalf("no descriptor listing in %q", lines)
+	}
+	return extra
+}
+
+// The listing must see only what the script holds itself. A pipeline would
+// list the parent bash while it still holds the next stage's pipe (CI saw
+// "0 1 2 4"); a slow fork (a large heap) widens that window.
+func TestFDListingIsRaceFree(t *testing.T) {
+	c, a := testClient(t)
+	lines, code, err := script(t, context.Background(), c, a,
+		"x=$(head -c 100000000 /dev/zero | tr '\\0' a)\nfor i in $(seq 200); do\n"+listFDs+"done\n")
+	if err != nil || code != 0 {
+		t.Fatalf("script = %d, %v", code, err)
+	}
+	if extra := extraFDs(t, lines); len(extra) > 0 {
+		t.Errorf("the listing saw descriptors %q; want none above 2", extra)
 	}
 }
 
@@ -539,15 +580,12 @@ func TestExecClosesInheritedFDs(t *testing.T) {
 	if _, err := unix.FcntlInt(uintptr(fd), unix.F_SETFD, 0); err != nil {
 		t.Fatal(err)
 	}
-	lines, code, err := script(t, context.Background(), c, a, "ls /proc/$$/fd | sort -n | tr '\n' ' '; echo\n")
-	if err != nil || code != 0 || len(lines) != 1 {
+	lines, code, err := script(t, context.Background(), c, a, listFDs)
+	if err != nil || code != 0 {
 		t.Fatalf("script = %q, %d, %v", lines, code, err)
 	}
-	for _, s := range strings.Fields(lines[0]) {
-		if n, _ := strconv.Atoi(s); n > 2 && n != 255 {
-			t.Errorf("open descriptors = %q (inherited %d); want only 0-2", lines[0], fd)
-			break
-		}
+	if extra := extraFDs(t, lines); len(extra) > 0 {
+		t.Errorf("open descriptors %q (inherited %d); want only 0-2", extra, fd)
 	}
 }
 
