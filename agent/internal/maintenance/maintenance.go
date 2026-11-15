@@ -84,7 +84,11 @@ type changes struct {
 // audit entry, as cli:root.
 func Run(ctx context.Context, d sysexec.Deps, j Jobs, homes Homes, w interface{ Write(audit.Entry) error }) error {
 	start := d.Now()
-	lockCtx, cancel := context.WithTimeout(ctx, lockWait)
+	// The budget starts here, so a wait for the lock counts against it: the
+	// wait and the run together stay under the unit's TimeoutStartSec.
+	runCtx, cancelRun := context.WithTimeout(ctx, runBudget)
+	defer cancelRun()
+	lockCtx, cancel := context.WithTimeout(runCtx, lockWait)
 	unlock, err := sysexec.Lock(lockCtx, d.Paths.MaintenanceLock())
 	cancel()
 	if err != nil {
@@ -92,8 +96,6 @@ func Run(ctx context.Context, d sysexec.Deps, j Jobs, homes Homes, w interface{ 
 	}
 	defer unlock()
 
-	runCtx, cancelRun := context.WithTimeout(ctx, runBudget)
-	defer cancelRun()
 	var c changes
 	var errs []error
 	// First, so nothing below runs or reloads against an untested file.

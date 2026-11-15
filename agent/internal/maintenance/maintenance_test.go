@@ -19,8 +19,10 @@ import (
 	"zimam/agent/contract"
 	"zimam/agent/internal/audit"
 	"zimam/agent/internal/config"
+	"zimam/agent/internal/helper"
 	"zimam/agent/internal/paths"
 	"zimam/agent/internal/php"
+	"zimam/agent/internal/sites"
 	"zimam/agent/internal/sysexec"
 )
 
@@ -599,21 +601,91 @@ func (r *ctxRunner) Run(ctx context.Context, c sysexec.Cmd) (sysexec.Result, err
 	return r.Runner.Run(ctx, c)
 }
 
+// liveHelper records whether the context of each listing was live.
+type liveHelper struct{ live []bool }
+
+func (h *liveHelper) List(ctx context.Context, _ helper.Account, _ string) (helper.Listing, error) {
+	h.live = append(h.live, ctx.Err() == nil)
+	return helper.Listing{}, nil
+}
+
+func (h *liveHelper) RemoveTree(context.Context, helper.Account, string) error { return nil }
+
 // A step that uses up its budget is cancelled alone: the steps after it get
-// their own contexts.
+// their own contexts. The cap step lists with a live context; pruning, which
+// takes none, still deletes the old job; logrotate's context is live too.
 func TestStepTimeoutDoesNotCancelLaterSteps(t *testing.T) {
 	defer func(l stepLimits) { limits = l }(limits)
 	limits.reconcile = 100 * time.Millisecond
 	e := newEnv(t)
 	r := &ctxRunner{Runner: e.d.Run, live: map[string]bool{}}
 	e.d.Run = r
-	err := Run(context.Background(), e.d, blockingJobs{}, Homes{}, audit.Writer{Paths: e.d.Paths})
+	if err := sites.Save(e.d.Paths, sites.State{Name: "shop", Domain: "shop.example.com", Type: contract.SiteStatic, TemplateVersion: 1, Security: sites.DefaultSecurity()}); err != nil {
+		t.Fatal(err)
+	}
+	const id = "01JBX7Q2M5YQ8T3N6V0R4K9W1E"
+	old := testNow.Add(-400 * 24 * time.Hour)
+	if err := os.MkdirAll(e.d.Paths.JobDir(contract.JobID(id)), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(e.d.Paths.JobState(contract.JobID(id)), []byte(`{"status":"succeeded"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{e.d.Paths.JobState(contract.JobID(id)), e.d.Paths.JobDir(contract.JobID(id))} {
+		os.Chtimes(path, old, old)
+	}
+	h := &liveHelper{}
+	homes := Homes{Helper: h, Lookup: func(name string) (helper.Account, error) {
+		return helper.Account{Name: name, UID: 1000, GID: 1000, Home: "/home/" + name}, nil
+	}}
+	err := Run(context.Background(), e.d, blockingJobs{}, homes, audit.Writer{Paths: e.d.Paths})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("Run = %v, want the reconcile step's timeout", err)
 	}
 	if live, ran := r.live[logrotate]; !ran || !live {
 		t.Errorf("logrotate ran=%v with a live context=%v after reconcile timed out, want both", ran, live)
 	}
+	if len(h.live) != 1 || !h.live[0] {
+		t.Errorf("enforceCaps listed with live contexts %v, want one live listing", h.live)
+	}
+	if _, err := os.Stat(e.d.Paths.JobDir(contract.JobID(id))); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("pruneJobs didn't run after the timed-out step: %v", err)
+	}
+}
+
+// The run's budget starts before the lock wait, so a held lock eats into
+// it: waiting and running together never pass the budget.
+func TestLockWaitCountsAgainstTheRunBudget(t *testing.T) {
+	defer func(b, w time.Duration, l stepLimits) { runBudget, lockWait, limits = b, w, l }(runBudget, lockWait, limits)
+	limits.rotationReserve = time.Second
+	runBudget, lockWait = 5*time.Second, time.Minute
+	e := newEnv(t)
+	unlock, err := sysexec.Lock(context.Background(), e.d.Paths.MaintenanceLock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	began := time.Now()
+	go func() {
+		time.Sleep(1500 * time.Millisecond)
+		unlock()
+	}()
+	var left time.Duration
+	jobs := deadlineJobs{left: &left}
+	if err := Run(context.Background(), e.d, jobs, Homes{}, audit.Writer{Paths: e.d.Paths}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if waited := time.Since(began); left <= 0 || left > runBudget-1400*time.Millisecond {
+		t.Errorf("%v of the budget was left after waiting %v for the lock, want it reduced by the wait", left, waited)
+	}
+}
+
+// deadlineJobs records how much of the run's budget was left at Reconcile.
+type deadlineJobs struct{ left *time.Duration }
+
+func (j deadlineJobs) Reconcile(ctx context.Context) (int, error) {
+	dl, _ := ctx.Deadline()
+	*j.left = time.Until(dl)
+	return 0, nil
 }
 
 // A run that hit a rotation budget is a run that changed something: it is
