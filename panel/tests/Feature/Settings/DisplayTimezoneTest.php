@@ -7,6 +7,8 @@ use App\Agent\FakeAgentClient;
 use App\Filament\Pages\Settings;
 use App\Filament\Resources\AgentJobResource\Pages\ViewAgentJob;
 use App\Models\AgentJob;
+use App\Livewire\LogViewer;
+use App\Models\Setting;
 use App\Models\User;
 use App\Settings\PanelSettings;
 use App\Support\DisplayTime;
@@ -71,7 +73,7 @@ final class DisplayTimezoneTest extends TestCase
 
     public function testUnknownZoneRefused(): void
     {
-        foreach (['Mars/Base', '../etc', ''] as $zone) {
+        foreach (['Mars/Base', '../etc', '', 'asia/riyadh'] as $zone) {
             Livewire::test(Settings::class)
                 ->fillForm(['display_timezone' => $zone])
                 ->call('save')
@@ -126,5 +128,23 @@ final class DisplayTimezoneTest extends TestCase
         $this->assertSame('Asia/Riyadh', app(PanelSettings::class)->displayTimezone());
         $this->assertSame([], $this->agent->calls());
         $this->assertSame(0, AgentJob::count());
+    }
+
+    public function testBadStoredValueFallsBackToUtc(): void
+    {
+        Setting::query()->create(['key' => 'display_timezone', 'value' => 'Mars/Base']);
+
+        $this->assertSame('UTC', app(PanelSettings::class)->displayTimezone());
+        $this->assertSame('09:00', DisplayTime::format(CarbonImmutable::parse('2026-11-11 09:00:00', 'UTC'), 'H:i'));
+    }
+
+    public function testJournalLinesShownInDisplayZone(): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2026-11-11 09:00:00', 'UTC'));
+        $meta = fn (): string => Livewire::test(LogViewer::class, ['source' => 'journal.nginx'])->get('lines')[0]['meta'];
+
+        $this->assertStringStartsWith('2026-11-11 09:00:00', $meta());
+        app(PanelSettings::class)->setDisplayTimezone('Asia/Riyadh');
+        $this->assertStringStartsWith('2026-11-11 12:00:00', $meta());
     }
 }

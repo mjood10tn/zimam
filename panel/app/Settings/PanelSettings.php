@@ -19,6 +19,9 @@ class PanelSettings
 
     public const SITE_LOG_CAP_BYTES = 5 * 1024 * 1024 * 1024;
 
+    /** The display zone, read once per request: Filament asks for it per cell. */
+    private ?string $zone = null;
+
     public function logRetentionDays(): int
     {
         return (int) $this->get('log_retention_days', self::LOG_RETENTION_DAYS);
@@ -56,9 +59,12 @@ class PanelSettings
 
     public function displayTimezone(): string
     {
+        if ($this->zone !== null) {
+            return $this->zone;
+        }
         $zone = (string) $this->get('display_timezone', self::DISPLAY_TIMEZONE);
 
-        return in_array($zone, \DateTimeZone::listIdentifiers(), true) ? $zone : self::DISPLAY_TIMEZONE;
+        return $this->zone = in_array($zone, \DateTimeZone::listIdentifiers(), true) ? $zone : self::DISPLAY_TIMEZONE;
     }
 
     /** The zone the panel shows times in; the panel keeps storing UTC. */
@@ -68,6 +74,7 @@ class PanelSettings
             throw new \InvalidArgumentException('Unknown time zone.');
         }
         $this->set('display_timezone', $zone);
+        $this->zone = null;
     }
 
     private function get(string $key, mixed $default): mixed

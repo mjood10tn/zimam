@@ -6,7 +6,9 @@ use App\Agent\AgentClient;
 use App\Agent\Commands\LogsList;
 use App\Agent\Commands\LogsRead;
 use App\Agent\Exceptions\AgentException;
+use App\Support\DisplayTime;
 use App\Support\PanelLog;
+use Carbon\CarbonImmutable;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
 
@@ -140,6 +142,19 @@ class LogViewer extends Component
         }
     }
 
+    /** The agent's RFC 3339 UTC time in the panel's display zone; blank when missing or unreadable. */
+    private static function displayTime(mixed $time): string
+    {
+        if (! is_string($time) || $time === '') {
+            return '';
+        }
+        try {
+            return DisplayTime::format(CarbonImmutable::parse($time), 'Y-m-d H:i:s');
+        } catch (\Throwable) {
+            return '';
+        }
+    }
+
     /** @param array<string, mixed>|null $data */
     private function apply(?array $data, bool $append, bool $keepForward = false): void
     {
@@ -151,7 +166,7 @@ class LogViewer extends Component
             $rows[] = ['key' => 'o'.$l['offset'], 'text' => $l['text'], 'meta' => '', 'priority' => null];
         }
         foreach ($data['entries'] ?? [] as $e) {
-            $rows[] = ['key' => 'c'.$e['cursor'], 'text' => $e['message'], 'meta' => trim(substr((string) $e['time'], 0, 19).' '.$e['unit']), 'priority' => $e['priority']];
+            $rows[] = ['key' => 'c'.$e['cursor'], 'text' => $e['message'], 'meta' => trim(self::displayTime($e['time'] ?? null).' '.($e['unit'] ?? '')), 'priority' => $e['priority']];
         }
         $this->lines = $append ? [...$this->lines, ...$rows] : $rows;
         $back = $this->isJournal() ? ($data['back_cursor'] ?? null) : ($data['back_offset'] ?? null);
