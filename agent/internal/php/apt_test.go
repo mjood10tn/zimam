@@ -23,7 +23,7 @@ func TestEnsureRepoRejectsWrongKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("EnsureRepo accepted a key with another fingerprint")
 	}
-	other, ferr := PrimaryFingerprint(otherKey(t))
+	other, ferr := CheckSingleCertificate(otherKey(t))
 	if ferr != nil {
 		t.Fatal(ferr)
 	}
@@ -91,7 +91,7 @@ func TestEnsureRepoWritesArmoredKeyringAsBinary(t *testing.T) {
 	if bytes.HasPrefix(k, []byte("-----BEGIN")) {
 		t.Fatal("the keyring was written armored")
 	}
-	if fpr, err := PrimaryFingerprint(k); err != nil || fpr != SuryFingerprint {
+	if fpr, err := CheckSingleCertificate(k); err != nil || fpr != SuryFingerprint {
 		t.Errorf("the written keyring has %q, %v", fpr, err)
 	}
 }

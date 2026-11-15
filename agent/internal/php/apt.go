@@ -51,7 +51,11 @@ func EnsureRepo(ctx context.Context, d sysexec.Deps) error {
 	if err != nil {
 		return err
 	}
-	keyring, fpr, err := readKeyring(raw)
+	fpr, err := CheckSingleCertificate(raw)
+	if err != nil {
+		return fmt.Errorf("%s: %w", keyURL, err)
+	}
+	keyring, err := binaryKeyring(raw)
 	if err != nil {
 		return fmt.Errorf("%s: %w", keyURL, err)
 	}

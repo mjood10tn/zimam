@@ -25,54 +25,71 @@ const (
 
 var errTruncated = errors.New("the keyring is truncated")
 
-// PrimaryFingerprint returns the fingerprint of the one primary key in an
-// OpenPGP keyring, binary or ASCII-armored, as 40 upper-case hex digits.
-func PrimaryFingerprint(keyring []byte) (string, error) {
-	_, fpr, err := readKeyring(keyring)
-	return fpr, err
+// binaryKeyring returns the keyring in binary form: APT reads binary
+// keyrings from /usr/share/keyrings, and an armored one is decoded here.
+func binaryKeyring(keyring []byte) ([]byte, error) {
+	if bytes.HasPrefix(bytes.TrimSpace(keyring), []byte(armorBegin)) {
+		return dearmor(keyring)
+	}
+	return keyring, nil
 }
 
-// readKeyring returns the keyring in binary form, and its primary key's
-// fingerprint. The keyring must hold exactly one primary key, first: APT
-// trusts every key in a Signed-By keyring, so a second one would be trusted
-// on the strength of the first one's fingerprint. Only v4 keys are read, the
+// allowedTag reports whether a packet type may follow the primary key in a
+// single certificate: signature (2), trust (12), user ID (13), public
+// subkey (14) and user attribute (17). The primary key (6) is checked apart.
+func allowedTag(tag byte) bool {
+	switch tag {
+	case 2, 12, 13, 14, 17:
+		return true
+	}
+	return false
+}
+
+// CheckSingleCertificate returns the fingerprint of the one primary key in an
+// OpenPGP keyring, binary or ASCII-armored, as 40 upper-case hex digits, and
+// refuses a keyring that holds anything but that one public certificate.
+// APT trusts every key in a Signed-By keyring, and sqv and gpgv-sq (what APT
+// runs on Ubuntu 26.04) accept a signature from a secret-key packet that
+// stock gpgv refuses. So the first packet must be a public key (tag 6), and
+// then only signatures, user IDs, public subkeys, user attributes and trust
+// packets may follow: a second public key, a secret key or subkey (5, 7) or
+// any other packet type refuses the keyring. Only v4 keys are read, the
 // version sury's key has (RFC 4880 §12.2).
-func readKeyring(keyring []byte) ([]byte, string, error) {
-	data := keyring
-	if bytes.HasPrefix(bytes.TrimSpace(keyring), []byte(armorBegin)) {
-		var err error
-		if data, err = dearmor(keyring); err != nil {
-			return nil, "", err
-		}
+func CheckSingleCertificate(keyring []byte) (fingerprint string, err error) {
+	data, err := binaryKeyring(keyring)
+	if err != nil {
+		return "", err
 	}
 	var primary []byte
 	primaries := 0
-	err := packets(data, func(tag byte, body []byte) error {
-		if primaries == 0 && tag != tagPublicKey {
+	err = packets(data, func(tag byte, body []byte) error {
+		switch {
+		case primaries == 0 && tag != tagPublicKey:
 			return fmt.Errorf("the keyring starts with packet type %d, not a public key", tag)
-		}
-		if tag == tagPublicKey {
+		case tag == tagPublicKey:
 			primaries++
 			primary = body
+		case !allowedTag(tag):
+			return fmt.Errorf("the keyring holds a packet type %d; only signatures, user IDs, public subkeys, user attributes and trust packets may follow the public key", tag)
 		}
 		return nil
 	})
 	switch {
 	case err != nil:
-		return nil, "", err
+		return "", err
 	case primaries > 1:
-		return nil, "", fmt.Errorf("the keyring holds %d primary keys; only one is allowed", primaries)
+		return "", fmt.Errorf("the keyring holds %d primary keys; only one is allowed", primaries)
 	case len(primary) == 0:
-		return nil, "", errors.New("the keyring's public key packet is empty")
+		return "", errors.New("the keyring's public key packet is empty")
 	case primary[0] != 4:
-		return nil, "", fmt.Errorf("the keyring's key is version %d; only version 4 is supported", primary[0])
+		return "", fmt.Errorf("the keyring's key is version %d; only version 4 is supported", primary[0])
 	case len(primary) > 0xffff:
-		return nil, "", errors.New("the keyring's public key packet is too long for a v4 fingerprint")
+		return "", errors.New("the keyring's public key packet is too long for a v4 fingerprint")
 	}
 	h := sha1.New()
 	h.Write([]byte{0x99, byte(len(primary) >> 8), byte(len(primary))})
 	h.Write(primary)
-	return data, strings.ToUpper(hex.EncodeToString(h.Sum(nil))), nil
+	return strings.ToUpper(hex.EncodeToString(h.Sum(nil))), nil
 }
 
 // packets calls fn with each packet's tag and body, in old or new format
