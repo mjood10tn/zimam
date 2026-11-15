@@ -38,19 +38,22 @@ test('Settings: the display time zone moves the times the panel shows', async ({
   let current = 'UTC';
   const setZone = async (zone: string) => {
     await page.goto(`${panel}/admin/settings`);
-    await page.getByRole('combobox', { name: /^Time zone/ }).first().click();
-    await page.keyboard.type(zone);
+    // Filament's searchable select: a button (not a combobox) opens a
+    // dropdown with a search input (role combobox) and role=option items.
+    await page.getByRole('button', { name: /^Time zone/ }).click();
+    await page.getByRole('combobox').fill(zone);
     await page.getByRole('option', { name: zone, exact: true }).click();
     await page.getByRole('button', { name: 'Save settings' }).click();
     if (zone !== current) await expect(page.getByText('The time zone is saved')).toBeVisible();
     current = zone;
     await page.reload();
-    await expect(page.getByRole('combobox', { name: /^Time zone/ }).first()).toContainText(zone);
+    await expect(page.getByRole('button', { name: /^Time zone/ })).toContainText(zone);
   };
-  // The first job's "Finished" time as the page shows it, in milliseconds.
+  // A finished job's "Finished" time as the page shows it, in milliseconds.
   const finished = async (): Promise<number> => {
     await page.goto(`${panel}/admin/agent-jobs`);
-    await page.locator('table tbody tr').first().click();
+    // A finished job, so the page has a Finished time.
+    await page.locator('table tbody tr').filter({ hasText: 'Succeeded' }).first().locator('td').first().click();
     const entry = page.locator('.fi-in-entry').filter({ hasText: 'Finished' }).first();
     await expect(entry).toContainText(stamp);
     const m = stamp.exec((await entry.textContent()) ?? '');
