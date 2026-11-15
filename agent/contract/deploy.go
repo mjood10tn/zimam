@@ -233,14 +233,38 @@ type SiteRepoResult struct {
 	Fingerprint string     `json:"fingerprint"`
 }
 
+// KeepReleases is how many releases a site keeps: 1–20 (OQ5).
+type KeepReleases int
+
+const (
+	minKeepReleases = 1
+	maxKeepReleases = 20
+	// DefaultKeepReleases is what a site keeps until a deploy says otherwise.
+	DefaultKeepReleases KeepReleases = 5
+)
+
+func (k KeepReleases) Validate() error {
+	if k < minKeepReleases || k > maxKeepReleases {
+		return errors.New("must be between 1 and 20")
+	}
+	return nil
+}
+
+func (KeepReleases) JSONSchema() Schema {
+	return Schema{"type": "integer", "minimum": minKeepReleases, "maximum": maxKeepReleases}
+}
+
 // SiteDeployParams is site.deploy's params (R02-D5). Without a commit the
 // deploy takes the branch's head; a given commit must be on the branch.
+// Without keep_releases the site keeps its stored value; with it, the agent
+// stores the new value and prunes by it.
 type SiteDeployParams struct {
-	Name     SiteName      `json:"name"`
-	Commit   CommitSHA     `json:"commit,omitempty"`
-	Script   DeployScript  `json:"script,omitempty"`
-	Composer bool          `json:"composer"`
-	Trigger  DeployTrigger `json:"trigger"`
+	Name         SiteName      `json:"name"`
+	Commit       CommitSHA     `json:"commit,omitempty"`
+	Script       DeployScript  `json:"script,omitempty"`
+	Composer     bool          `json:"composer"`
+	Trigger      DeployTrigger `json:"trigger"`
+	KeepReleases *KeepReleases `json:"keep_releases,omitempty"`
 }
 
 func (p *SiteDeployParams) Validate() error {
@@ -251,6 +275,9 @@ func (p *SiteDeployParams) Validate() error {
 	}
 	f.Check("script", p.Script)
 	f.Check("trigger", p.Trigger)
+	if p.KeepReleases != nil {
+		f.Check("keep_releases", *p.KeepReleases)
+	}
 	return f.Err()
 }
 

@@ -54,6 +54,9 @@ type Lookup func(username string) (helper.Account, error)
 // or PHP version: provisioning again is a retry, never a change. agent.json
 // and the state files are read on every call.
 func Check(d sysexec.Deps, p contract.SiteProvisionParams) error {
+	if err := refuseLaravel(p); err != nil {
+		return err
+	}
 	if p.Type == contract.SitePHP {
 		if err := checkPHP(d, p.PHPVersion); err != nil {
 			return err
@@ -100,6 +103,17 @@ func conflict(format string, args ...any) error {
 	return &contract.AgentError{Code: contract.ErrConflict, Message: fmt.Sprintf(format, args...)}
 }
 
+// refuseLaravel keeps a laravel site from being provisioned down the static
+// path while the contract already accepts the type: its shared .env,
+// storage/ and log rules (R02-D8) don't exist yet. Task 7 of the v0.2.0
+// plan removes this guard.
+func refuseLaravel(p contract.SiteProvisionParams) error {
+	if p.Type != contract.SiteLaravel {
+		return nil
+	}
+	return contract.FieldErrors{"type": "laravel sites aren't supported by this agent yet"}.Err()
+}
+
 // Provision creates a site (§9.2): its user and home, its files through the
 // helper, its log directory, its pool for a PHP site, its security.conf and
 // HTTP vhost, its log rules, and last its state file. Each step checks
@@ -107,6 +121,9 @@ func conflict(format string, args ...any) error {
 // redoes nothing that is already in place.
 func Provision(ctx context.Context, d sysexec.Deps, h Helper, lookup Lookup, p contract.SiteProvisionParams) (contract.SiteProvisionResult, error) {
 	if err := p.Validate(); err != nil {
+		return contract.SiteProvisionResult{}, err
+	}
+	if err := refuseLaravel(p); err != nil {
 		return contract.SiteProvisionResult{}, err
 	}
 	sec := DefaultSecurity()

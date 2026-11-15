@@ -9,6 +9,18 @@
     "composer": {
       "type": "boolean"
     },
+    "keep_releases": {
+      "anyOf": [
+        {
+          "maximum": 20,
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "name": {
       "not": {
         "enum": [

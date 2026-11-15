@@ -220,3 +220,29 @@ func TestDeployCommandsSubjects(t *testing.T) {
 		}
 	}
 }
+
+func TestKeepReleases(t *testing.T) {
+	checkValues(t,
+		[]KeepReleases{1, 5, 20},
+		[]KeepReleases{0, -1, 21, 100})
+}
+
+// keep_releases is optional: left out, the agent keeps the site's stored
+// value (5 by default).
+func TestSiteDeployKeepReleases(t *testing.T) {
+	for _, n := range []KeepReleases{1, 5, 20} {
+		if f := fields(t, &SiteDeployParams{Name: "shop", Trigger: DeployManual, KeepReleases: &n}); f != nil {
+			t.Errorf("keep_releases %d: %v", n, f)
+		}
+	}
+	for _, n := range []KeepReleases{0, 21} {
+		wantRefused(t, &SiteDeployParams{Name: "shop", Trigger: DeployManual, KeepReleases: &n}, "keep_releases")
+	}
+	var p SiteDeployParams
+	if err := DecodeStrict([]byte(`{"name":"shop","composer":false,"trigger":"manual"}`), &p); err != nil || p.KeepReleases != nil {
+		t.Errorf("without keep_releases: %v, %v; want nil", err, p.KeepReleases)
+	}
+	if err := DecodeStrict([]byte(`{"name":"shop","composer":false,"trigger":"manual","keep_releases":7}`), &p); err != nil || p.KeepReleases == nil || *p.KeepReleases != 7 {
+		t.Errorf("keep_releases 7: %v, %v", err, p.KeepReleases)
+	}
+}
