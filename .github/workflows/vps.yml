@@ -31,18 +31,24 @@ env:
     497c36c1b50c0daff30870d5908c9b97af29223d5510c5e6c24957d0cc502fb8
 
 jobs:
+  # One server per architecture for the vps job, and one more amd64 server
+  # for the upgrade job: the upgrade needs a fresh server, and runs on amd64
+  # only, to bound the cost. A server's name is its run.
   create:
     strategy:
       fail-fast: false
       matrix:
-        arch: [amd64, arm64]
+        include:
+          - { run: amd64, arch: amd64 }
+          - { run: arm64, arch: arm64 }
+          - { run: upgrade-amd64, arch: amd64 }
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       contents: read
     env:
       E2E_GOARCH: ${{ matrix.arch }}
-      E2E_VPS_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
+      E2E_VPS_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -54,10 +60,10 @@ jobs:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
         run: bash e2e/vps/create.sh
       # The server's address and the throwaway key that opens it, for the vps
-      # job. The key opens only this run's server, for a day at most.
+      # or upgrade job. The key opens only this run's server, for a day at most.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: vps-access-${{ matrix.arch }}
+          name: vps-access-${{ matrix.run }}
           path: ${{ runner.temp }}/zimam-e2e/access/
           retention-days: 1
           if-no-files-found: error
@@ -137,21 +143,82 @@ jobs:
           name: vps-logs-${{ matrix.arch }}
           path: ${{ runner.temp }}/zimam-e2e/logs
 
-  # Runs whatever create and vps did, failed or cancelled included, so a
-  # half-created server goes too; keep_server leaves both for vps-sweep.yml.
+  # The upgrade (e2e/README.md) on its own fresh amd64 server: the previous
+  # release, built by its own build.sh, then this tree's, signed with the
+  # same key and built as a later version, through the installer again.
+  upgrade:
+    needs: create
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    env:
+      E2E_GOARCH: amd64
+      E2E_VPS_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-upgrade-amd64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The tags and history, for build-previous.sh's git describe.
+          fetch-depth: 0
+      - name: work directory
+        run: echo "E2E_WORK=$RUNNER_TEMP/zimam-e2e" >>"$GITHUB_ENV"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: vps-access-upgrade-amd64
+          path: ${{ runner.temp }}/zimam-e2e/access
+      - name: reach the server create made
+        run: bash e2e/vps/attach.sh >>"$GITHUB_ENV"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.3'
+          extensions: intl, mbstring, pdo_sqlite, sqlite3, zip
+          tools: composer
+          coverage: none
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: |
+            panel/package-lock.json
+            e2e/browser/package-lock.json
+      - name: the previous release, built by its own build.sh
+        run: bash e2e/scripts/build-previous.sh
+      - name: this tree as the next release, signed with the previous release's key
+        run: |
+          export E2E_VERSION E2E_RELEASE_KEY
+          E2E_VERSION=$(cat "$E2E_WORK/release-previous/next-version")
+          E2E_RELEASE_KEY=$E2E_WORK/release-previous/keys/release-key
+          bash e2e/scripts/build.sh
+      - name: the upgrade from the previous release by running the installer again, and a refused downgrade
+        run: bash e2e/scenarios/upgrade.sh
+      - name: collect logs
+        if: failure()
+        run: bash e2e/scripts/collect-logs.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: vps-logs-upgrade-amd64
+          path: ${{ runner.temp }}/zimam-e2e/logs
+
+  # Runs whatever create, vps and upgrade did, failed or cancelled included,
+  # so a half-created server goes too; keep_server leaves them for
+  # vps-sweep.yml.
   delete:
-    needs: [create, vps]
+    needs: [create, vps, upgrade]
     if: always() && !inputs.keep_server
     strategy:
       fail-fast: false
       matrix:
-        arch: [amd64, arm64]
+        run: [amd64, arm64, upgrade-amd64]
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
     env:
-      E2E_VPS_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
+      E2E_VPS_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

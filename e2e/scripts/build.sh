@@ -2,7 +2,10 @@
 # Builds what a run needs on this host, which has Go, PHP with Composer, and
 # npm (design §14.2):
 #   - a throwaway release key, and an e2e release whose base URL is this
-#     host on the LXD bridge;
+#     host on the LXD bridge. With E2E_RELEASE_KEY (a private key's path,
+#     outside $E2E_WORK/keys) the release is signed with that key instead:
+#     the upgrade run signs both releases with the key build-previous.sh's
+#     build made, as one release key signs every real release;
 #   - the panel with its dev dependencies, for the contract suite;
 #   - the probe client and the root-only test binaries, for E2E_GOARCH
 #     (the server's architecture; this host's by default).
@@ -12,12 +15,24 @@ source "$(dirname "$0")/common.sh"
 load_state
 
 w=$E2E_WORK
+key=${E2E_RELEASE_KEY:-}
+if [[ -n $key ]]; then
+	[[ -f $key ]] || die "no private key at E2E_RELEASE_KEY=$key"
+	key=$(realpath "$key")
+	[[ $key != "$(realpath -m "$w/keys")"/* ]] || die "E2E_RELEASE_KEY must be outside $w/keys, which this script empties"
+fi
 rm -rf "${w:?}/keys" "${w:?}/panel-dist" "${w:?}/dist" "${w:?}/contract-test" "${w:?}/bin"
 mkdir -p "$w/keys" "$w/bin"
 chmod 0700 "$w/keys"
 
-log "a throwaway key and the e2e release $E2E_VERSION for http://$BRIDGE:$E2E_PORT"
-(cd "$E2E_ROOT/agent" && go run ./tools/release keygen -out "$w/keys")
+if [[ -n $key ]]; then
+	log "the key $key and the e2e release $E2E_VERSION for http://$BRIDGE:$E2E_PORT"
+	install -m 0600 "$key" "$w/keys/release-key"
+	(cd "$E2E_ROOT/agent" && go run ./tools/release pubkey -key "$w/keys/release-key") >"$w/keys/release-key.pub"
+else
+	log "a throwaway key and the e2e release $E2E_VERSION for http://$BRIDGE:$E2E_PORT"
+	(cd "$E2E_ROOT/agent" && go run ./tools/release keygen -out "$w/keys")
+fi
 # The same two steps as release.yml: the panel first, then the signed release.
 bash "$E2E_ROOT/.github/scripts/build-panel.sh" "$E2E_VERSION" "$w/panel-dist"
 bash "$E2E_ROOT/.github/scripts/build-release.sh" "$E2E_VERSION" "http://$BRIDGE:$E2E_PORT" "$w/keys/release-key" \

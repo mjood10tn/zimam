@@ -27,6 +27,8 @@ Three jobs per architecture: `create` runs step 1, `vps` steps 2 and 3, and `del
    - Checks IPv6 on the server: Nginx on `[::]`, UFW's v6 rules, and `curl -6` to the server's own address.
 4. `destroy.sh` deletes the server and the key, whatever happened before, unless the run was started with **keep_server**.
 
+`create` also makes a third server, amd64 only to bound the cost, named by its run, `upgrade-amd64`. The `upgrade` job attaches to it and runs the upgrade scenario on it (`e2e/README.md`, "The upgrade"). `delete` removes it like the others.
+
 `.github/workflows/vps-sweep.yml` runs `sweep.sh` daily. It deletes servers and keys labelled `zimam-vps` that are older than 3 hours, which is what a run that died before `destroy.sh` leaves behind. To test it, start `vps.yml` with **keep_server**, then start `vps-sweep.yml` with a small `hours`.
 
 ## Secrets

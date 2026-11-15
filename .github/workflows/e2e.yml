@@ -13,12 +13,15 @@ jobs:
     # The end-to-end run (design §14.2) and the milestone gates: an e2e
     # release, signed with a throwaway key, installed by install.sh in a
     # fresh Ubuntu 26.04 LXD container, with Pebble as the ACME server.
+    # Then the upgrade from the previous release, in its own container.
     runs-on: ubuntu-26.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The tags and history, for build-previous.sh's git describe.
+          fetch-depth: 0
       - name: shellcheck the harness, in ubuntu:26.04
         run: |
           docker run --rm -v "$PWD:/w:ro" -w /w ubuntu:26.04 bash -c '
@@ -72,6 +75,29 @@ jobs:
         run: bash e2e/scenarios/audit.sh
       - name: running the installer again repairs, after the version check
         run: bash e2e/scenarios/m1-repair.sh
+      # The upgrade (e2e/README.md): a fresh container gets the previous
+      # release, built by its own build.sh, then this tree's, signed with
+      # the same key and built as a later version. Its work directory and
+      # container replace the main run's for the steps after, collect-logs
+      # and tear down included.
+      - name: free the main run's container for the upgrade
+        run: bash e2e/scripts/down.sh
+      - name: the upgrade's work directory and container
+        run: |
+          echo "E2E_WORK=$RUNNER_TEMP/zimam-upgrade" >>"$GITHUB_ENV"
+          echo "E2E_CONTAINER=zimam-upgrade" >>"$GITHUB_ENV"
+      - name: the upgrade, a fresh container, Pebble and challtestsrv
+        run: bash e2e/scripts/up.sh
+      - name: the upgrade, the previous release, built by its own build.sh
+        run: bash e2e/scripts/build-previous.sh
+      - name: the upgrade, this tree as the next release, signed with the previous release's key
+        run: |
+          export E2E_VERSION E2E_RELEASE_KEY
+          E2E_VERSION=$(cat "$E2E_WORK/release-previous/next-version")
+          E2E_RELEASE_KEY=$E2E_WORK/release-previous/keys/release-key
+          bash e2e/scripts/build.sh
+      - name: the upgrade from the previous release by running the installer again, and a refused downgrade
+        run: bash e2e/scenarios/upgrade.sh
       - name: collect logs
         if: failure()
         run: bash e2e/scripts/collect-logs.sh
@@ -79,7 +105,9 @@ jobs:
         if: failure()
         with:
           name: e2e-logs
-          path: ${{ runner.temp }}/zimam-e2e/logs
+          path: |
+            ${{ runner.temp }}/zimam-e2e/logs
+            ${{ runner.temp }}/zimam-upgrade/logs
       - name: tear down
         if: always()
         run: bash e2e/scripts/down.sh

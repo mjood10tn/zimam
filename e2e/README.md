@@ -18,9 +18,55 @@ The end-to-end harness (design §14.2): a release built with the `e2e` tag and a
 | The caller (`nobody`, `s_php84`), protocol, validation, log and job-limit (`e2e.memhog` ends `oom-kill`) probes between two file snapshots, then the `site.destroy` symlink and maintenance (planted links, a 1 KiB cap) probes with their own | `probes/run.sh` | container |
 | Done-when 11: the audit log, for every command so far | `scenarios/audit.sh` | host |
 | Running the installer again repairs, after `zimam-agent version --at-least` (D25) | `scenarios/m1-repair.sh` | host |
+| The main run's container goes; the upgrade gets its own work directory and container | `scripts/down.sh` | host |
+| The upgrade: a fresh container, Pebble and challtestsrv, with `E2E_WORK` and `E2E_CONTAINER` set to `zimam-upgrade` | `scripts/up.sh` | host |
+| The previous release, built by its own `build.sh` | `scripts/build-previous.sh` | host |
+| This tree as the next release, signed with the previous release's key | `scripts/build.sh` with `E2E_VERSION` and `E2E_RELEASE_KEY` | host |
+| Install the previous release, set it up in Chromium, provision `up-static` and `up-php`, then run this tree's installer: the upgrade's checks, then a refused downgrade | `scenarios/upgrade.sh` | host |
 | Logs for a failed run, then tear down | `scripts/collect-logs.sh`, `scripts/down.sh` | host |
 
-`up.sh` writes `$E2E_WORK/state.env` (the bridge and container addresses), and every later step reads it. `E2E_WORK` defaults to `/tmp/zimam-e2e`; `E2E_CONTAINER`, `E2E_IMAGE` and `E2E_VERSION` can be set too (`scripts/common.sh`).
+`up.sh` writes `$E2E_WORK/state.env` (the bridge and container addresses), and every later step reads it. `E2E_WORK` defaults to `/tmp/zimam-e2e`; `E2E_CONTAINER`, `E2E_IMAGE` and `E2E_VERSION` can be set too (`scripts/common.sh`). `serve-release.sh` serves `$E2E_WORK/dist` by default, or the release in `E2E_DIST`, and reads the version from its manifest.
+
+## The upgrade
+
+`scenarios/upgrade.sh` checks that a server installed from the previous release takes this tree's release when the installer runs again (design §4, D25). It runs in a fresh container, after the main scenarios. In `e2e.yml` that is the same job: the main run's container goes first, and the steps after it use `E2E_WORK=$RUNNER_TEMP/zimam-upgrade` and `E2E_CONTAINER=zimam-upgrade`. `vps.yml` runs it on a fresh amd64 server of its own, in the `upgrade` job.
+
+`build-previous.sh` builds the previous release with that release's own `e2e/scripts/build.sh`, unchanged, since this tree's script may rely on files the old tree lacks.
+- The previous release is the newest tag before `HEAD`, from `git describe --tags --abbrev=0 HEAD^`, so the checkout needs its tags (`fetch-depth: 0`).
+- The tag is checked out with `git worktree add` into `$E2E_WORK/tree-previous`. The worktree is removed when the build ends, whatever the outcome.
+- The old `build.sh` runs with `E2E_WORK=$E2E_WORK/release-previous`, where `build-previous.sh` copies `state.env` first. Its release, contract copy, binaries and throwaway key land there.
+- `build-previous.sh` also writes `release-previous/next-version`, the version for this tree's build.
+
+This tree's `build.sh` then builds the current release.
+- `E2E_RELEASE_KEY` points it at `release-previous/keys/release-key`, so one key signs both releases, as it does every real release.
+- v0.1.0's `build.sh` reads no key variable and always makes its own key. That is why the key passes from the old build to the new one, not the other way.
+
+The installer refuses to move a server to an older release (D25), in SemVer order, where a pre-release sorts before its release. So the two builds carry explicit versions:
+- the previous release is built as the tag's version (`v0.1.0` gives `0.1.0`);
+- this tree is built with the patch number one higher and the pre-release `e2e` (`0.1.1-e2e`).
+
+The settings:
+
+| Variable | Read by | Default |
+| --- | --- | --- |
+| `E2E_PREVIOUS_TAG` | `build-previous.sh` | `git describe --tags --abbrev=0 HEAD^` |
+| `E2E_PREVIOUS_VERSION` | `build-previous.sh`, passed to the old `build.sh` as `E2E_VERSION` | the tag without its `v` |
+| `E2E_RELEASE_KEY` | `build.sh`: sign with this private key instead of a new one | unset: a new throwaway key |
+| `E2E_VERSION` | `build.sh` | `0.0.0-e2e`; set it to `release-previous/next-version` for the upgrade |
+| `E2E_DIST` | `serve-release.sh` | `$E2E_WORK/dist` |
+
+The scenario:
+1. Serves the previous release and installs it with `scripts/install.sh`.
+2. Completes setup through the setup link with the browser's `setup` project.
+3. Provisions `up-static` and `up-php` through the socket with `probeclient`. `up-php` runs on the default PHP. Both must answer before the upgrade.
+4. Serves this tree's release and runs the installer again. Then:
+   - `zimam-agent version` reports the new version;
+   - bootstrap installed the new panel release;
+   - both sites answer 200 with their placeholder;
+   - `/admin/login` answers 200;
+   - `zimam-agent maintenance` exits 0;
+   - the audit log has the cli:root `bootstrap` entries of both installer runs.
+5. Serves the previous release again and runs its installer. This is the `refuses a downgrade` case: the installer must exit non-zero with D25's message, the new agent must stay, and the audit log must not grow.
 
 ## Running it locally
 
