@@ -24,6 +24,8 @@ import (
 	"golang.org/x/sys/unix"
 
 	"zimam/agent/contract"
+	"zimam/agent/internal/composer"
+	"zimam/agent/internal/paths"
 )
 
 // The exec operation (R02-D1) runs one program of a fixed set as the site
@@ -58,9 +60,9 @@ const (
 	execKillWait = 5 * time.Second
 )
 
-// ComposerPhar is the pinned Composer (R02-D6, spike amendment A9). The
-// Composer task moves the version into paths.
-const ComposerPhar = "/usr/local/lib/zimam/composer/composer-2.11.2.phar"
+// composerPhar is the pinned Composer (R02-D6, spike amendment A9), at its
+// production path: the helper runs on the server, never under a test root.
+var composerPhar = paths.Paths{}.ComposerPhar(composer.Version)
 
 // execProgram is one program the helper may run.
 type execProgram struct {
@@ -76,7 +78,7 @@ var execPrograms = map[string]execProgram{
 	"ssh-keygen": {path: "/usr/bin/ssh-keygen"},
 	"php":        {},
 	"artisan":    {lead: []string{"artisan"}},
-	"composer": {lead: []string{ComposerPhar},
+	"composer": {lead: []string{composerPhar},
 		env: []string{"COMPOSER_HOME", "COMPOSER_CACHE_DIR", "COMPOSER_NO_INTERACTION"}},
 	// R02-D2: the script comes on stdin, never in argv.
 	"deploy-script": {path: "/bin/bash", lead: []string{"--noprofile", "--norc", "-eo", "pipefail", "-s"}, noArg: true, stdin: true},

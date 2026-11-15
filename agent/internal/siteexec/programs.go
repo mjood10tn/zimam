@@ -23,7 +23,7 @@ var Programs = []Program{Git, Composer, PHP, Artisan, SSHKeygen, DeployScript}
 
 // Path is the absolute path the helper executes for p: /usr/bin/git,
 // /usr/bin/ssh-keygen, /bin/bash for deploy-script, and /usr/bin/php<v> for
-// php, artisan and composer (composer runs helper.ComposerPhar, artisan the
+// php, artisan and composer (composer runs the pinned phar, paths.ComposerPhar, artisan the
 // release's artisan file). The PHP programs need a supported version; the
 // others ignore it.
 func (p Program) Path(phpVersion contract.PHPVersion) (string, error) {

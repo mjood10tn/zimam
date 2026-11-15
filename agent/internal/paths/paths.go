@@ -123,6 +123,19 @@ func (p Paths) EtcGroup() string { return p.at("etc/group") }
 func (p Paths) EtcPasswd() string    { return p.at("etc/passwd") }
 func (p Paths) EtcLoginDefs() string { return p.at("etc/login.defs") }
 
+// GitBinary and UnzipBinary exist while git and unzip are installed;
+// site.repo installs whichever is missing (R02-D7).
+func (p Paths) GitBinary() string   { return p.at("usr/bin/git") }
+func (p Paths) UnzipBinary() string { return p.at("usr/bin/unzip") }
+
+// ComposerDir holds the pinned Composer (R02-D6, root 0755), and
+// ComposerPhar is one version's phar in it (root 0644). The version comes
+// from the agent's own pin, never from the panel.
+func (p Paths) ComposerDir() string { return p.at("usr/local/lib/zimam/composer") }
+func (p Paths) ComposerPhar(version string) string {
+	return p.at("usr/local/lib/zimam/composer", "composer-"+version+".phar")
+}
+
 // Crontab and Atq exist while cron and at are installed; site.destroy
 // clears a deleted user's jobs only then.
 func (p Paths) Crontab() string { return p.at("usr/bin/crontab") }

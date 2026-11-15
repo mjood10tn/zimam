@@ -32,11 +32,17 @@ type Request struct {
 	CaptureMax int64
 }
 
+// Execer runs one program through the helper's exec operation;
+// *helper.Client is the real one.
+type Execer interface {
+	Exec(ctx context.Context, a helper.Account, r helper.ExecRequest) (int, error)
+}
+
 // Run runs r as the account a and logs its output lines through d.Logf. It
 // returns the exit code; a non-zero exit also returns a *sysexec.ExitError,
 // so a failed program can't pass for success. Cancelling ctx kills the
 // program's process group.
-func Run(ctx context.Context, d sysexec.Deps, h helper.Client, a helper.Account, r Request) (exitCode int, err error) {
+func Run(ctx context.Context, d sysexec.Deps, h Execer, a helper.Account, r Request) (exitCode int, err error) {
 	code, err := h.Exec(ctx, a, helper.ExecRequest{
 		Program:    string(r.Program),
 		PHP:        r.PHP,
@@ -66,3 +72,5 @@ func outcome(p Program, code int, err error) (int, error) {
 	}
 	return 0, nil
 }
+
+var _ Execer = (*helper.Client)(nil)

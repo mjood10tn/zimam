@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"zimam/agent/internal/configtx"
 	"zimam/agent/internal/sysexec"
@@ -109,4 +110,22 @@ func download(ctx context.Context, c *http.Client, u string) ([]byte, error) {
 		return nil, fmt.Errorf("%s is larger than %d bytes", u, maxKeyringBytes)
 	}
 	return b, nil
+}
+
+// InstallPackages installs other packages Zimam needs on first use, such as
+// git and unzip for deploys (R02-D7), the way PHP's are installed: after
+// apt-get update, without recommends, never stopping at a dpkg question,
+// and finishing a dpkg run that a killed job interrupted. The job's
+// package guard keeps job.cancel from stopping it midway.
+func InstallPackages(ctx context.Context, d sysexec.Deps, pkgs ...string) error {
+	if len(pkgs) == 0 {
+		return nil
+	}
+	d.Logf("Installing %s", strings.Join(pkgs, ", "))
+	if _, err := d.Run.Run(ctx, sysexec.Cmd{Path: aptGet, Args: append(slices.Clone(aptLockWait), "update"), Env: aptEnv}); err != nil {
+		return err
+	}
+	args := append(slices.Clone(aptLockWait), "-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold",
+		"install", "-y", "--no-install-recommends")
+	return aptGetRepairing(ctx, d, append(args, pkgs...))
 }

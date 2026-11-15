@@ -70,7 +70,7 @@ func TestRunRefusesBadRequests(t *testing.T) {
 		{Program: DeployScript, Args: []string{"-c", "id"}},
 		{Program: Git, Capture: &bytes.Buffer{}},
 	} {
-		_, err := Run(context.Background(), d, h, a, r)
+		_, err := Run(context.Background(), d, &h, a, r)
 		if err == nil || strings.Contains(err.Error(), "nonexistent") {
 			t.Errorf("Run(%+v) = %v; want a refusal before starting", r, err)
 		}

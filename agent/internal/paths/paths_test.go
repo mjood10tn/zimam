@@ -109,6 +109,10 @@ var production = map[string]string{
 	"SiteTmpDir":            "/home/s_shop/tmp",
 	"SiteHomeLogsDir":       "/home/s_shop/logs",
 	"SitePHPErrorLog":       "/home/s_shop/logs/php-error.log",
+	"ComposerDir":           "/usr/local/lib/zimam/composer",
+	"ComposerPhar":          "/usr/local/lib/zimam/composer/composer-site:shop.phar", // the version argument is "site:shop" too
+	"GitBinary":             "/usr/bin/git",
+	"UnzipBinary":           "/usr/bin/unzip",
 }
 
 const testJob = "01JBX7Q2M5YQ8T3N6V0R4K9W1E"

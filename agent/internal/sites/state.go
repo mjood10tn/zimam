@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -24,7 +25,17 @@ type State struct {
 	PHPVersion      contract.PHPVersion `json:"php_version,omitempty"` // PHP sites only
 	TemplateVersion int                 `json:"template_version"`
 	Security        Security            `json:"security"`
+	// Repository, Branch and DeployKeyFingerprint are set by site.repo
+	// (v0.2.0); a site that never had one leaves them out.
+	Repository           contract.Repository `json:"repository,omitempty"`
+	Branch               contract.Branch     `json:"branch,omitempty"`
+	DeployKeyFingerprint string              `json:"deploy_key_fingerprint,omitempty"`
 }
+
+// KeyFingerprint is the shape of an OpenSSH SHA-256 key fingerprint:
+// "SHA256:" and 32 bytes in unpadded base64. A site's deploy key
+// fingerprint must have it, in the state file and in site.repo's result.
+var KeyFingerprint = regexp.MustCompile(`^SHA256:[A-Za-z0-9+/]{43}$`)
 
 // Security is a site's security settings (§9.6). site.security changes
 // them from Task 33 on; until then every site has the defaults. Password
@@ -54,6 +65,13 @@ func (s State) validate() error {
 	f.Check("type", s.Type)
 	if s.Type == contract.SitePHP {
 		f.Check("php_version", s.PHPVersion)
+	}
+	if s.Repository != "" || s.Branch != "" || s.DeployKeyFingerprint != "" {
+		f.Check("repository", s.Repository)
+		f.Check("branch", s.Branch)
+		if !KeyFingerprint.MatchString(s.DeployKeyFingerprint) {
+			f["deploy_key_fingerprint"] = "must be an OpenSSH SHA-256 fingerprint"
+		}
 	}
 	return f.Err()
 }

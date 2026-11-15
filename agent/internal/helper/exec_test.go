@@ -157,7 +157,7 @@ func TestProgramArgv(t *testing.T) {
 		{"ssh-keygen", "", "/usr/bin/ssh-keygen", nil},
 		{"php", "8.3", "/usr/bin/php8.3", nil},
 		{"artisan", "8.4", "/usr/bin/php8.4", []string{"artisan"}},
-		{"composer", "8.5", "/usr/bin/php8.5", []string{ComposerPhar}},
+		{"composer", "8.5", "/usr/bin/php8.5", []string{"/usr/local/lib/zimam/composer/composer-2.11.2.phar"}},
 		{"deploy-script", "", "/bin/bash", []string{"--noprofile", "--norc", "-eo", "pipefail", "-s"}},
 	} {
 		path, lead, err := ProgramArgv(c.program, contract.PHPVersion(c.php))
