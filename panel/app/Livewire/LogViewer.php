@@ -7,6 +7,7 @@ use App\Agent\Commands\LogsList;
 use App\Agent\Commands\LogsRead;
 use App\Agent\Exceptions\AgentException;
 use App\Support\PanelLog;
+use Livewire\Attributes\Locked;
 use Livewire\Component;
 
 /**
@@ -21,8 +22,10 @@ class LogViewer extends Component
     /** Lines kept on the page while following. */
     public const KEEP = 2000;
 
+    #[Locked]
     public string $source;
 
+    #[Locked]
     public ?string $site = null;
 
     public ?string $archive = null;

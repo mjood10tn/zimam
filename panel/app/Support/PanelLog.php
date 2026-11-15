@@ -32,7 +32,7 @@ final class PanelLog
             // A search looks through at most 16 MiB at a time, to stay inside PHP's memory.
             $start = min($offset ?? 0, $size);
             $end = min($size, $start + 16 * self::WINDOW);
-            $lines = array_values(array_filter(self::lines($path, $start, $end), fn (array $l): bool => mb_stripos($l['text'], $search) !== false));
+            $lines = self::lines($path, $start, $end, $search);
             $stopped = count($lines) >= 2000 ? 'matches' : ($end < $size ? 'size' : 'end');
 
             return ['lines' => array_slice($lines, 0, 2000), 'back_offset' => null, 'forward_offset' => $end, 'search_stopped' => $stopped];
@@ -54,8 +54,14 @@ final class PanelLog
         return ['lines' => $lines, 'back_offset' => ($lines[0]['offset'] ?? 0) > 0 ? $lines[0]['offset'] : null, 'forward_offset' => $before, 'search_stopped' => ''];
     }
 
-    /** @return list<array{offset: int, text: string}> the complete lines between two offsets */
-    private static function lines(string $path, int $from, int $to): array
+    /**
+     * The complete lines between two offsets; with a search term, only the
+     * lines that contain it (case-insensitive), so a window of short lines
+     * never becomes a million-entry array.
+     *
+     * @return list<array{offset: int, text: string}>
+     */
+    private static function lines(string $path, int $from, int $to, string $search = ''): array
     {
         $h = fopen($path, 'rb');
         fseek($h, $from);
@@ -66,7 +72,10 @@ final class PanelLog
         // would copy it once per line, which stalls on a log of a few MiB.
         $pos = 0;
         while (($nl = strpos($data, "\n", $pos)) !== false) {
-            $out[] = ['offset' => $from + $pos, 'text' => mb_strcut(substr($data, $pos, $nl - $pos), 0, 16384)];
+            $text = mb_strcut(substr($data, $pos, $nl - $pos), 0, 16384);
+            if ($search === '' || mb_stripos($text, $search) !== false) {
+                $out[] = ['offset' => $from + $pos, 'text' => $text];
+            }
             $pos = $nl + 1;
         }
 

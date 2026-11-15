@@ -9,7 +9,9 @@ use App\Models\Site;
 use App\Models\User;
 use App\Support\PanelLog;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
 use Livewire\Livewire;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /** The log viewer (§11.2): the last 200 lines, older on demand, live follow, search, priority, archives. */
@@ -33,6 +35,21 @@ final class LogViewerTest extends TestCase
     private function reads(): array
     {
         return array_values(array_column(array_filter($this->agent->calls(), fn (array $c): bool => $c['command'] === 'logs.read'), 'params'));
+    }
+
+    /** The source and the site come from the mount, never from the browser. */
+    #[DataProvider('lockedProperties')]
+    public function testSourceAndSiteAreLocked(string $property, string $value): void
+    {
+        $this->expectException(CannotUpdateLockedPropertyException::class);
+
+        Livewire::test(LogViewer::class, ['source' => 'file.zimam-audit', 'site' => 'shop'])->set($property, $value);
+    }
+
+    /** @return array<string, array{string, string}> */
+    public static function lockedProperties(): array
+    {
+        return ['source' => ['source', 'journal.system'], 'site' => ['site', 'other']];
     }
 
     public function testLoadsLast200(): void
