@@ -73,6 +73,9 @@ policy)
 	[[ $days == 1 ]] || die "FAIL done-when 10: agent.json keeps logs for $days days"
 	in_c grep -qx '    maxage 1' /etc/zimam/logrotate.d/site-php84.conf || die "FAIL done-when 10: php84's rules don't say maxage 1"
 	pass "logs.policy stored 1 day in agent.json and php84's rotation rules"
+	lock=$(in_c stat -c '%U %a' /run/zimam/locks/logrotate.lock) || die "FAIL: /run/zimam/locks/logrotate.lock is missing after logs.policy"
+	[[ $lock == "root 600" ]] || die "FAIL: logrotate.lock is $lock, want root 600"
+	pass "logrotate.lock is root 600"
 	;;
 retention)
 	archive=$(cat "$E2E_WORK/rotated-archive")
