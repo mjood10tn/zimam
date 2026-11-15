@@ -216,6 +216,10 @@ func TestClientRoundTrip(t *testing.T) {
 	if err != nil || idx.Size != 13 || idx.Mode != 0o640 {
 		t.Errorf("extracted index.php = %+v, %v", idx, err)
 	}
+	must(c.Chmod(ctx, a, "site/releases/two/public/index.php", 0o600))
+	if idx, err := c.Stat(ctx, a, "site/releases/two/public/index.php"); err != nil || idx.Mode != 0o600 {
+		t.Errorf("after Chmod, index.php = %+v, %v", idx, err)
+	}
 	must(c.RemoveTree(ctx, a, "."))
 	if l, err := c.List(ctx, a, "."); err != nil || len(l.Entries) != 0 {
 		t.Errorf("after RemoveTree, the home lists %+v, %v", l, err)

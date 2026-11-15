@@ -1,7 +1,8 @@
 // Package maintenance is `zimam-agent maintenance`, which
 // zimam-maintenance.timer runs every 15 minutes (design §11.3). It settles
 // dead jobs, rotates Zimam's and every site's logs, counts the pending updates hourly and
-// refreshes the sury keyring weekly.
+// refreshes the sury keyring weekly and reloads the PHP versions deploys
+// marked (spike amendment A3).
 package maintenance
 
 import (
@@ -35,8 +36,8 @@ var runBudget = 18 * time.Minute
 // step ends rotationReserve before the run's budget, so the steps after it
 // still have time.
 type stepLimits struct {
-	reconcile, updates, caps, retention, keyring time.Duration
-	rotationReserve                              time.Duration
+	reconcile, updates, caps, retention, keyring, fpmReload time.Duration
+	rotationReserve                                         time.Duration
 }
 
 var limits = stepLimits{
@@ -45,6 +46,7 @@ var limits = stepLimits{
 	caps:            3 * time.Minute,
 	retention:       2 * time.Minute,
 	keyring:         3 * time.Minute,
+	fpmReload:       3 * time.Minute,
 	rotationReserve: 5 * time.Minute,
 }
 
@@ -76,6 +78,9 @@ type changes struct {
 	DeletedArchives  []string `json:"deleted_archives,omitempty"`  // over a site's log cap (§11.4), or past a retention period
 	PrunedJobs       int      `json:"pruned_jobs"`                 // older than the log retention period
 	RotationTimeouts []string `json:"rotation_timeouts,omitempty"` // rules files whose logrotate ran out of its budget
+	// PHP versions whose FPM a deploy marked, reloaded gracefully (spike
+	// amendment A3).
+	ReloadedPHP []contract.PHPVersion `json:"reloaded_php,omitempty"`
 }
 
 // Run is one maintenance run, which never overlaps another. Its steps don't
@@ -151,8 +156,14 @@ func Run(ctx context.Context, d sysexec.Deps, j Jobs, homes Homes, w interface{ 
 	if err != nil {
 		errs = append(errs, err)
 	}
+	sctx, cancel = step(runCtx, limits.fpmReload)
+	c.ReloadedPHP, err = php.ReloadMarked(sctx, d)
+	cancel()
+	if err != nil {
+		errs = append(errs, fmt.Errorf("reloading the PHP versions deploys marked: %w", err))
+	}
 	err = errors.Join(errs...)
-	if len(c.RestoredConfigs) == 0 && c.ReconciledJobs == 0 && !c.KeyringRefreshed && len(c.DeletedArchives) == 0 && c.PrunedJobs == 0 && len(c.RotationTimeouts) == 0 {
+	if len(c.RestoredConfigs) == 0 && c.ReconciledJobs == 0 && !c.KeyringRefreshed && len(c.DeletedArchives) == 0 && c.PrunedJobs == 0 && len(c.RotationTimeouts) == 0 && len(c.ReloadedPHP) == 0 {
 		return err
 	}
 	outcome := "ok"

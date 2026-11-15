@@ -282,11 +282,14 @@ func (p *SiteDeployParams) Validate() error {
 	return f.Err()
 }
 
-// SiteDeployResult is the release a deploy made live and its commit.
+// SiteDeployResult is the release a deploy made live and its commit, and the
+// release that was live before it. PreviousRelease is left out when that was
+// no deployed release, such as a provisioned site's "initial".
 type SiteDeployResult struct {
-	Name    SiteName  `json:"name"`
-	Release ReleaseID `json:"release"`
-	Commit  CommitSHA `json:"commit"`
+	Name            SiteName   `json:"name"`
+	Release         ReleaseID  `json:"release"`
+	Commit          CommitSHA  `json:"commit"`
+	PreviousRelease *ReleaseID `json:"previous_release,omitempty"`
 }
 
 // SiteRollbackParams is site.rollback's params: a kept release to make live

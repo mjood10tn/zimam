@@ -420,3 +420,31 @@ func TestPolicyWaitingOnProvisionSeesTheSite(t *testing.T) {
 		t.Fatal("the provision never logged that the site is ready")
 	}
 }
+
+// A provision run again for a site that exists keeps what site.repo and
+// site.deploy stored: its repository, deploy key and releases. Dropping
+// them would let the next deploy prune releases it should keep.
+func TestProvisionRetryKeepsDeployFields(t *testing.T) {
+	e := newEnv(t)
+	e.fpmActive("8.4", false, true)
+	if _, err := e.provision(php84); err != nil {
+		t.Fatal(err)
+	}
+	st, err := Load(e.p, "shop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Repository, st.Branch, st.DeployKeyFingerprint = "octo/app", "main", "SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU"
+	st.KeepReleases = 3
+	st.Releases = []contract.Release{{ID: "20261115120000-1111111", Commit: "1111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Created: time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC), Active: true}}
+	if err := Save(e.p, st); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.provision(php84); err != nil {
+		t.Fatalf("the second provision: %v", err)
+	}
+	got, err := Load(e.p, "shop")
+	if err != nil || !reflect.DeepEqual(got, st) {
+		t.Errorf("after the second provision, state = %+v, %v; want %+v", got, err, st)
+	}
+}

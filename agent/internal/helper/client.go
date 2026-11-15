@@ -181,6 +181,12 @@ func (c *Client) SymlinkSwap(ctx context.Context, a Account, link, target string
 	return c.run(ctx, a, "symlink-swap", nil, &struct{}{}, link, target)
 }
 
+// Chmod gives the regular file or directory name its mode; it refuses a
+// symlink, which it never follows.
+func (c *Client) Chmod(ctx context.Context, a Account, name string, mode fs.FileMode) error {
+	return c.run(ctx, a, "chmod", nil, &struct{}{}, name, octal(mode))
+}
+
 // RemoveTree deletes name and everything under it; for "." it empties the
 // home and keeps it.
 func (c *Client) RemoveTree(ctx context.Context, a Account, name string) error {

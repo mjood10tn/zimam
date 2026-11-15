@@ -1,6 +1,7 @@
 package contract
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -252,5 +253,26 @@ func TestSiteDeployKeepReleases(t *testing.T) {
 	}
 	if err := DecodeStrict([]byte(`{"name":"shop","composer":false,"trigger":"manual","keep_releases":7}`), &p); err != nil || p.KeepReleases == nil || *p.KeepReleases != 7 {
 		t.Errorf("keep_releases 7: %v, %v", err, p.KeepReleases)
+	}
+}
+
+// site.deploy's result names the release live before the deploy, when that
+// was a deployed release: a provisioned site's first deploy replaces
+// "initial", which is no release id, so the field is left out.
+func TestSiteDeployResultPreviousRelease(t *testing.T) {
+	prev := ReleaseID("20261115120000-1111111")
+	for _, c := range []struct {
+		res  SiteDeployResult
+		want string
+	}{
+		{SiteDeployResult{Name: "shop", Release: "20261115120100-2222222", Commit: "2222222bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+			`{"name":"shop","release":"20261115120100-2222222","commit":"2222222bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}`},
+		{SiteDeployResult{Name: "shop", Release: "20261115120100-2222222", Commit: "2222222bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", PreviousRelease: &prev},
+			`{"name":"shop","release":"20261115120100-2222222","commit":"2222222bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","previous_release":"20261115120000-1111111"}`},
+	} {
+		b, err := json.Marshal(c.res)
+		if err != nil || string(b) != c.want {
+			t.Errorf("Marshal = %s, %v; want %s", b, err, c.want)
+		}
 	}
 }

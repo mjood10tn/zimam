@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"math"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
@@ -230,10 +231,12 @@ func TestExtractEntryLimit(t *testing.T) {
 }
 
 func TestExtractModes(t *testing.T) {
-	// The archive's own modes are ignored.
+	// The archive's own modes are ignored, except for a file's execute bits
+	// (TestExtractExecutableBit): setuid, setgid and sticky never come through.
 	home, _, err := extractInto(t, testLimits,
 		member{name: "d/", typ: tar.TypeDir, mode: 0o777},
-		member{name: "d/f", body: "x", typ: tar.TypeReg, mode: 0o4777},
+		member{name: "d/f", body: "x", typ: tar.TypeReg, mode: 0o6666},
+		member{name: "d/x", body: "x", typ: tar.TypeReg, mode: 0o7777},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -243,6 +246,9 @@ func TestExtractModes(t *testing.T) {
 	}
 	if got := modeOf(t, filepath.Join(home, "rel/d/f")); got != 0o640 {
 		t.Errorf("file mode %v, want 0640", got)
+	}
+	if got := modeOf(t, filepath.Join(home, "rel/d/x")); got != 0o750 {
+		t.Errorf("executable file mode %v, want 0750", got)
 	}
 }
 
@@ -305,4 +311,101 @@ func FuzzLinkStaysInside(f *testing.F) {
 			t.Errorf("linkStaysInside(%q, %q): accepted, but the target leaves the archive", name, target)
 		}
 	})
+}
+
+// TestExtractExecutableBit: a regular file whose tar mode has any execute
+// bit extracts as 0750, so a repository's scripts still run; the others stay
+// 0640 (spike amendment A4). Other bits never come through.
+func TestExtractExecutableBit(t *testing.T) {
+	home, _, err := extractInto(t, testLimits,
+		member{name: "run.sh", body: "#!/bin/sh\n", typ: tar.TypeReg, mode: 0o755},
+		member{name: "group-x", body: "x", typ: tar.TypeReg, mode: 0o610},
+		member{name: "other-x", body: "x", typ: tar.TypeReg, mode: 0o4601},
+		member{name: "plain", body: "x", typ: tar.TypeReg, mode: 0o666},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]fs.FileMode{"run.sh": 0o750, "group-x": 0o750, "other-x": 0o750, "plain": 0o640} {
+		if got := modeOf(t, filepath.Join(home, "rel", name)); got != want {
+			t.Errorf("%s mode %v, want %v", name, got, want)
+		}
+	}
+}
+
+// gitRepo makes a repository with git in a temporary directory, hermetic:
+// no system or global config, a fixed author. It skips the test without
+// /usr/bin/git.
+func gitRepo(t *testing.T) (dir string, git func(args ...string) string) {
+	t.Helper()
+	if _, err := os.Stat("/usr/bin/git"); err != nil {
+		t.Skip("needs /usr/bin/git")
+	}
+	dir = t.TempDir()
+	env := []string{
+		"PATH=/usr/bin:/bin", "HOME=" + dir, "LANG=C.UTF-8",
+		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com",
+	}
+	git = func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("/usr/bin/git", args...)
+		cmd.Dir, cmd.Env = dir, env
+		out, err := cmd.Output()
+		if err != nil {
+			var stderr []byte
+			if ee, ok := err.(*exec.ExitError); ok {
+				stderr = ee.Stderr
+			}
+			t.Fatalf("git %q: %v\n%s", args, err, stderr)
+		}
+		return string(out)
+	}
+	git("init", "-q", "-b", "main")
+	return dir, git
+}
+
+// TestExtractRealGitArchive feeds extract-tar what git archive really
+// prints (spike amendment A1): a tree's archive extracts, with the script's
+// execute bit and a symlink inside; a commit's archive carries a
+// pax_global_header and is refused.
+func TestExtractRealGitArchive(t *testing.T) {
+	dir, git := gitRepo(t)
+	put(t, dir, "public/index.php", "<?php echo 1;\n")
+	put(t, dir, "bin/deploy.sh", "#!/bin/sh\n")
+	if err := os.Chmod(filepath.Join(dir, "bin/deploy.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	symlinkAt(t, "public/index.php", filepath.Join(dir, "index.php"))
+	git("add", "-A")
+	git("commit", "-q", "-m", "one")
+
+	root, home, _ := testHome(t)
+	for _, d := range []string{"rel", "rel2"} {
+		if err := root.Mkdir(d, 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tree := git("archive", "--format=tar.gz", "HEAD^{tree}")
+	if err := extractTarGz(root, "rel", strings.NewReader(tree), testLimits); err != nil {
+		t.Fatalf("extracting a tree's archive: %v", err)
+	}
+	if got := readString(t, filepath.Join(home, "rel/public/index.php")); got != "<?php echo 1;\n" {
+		t.Errorf("index.php = %q", got)
+	}
+	if got := modeOf(t, filepath.Join(home, "rel/bin/deploy.sh")); got != 0o750 {
+		t.Errorf("deploy.sh mode %v, want 0750", got)
+	}
+	if got := modeOf(t, filepath.Join(home, "rel/public/index.php")); got != 0o640 {
+		t.Errorf("index.php mode %v, want 0640", got)
+	}
+	if got, err := os.Readlink(filepath.Join(home, "rel/index.php")); err != nil || got != "public/index.php" {
+		t.Errorf("index.php link -> %q, %v", got, err)
+	}
+
+	commit := git("archive", "--format=tar.gz", "HEAD")
+	err := extractTarGz(root, "rel2", strings.NewReader(commit), testLimits)
+	if err == nil || !strings.Contains(err.Error(), "pax_global_header") {
+		t.Errorf("extracting a commit's archive: %v; want the pax_global_header refused", err)
+	}
 }

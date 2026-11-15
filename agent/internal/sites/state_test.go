@@ -5,8 +5,10 @@ import (
 	"io/fs"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"zimam/agent/contract"
 	"zimam/agent/internal/paths"
@@ -85,6 +87,44 @@ func TestStateRepositoryFields(t *testing.T) {
 		},
 	} {
 		st := ok
+		bad(&st)
+		if err := Save(p, st); err == nil {
+			t.Errorf("%s: saved %+v", name, st)
+		}
+	}
+}
+
+// The release fields (v0.2.0) are optional too. Set, keep_releases is 1-20,
+// every release has a valid id, commit and time, the ids are unique, and at
+// most one release is active.
+func TestStateReleaseFields(t *testing.T) {
+	p := paths.Paths{Root: t.TempDir()}
+	created := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	const c1, c2 = "1111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "2222222bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	ok := State{Name: "shop", Domain: "shop.example.com", Type: contract.SiteStatic, TemplateVersion: 1, Security: DefaultSecurity(),
+		KeepReleases: 3,
+		Releases: []contract.Release{
+			{ID: "20261115120000-1111111", Commit: c1, Created: created},
+			{ID: "20261115120100-2222222", Commit: c2, Created: created.Add(time.Minute), Active: true},
+		},
+	}
+	if err := Save(p, ok); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := Load(p, "shop"); err != nil || !reflect.DeepEqual(got, ok) {
+		t.Errorf("Load = %+v, %v; want %+v", got, err, ok)
+	}
+	for name, bad := range map[string]func(*State){
+		"keep_releases 21": func(s *State) { s.KeepReleases = 21 },
+		"keep_releases -1": func(s *State) { s.KeepReleases = -1 },
+		"bad id":           func(s *State) { s.Releases[0].ID = "initial" },
+		"bad commit":       func(s *State) { s.Releases[0].Commit = "abc" },
+		"no time":          func(s *State) { s.Releases[0].Created = time.Time{} },
+		"same id twice":    func(s *State) { s.Releases[1].ID = s.Releases[0].ID },
+		"two active":       func(s *State) { s.Releases[0].Active = true },
+	} {
+		st := ok
+		st.Releases = slices.Clone(ok.Releases)
 		bad(&st)
 		if err := Save(p, st); err == nil {
 			t.Errorf("%s: saved %+v", name, st)

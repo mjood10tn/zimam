@@ -126,14 +126,19 @@ func Provision(ctx context.Context, d sysexec.Deps, h Helper, lookup Lookup, p c
 	if err := refuseLaravel(p); err != nil {
 		return contract.SiteProvisionResult{}, err
 	}
-	sec := DefaultSecurity()
+	st := State{Name: p.Name, Domain: p.Domain, Type: p.Type, PHPVersion: p.PHPVersion, TemplateVersion: templates.Version, Security: DefaultSecurity()}
 	switch old, err := Load(d.Paths, p.Name); {
 	case err == nil:
-		sec = old.Security // a retry keeps the site's settings
+		// A retry keeps the site's settings, and what site.repo and
+		// site.deploy stored: dropping the releases would let the next
+		// deploy prune ones it should keep.
+		st.Security = old.Security
+		st.Repository, st.Branch, st.DeployKeyFingerprint = old.Repository, old.Branch, old.DeployKeyFingerprint
+		st.KeepReleases, st.Releases = old.KeepReleases, old.Releases
 	case !errors.Is(err, fs.ErrNotExist):
 		return contract.SiteProvisionResult{}, err
 	}
-	st := State{Name: p.Name, Domain: p.Domain, Type: p.Type, PHPVersion: p.PHPVersion, TemplateVersion: templates.Version, Security: sec}
+	sec := st.Security
 	a, err := ensureUser(ctx, d, lookup, p.Name)
 	if err != nil {
 		return contract.SiteProvisionResult{}, err

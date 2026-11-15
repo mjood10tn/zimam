@@ -114,6 +114,8 @@ var production = map[string]string{
 	"ComposerPhar":          "/usr/local/lib/zimam/composer/composer-site:shop.phar", // the version argument is "site:shop" too
 	"GitBinary":             "/usr/bin/git",
 	"UnzipBinary":           "/usr/bin/unzip",
+	"FPMReloadDir":          "/run/zimam/fpm-reload",
+	"FPMReloadMark":         "/run/zimam/fpm-reload/8.4",
 }
 
 const testJob = "01JBX7Q2M5YQ8T3N6V0R4K9W1E"

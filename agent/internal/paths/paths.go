@@ -56,6 +56,14 @@ func (p Paths) SubjectLock(subject string) string {
 	return p.at("run/zimam/locks", subject+".lock")
 }
 
+// FPMReloadDir holds a root-owned mark per PHP version whose pools a deploy
+// has served new code from; maintenance reloads each marked version
+// gracefully and clears its mark (spike amendment A3).
+func (p Paths) FPMReloadDir() string { return p.at("run/zimam/fpm-reload") }
+func (p Paths) FPMReloadMark(v contract.PHPVersion) string {
+	return p.at("run/zimam/fpm-reload", string(v))
+}
+
 // /var/lib/zimam
 
 func (p Paths) StateDir() string { return p.at("var/lib/zimam") }

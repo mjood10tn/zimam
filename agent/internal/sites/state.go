@@ -30,6 +30,12 @@ type State struct {
 	Repository           contract.Repository `json:"repository,omitempty"`
 	Branch               contract.Branch     `json:"branch,omitempty"`
 	DeployKeyFingerprint string              `json:"deploy_key_fingerprint,omitempty"`
+	// KeepReleases and Releases are set by site.deploy: how many releases the
+	// site keeps (0 is contract.DefaultKeepReleases), and the releases that
+	// deploys built and that are still kept, oldest first, with the live one
+	// marked Active. A provisioned site's "initial" is not one of them.
+	KeepReleases contract.KeepReleases `json:"keep_releases,omitempty"`
+	Releases     []contract.Release    `json:"releases,omitempty"`
 }
 
 // KeyFingerprint is the shape of an OpenSSH SHA-256 key fingerprint:
@@ -72,6 +78,12 @@ func (s State) validate() error {
 		if !KeyFingerprint.MatchString(s.DeployKeyFingerprint) {
 			f["deploy_key_fingerprint"] = "must be an OpenSSH SHA-256 fingerprint"
 		}
+	}
+	if s.KeepReleases != 0 {
+		f.Check("keep_releases", s.KeepReleases)
+	}
+	if msg := checkReleases(s.Releases); msg != "" {
+		f["releases"] = msg
 	}
 	return f.Err()
 }
@@ -158,4 +170,38 @@ func All(p paths.Paths) ([]State, error) {
 	}
 	slices.SortFunc(all, func(a, b State) int { return strings.Compare(string(a.Name), string(b.Name)) })
 	return all, nil
+}
+
+// Keep is how many releases the site keeps.
+func (s State) Keep() contract.KeepReleases {
+	if s.KeepReleases == 0 {
+		return contract.DefaultKeepReleases
+	}
+	return s.KeepReleases
+}
+
+// checkReleases says what is wrong with a state file's releases, or "".
+func checkReleases(rs []contract.Release) string {
+	seen := map[contract.ReleaseID]bool{}
+	active := 0
+	for _, r := range rs {
+		switch {
+		case r.ID.Validate() != nil:
+			return fmt.Sprintf("%q is not a release id", r.ID)
+		case r.Commit.Validate() != nil:
+			return fmt.Sprintf("release %s has a bad commit", r.ID)
+		case r.Created.IsZero():
+			return fmt.Sprintf("release %s has no creation time", r.ID)
+		case seen[r.ID]:
+			return fmt.Sprintf("release %s is listed twice", r.ID)
+		}
+		seen[r.ID] = true
+		if r.Active {
+			active++
+		}
+	}
+	if active > 1 {
+		return "more than one release is active"
+	}
+	return ""
 }

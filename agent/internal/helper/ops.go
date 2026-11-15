@@ -492,3 +492,35 @@ func (lr *lineReader) next() (line Line, ok bool, err error) {
 		return line, true, nil
 	}
 }
+
+// chmod gives the regular file or directory name its mode exactly, whatever
+// the umask. It never follows a symlink, even one that stays in the home:
+// os.Root follows one inside the home even with O_NOFOLLOW, so name is
+// looked at with Lstat first, and what was opened must be that same file.
+// Anything but a regular file or a directory is refused. O_NONBLOCK keeps a
+// FIFO from blocking the open.
+func chmod(root *os.Root, name string, mode fs.FileMode) error {
+	lfi, err := root.Lstat(name)
+	if err != nil {
+		return err
+	}
+	if !lfi.Mode().IsRegular() && !lfi.IsDir() {
+		return fmt.Errorf("%s is not a regular file or a directory", name)
+	}
+	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if !fi.Mode().IsRegular() && !fi.IsDir() {
+		return fmt.Errorf("%s is not a regular file or a directory", name)
+	}
+	if !os.SameFile(lfi, fi) {
+		return fmt.Errorf("%s changed while it was opened", name)
+	}
+	return f.Chmod(mode)
+}

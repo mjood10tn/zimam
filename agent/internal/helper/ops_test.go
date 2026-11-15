@@ -611,3 +611,59 @@ func TestListReportsAllocatedBytes(t *testing.T) {
 		t.Errorf("Size %d, BlocksBytes %d; want 200 MiB apparent and under 64 KiB allocated", e.Size, e.BlocksBytes)
 	}
 }
+
+// TestChmod: chmod gives a regular file or a directory its mode exactly,
+// whatever the umask, and refuses a symlink, which it never follows, and
+// anything else.
+func TestChmod(t *testing.T) {
+	root, home, outside := testHome(t)
+	put(t, home, "cache/config.php", "<?php")
+	target := put(t, outside, "secret", "x")
+	symlinkAt(t, target, filepath.Join(home, "cache/out.php"))
+	symlinkAt(t, "config.php", filepath.Join(home, "cache/in.php"))
+	if err := syscall.Mkfifo(filepath.Join(home, "cache/fifo"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	for name, mode := range map[string]fs.FileMode{"cache": 0o700, "cache/config.php": 0o600} {
+		if err := chmod(root, name, mode); err != nil {
+			t.Fatalf("chmod %s: %v", name, err)
+		}
+	}
+	if got := modeOf(t, filepath.Join(home, "cache")); got != fs.ModeDir|0o700 {
+		t.Errorf("cache mode %v, want 0700", got)
+	}
+	if got := modeOf(t, filepath.Join(home, "cache/config.php")); got != 0o600 {
+		t.Errorf("config.php mode %v, want 0600", got)
+	}
+	for _, name := range []string{"cache/out.php", "cache/in.php", "cache/fifo", "../outside/secret"} {
+		if err := chmod(root, name, 0o600); err == nil {
+			t.Errorf("chmod %s: no error", name)
+		}
+	}
+	if got := modeOf(t, target); got != 0o640 {
+		t.Errorf("the file outside is %v, want it untouched", got)
+	}
+	if got := modeOf(t, filepath.Join(home, "cache/fifo")); got != fs.ModeNamedPipe|0o640 {
+		t.Errorf("the FIFO is %v, want it untouched", got)
+	}
+}
+
+func TestChmodOperation(t *testing.T) {
+	root, home, _ := testHome(t)
+	put(t, home, "f", "x")
+	var stdout, stderr strings.Builder
+	if code := Serve(root, "chmod", []string{"f", "600"}, strings.NewReader(""), &stdout, &stderr); code != exitOK || stdout.String() != "{}\n" {
+		t.Fatalf("chmod = %d, %q, %q", code, stdout.String(), stderr.String())
+	}
+	if got := modeOf(t, filepath.Join(home, "f")); got != 0o600 {
+		t.Errorf("mode %v, want 0600", got)
+	}
+	for _, args := range [][]string{{"f", "1777"}, {"f", "x"}, {"f"}} {
+		if code := Serve(root, "chmod", args, strings.NewReader(""), &stdout, &stderr); code != exitUsage {
+			t.Errorf("chmod %q = %d, want 2", args, code)
+		}
+	}
+	if code := Serve(root, "chmod", []string{"missing", "600"}, strings.NewReader(""), &stdout, &stderr); code != exitNotExist {
+		t.Errorf("chmod of a missing file = %d, want 3", code)
+	}
+}

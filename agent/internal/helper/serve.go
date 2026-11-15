@@ -117,6 +117,13 @@ var operations = map[string]operation{
 	"symlink-swap": {2, func(root *os.Root, a []string, _ io.Reader) (any, error) {
 		return nil, symlinkSwap(root, a[0], a[1])
 	}},
+	"chmod": {2, func(root *os.Root, a []string, _ io.Reader) (any, error) {
+		mode, err := parseMode(a[1])
+		if err != nil {
+			return nil, err
+		}
+		return nil, chmod(root, a[0], mode)
+	}},
 	"remove-tree": {1, func(root *os.Root, a []string, _ io.Reader) (any, error) {
 		return nil, removeTree(root, a[0])
 	}},
