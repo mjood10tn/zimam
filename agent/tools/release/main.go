@@ -6,6 +6,7 @@
 //	release manifest -version <v> -expires <RFC 3339 time> -composer <composer.json> -out <file> <artifact>...
 //	release sign -key <private-key> <file>
 //	release verify -key <public-key> -agent-version <v> <dir>
+//	release resign -key <private-key> -days <n> <dir>
 //	release check-binary -key <public-key> <binary>...
 //
 // Private keys are PKCS #8 PEM and public keys PEM SubjectPublicKeyInfo, the
@@ -51,6 +52,7 @@ var commands = map[string]command{
 	"manifest":     {"manifest -version <v> -expires <RFC 3339 time> -composer <composer.json> -out <file> <artifact>...", manifest},
 	"sign":         {"sign -key <private-key> <file>", sign},
 	"verify":       {"verify -key <public-key> -agent-version <v> <dir>", verify},
+	"resign":       {"resign -key <private-key> -days <n> <dir>", resign},
 	"check-binary": {"check-binary -key <public-key> <binary>...", checkBinary},
 }
 
@@ -207,11 +209,21 @@ func manifest(args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 	}
-	data, err := json.MarshalIndent(m, "", "  ")
+	data, err := encodeManifest(&m)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(*out, append(data, '\n'), 0o644)
+	return os.WriteFile(*out, data, 0o644)
+}
+
+// encodeManifest is the one form manifest.json is written in. resign relies
+// on it to change nothing but the expiry.
+func encodeManifest(m *release.Manifest) ([]byte, error) {
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
 }
 
 // panelPHPMin returns composer.json's config.platform.php, after checking
@@ -296,6 +308,16 @@ func verify(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if err := checkDir(m, dir); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "release %s and its %d artifacts verified\n", m.Version, len(m.Artifacts))
+	return nil
+}
+
+// checkDir checks every artifact a verified manifest lists, and that the
+// directory holds nothing else.
+func checkDir(m *release.Manifest, dir string) error {
 	for _, name := range slices.Sorted(maps.Keys(m.Artifacts)) {
 		if !artifactName.MatchString(name) {
 			return fmt.Errorf("artifact name %q is not a plain file name", name)
@@ -316,7 +338,6 @@ func verify(args []string, stdout, stderr io.Writer) error {
 			return fmt.Errorf("%s is in the release directory but not in the manifest", name)
 		}
 	}
-	fmt.Fprintf(stdout, "release %s and its %d artifacts verified\n", m.Version, len(m.Artifacts))
 	return nil
 }
 

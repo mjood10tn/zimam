@@ -1,0 +1,97 @@
+name: resign
+
+# Gives a published release's manifest a new expiry, 30 days ahead, and signs
+# it again (R01-D18). install.sh and the agent refuse an expired manifest, so
+# without this a fresh install or a repair run of the latest release fails
+# 30 days after its build. Nothing but manifest.json and manifest.json.sig
+# changes: release resign refuses unless the release verifies as published,
+# except for its expiry, and changes no other byte of the manifest.
+#
+# The job holds the signing key, so like release.yml's build job it runs
+# only Go, git, gh and GitHub's own actions pinned by commit, and restores no
+# cache. Dispatched by hand from master; the release environment waits for
+# the owner's approval.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to re-sign, e.g. v0.1.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: resign-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  resign:
+    environment: release
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: check the tag and the release key
+        run: |
+          if ! [[ $TAG =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::tag $TAG isn't v<major>.<minor>.<patch>[-<pre-release>]"
+            exit 1
+          fi
+          if [ ! -s release/release-key.pub ]; then
+            echo "::error::release/release-key.pub isn't committed"
+            exit 1
+          fi
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: agent/go.mod
+          cache: false
+      - name: build the release tool
+        run: go -C agent build -trimpath -o "$RUNNER_TEMP/release" ./tools/release
+      - name: download the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dist="$RUNNER_TEMP/dist"
+          mkdir "$dist"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$dist"
+          version="$(jq -r .version "$dist/manifest.json")"
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::tag $TAG isn't v$version from manifest.json"
+            exit 1
+          fi
+      - name: re-sign
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          key="$(mktemp "$RUNNER_TEMP/signing-key.XXXXXX")"
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$RELEASE_SIGNING_KEY" >"$key"
+          unset RELEASE_SIGNING_KEY
+          "$RUNNER_TEMP/release" resign -key "$key" -days 30 "$RUNNER_TEMP/dist"
+      - name: verify against the committed key
+        # Proves the secret signed for the same key the agents and install.sh
+        # carry, before anything is uploaded.
+        run: '"$RUNNER_TEMP/release" verify -key release/release-key.pub -agent-version "${TAG#v}" "$RUNNER_TEMP/dist"'
+      - name: replace the manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+            "$RUNNER_TEMP/dist/manifest.json" "$RUNNER_TEMP/dist/manifest.json.sig"
+      - name: verify what is published
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          published="$(mktemp -d "$RUNNER_TEMP/published.XXXXXX")"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$published"
+          "$RUNNER_TEMP/release" verify -key release/release-key.pub -agent-version "${TAG#v}" "$published"
+          cmp "$RUNNER_TEMP/dist/manifest.json" "$published/manifest.json"
+          cmp "$RUNNER_TEMP/dist/manifest.json.sig" "$published/manifest.json.sig"
+          jq -r '"expires " + .expires' "$published/manifest.json"
