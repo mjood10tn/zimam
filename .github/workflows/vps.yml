@@ -31,24 +31,18 @@ env:
     497c36c1b50c0daff30870d5908c9b97af29223d5510c5e6c24957d0cc502fb8
 
 jobs:
-  # One server per architecture for the vps job, and one more amd64 server
-  # for the upgrade job: the upgrade needs a fresh server, and runs on amd64
-  # only, to bound the cost. A server's name is its run.
   create:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { run: amd64, arch: amd64 }
-          - { run: arm64, arch: arm64 }
-          - { run: upgrade-amd64, arch: amd64 }
+        arch: [amd64, arm64]
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       contents: read
     env:
       E2E_GOARCH: ${{ matrix.arch }}
-      E2E_VPS_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.run }}
+      E2E_VPS_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -60,10 +54,37 @@ jobs:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
         run: bash e2e/vps/create.sh
       # The server's address and the throwaway key that opens it, for the vps
-      # or upgrade job. The key opens only this run's server, for a day at most.
+      # job. The key opens only this run's server, for a day at most.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: vps-access-${{ matrix.run }}
+          name: vps-access-${{ matrix.arch }}
+          path: ${{ runner.temp }}/zimam-e2e/access/
+          retention-days: 1
+          if-no-files-found: error
+
+  # The upgrade's own fresh server, amd64 only to bound the cost. A job of
+  # its own, so a server that fails to come up here never skips the vps job.
+  create-upgrade:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      E2E_GOARCH: amd64
+      E2E_VPS_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-upgrade-amd64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: work directory
+        run: echo "E2E_WORK=$RUNNER_TEMP/zimam-e2e" >>"$GITHUB_ENV"
+      - name: create the server, wait for SSH and sslip.io
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: bash e2e/vps/create.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vps-access-upgrade-amd64
           path: ${{ runner.temp }}/zimam-e2e/access/
           retention-days: 1
           if-no-files-found: error
@@ -147,7 +168,7 @@ jobs:
   # release, built by its own build.sh, then this tree's, signed with the
   # same key and built as a later version, through the installer again.
   upgrade:
-    needs: create
+    needs: create-upgrade
     runs-on: ubuntu-26.04
     timeout-minutes: 60
     env:
@@ -203,11 +224,11 @@ jobs:
           name: vps-logs-upgrade-amd64
           path: ${{ runner.temp }}/zimam-e2e/logs
 
-  # Runs whatever create, vps and upgrade did, failed or cancelled included,
-  # so a half-created server goes too; keep_server leaves them for
-  # vps-sweep.yml.
+  # Runs whatever the create jobs, vps and upgrade did, failed or cancelled
+  # included, so a half-created server goes too; keep_server leaves them
+  # for vps-sweep.yml.
   delete:
-    needs: [create, vps, upgrade]
+    needs: [create, create-upgrade, vps, upgrade]
     if: always() && !inputs.keep_server
     strategy:
       fail-fast: false
