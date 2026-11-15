@@ -148,7 +148,15 @@ if job=$(submit site.provision "{\"name\":\"up-new\",\"domain\":\"up-new.$E2E_DO
 else
 	status="not accepted"
 fi
-code=$(site_status up-new) || code=none
+# The job ends right after nginx reloads, and a request then can reach a
+# worker that is shutting down (curl: Empty reply from server), so the
+# site gets a few seconds to answer.
+rm -f "$E2E_WORK/site.body"
+for _ in $(seq 10); do
+	code=$(site_status up-new) || code=none
+	[[ $code == none ]] || break
+	sleep 2
+done
 body=$(cat "$E2E_WORK/site.body" 2>/dev/null || true)
 if [[ $status == succeeded* && $code == 200 && $body == *"Zimam site up-new is ready."* ]]; then
 	pass "upgrade: up-new, provisioned on $new $mark_file uid-highwater.json, answers 200 with its placeholder"
