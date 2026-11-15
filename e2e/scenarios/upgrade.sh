@@ -11,8 +11,9 @@
 #      socket, and check both answer;
 #   4. serve this tree's release and run the installer again. Then the agent
 #      reports the new version, bootstrap installed the new panel release,
-#      both sites still answer 200 with their placeholder, the panel's
-#      /admin/login answers 200, maintenance exits 0, and the audit log has
+#      both sites still answer 200 with their placeholder, a new static
+#      site up-new provisions and answers 200, the panel's /admin/login
+#      answers 200, maintenance exits 0, and the audit log has
 #      the installer's cli:root entries from both runs;
 #   5. serve the previous release again and run its installer: D25 refuses
 #      the downgrade and changes nothing.
@@ -137,6 +138,23 @@ else
 	fail "upgrade: the panel's current points at $current, not releases/$new"
 fi
 check_sites "on $new"
+# A new site on the upgraded server. A release before v0.1.1 leaves no
+# uid-highwater.json, so the new site user's uid then comes from
+# /etc/passwd alone, above the sites provisioned on $old.
+mark_file=without
+in_c test -e /var/lib/zimam/uid-highwater.json && mark_file=with
+if job=$(submit site.provision "{\"name\":\"up-new\",\"domain\":\"up-new.$E2E_DOMAIN\",\"type\":\"static\"}"); then
+	status=$(job_end "$job")
+else
+	status="not accepted"
+fi
+code=$(site_status up-new) || code=none
+body=$(cat "$E2E_WORK/site.body" 2>/dev/null || true)
+if [[ $status == succeeded* && $code == 200 && $body == *"Zimam site up-new is ready."* ]]; then
+	pass "upgrade: up-new, provisioned on $new $mark_file uid-highwater.json, answers 200 with its placeholder"
+else
+	fail "upgrade: provisioning up-new on $new ended $status, and it answered $code: ${body:0:300}"
+fi
 code=$(curl -sS -m 10 -o /dev/null -w '%{http_code}' --cacert "$E2E_CA" --resolve "$E2E_PANEL:443:$CIP" "https://$E2E_PANEL/admin/login") || code=none
 if [[ $code == 200 ]]; then
 	pass "upgrade: the panel's /admin/login answers 200"
