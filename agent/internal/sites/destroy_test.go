@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"zimam/agent/contract"
+	"zimam/agent/internal/logpolicy"
 )
 
 const (
@@ -209,4 +210,37 @@ func count(s []string, v string) int {
 		}
 	}
 	return n
+}
+
+// Removing a site's rules is a write of logrotate rules, so it waits for
+// whoever holds the lock.
+func TestDestroyTakesTheLogrotateLock(t *testing.T) {
+	e := provisioned(t)
+	done := make(chan error, 1)
+	err := logpolicy.WithLock(e.p, func() error {
+		go func() {
+			_, err := e.destroy()
+			done <- err
+		}()
+		time.Sleep(500 * time.Millisecond)
+		if !exists(e.p.SiteLogrotateConf("shop")) {
+			t.Error("destroy removed the rules while the lock was held")
+		}
+		select {
+		case err := <-done:
+			done <- err
+			t.Errorf("destroy finished while the lock was held: %v", err)
+		default:
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Destroy: %v", err)
+	}
+	if exists(e.p.SiteLogrotateConf("shop")) {
+		t.Error("the rules are left")
+	}
 }

@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"zimam/agent/contract"
+	"zimam/agent/internal/config"
+	"zimam/agent/internal/logpolicy"
 	"zimam/agent/internal/templates"
 )
 
@@ -325,5 +327,36 @@ func TestProvisionWaitsForPoolSocket(t *testing.T) {
 	}
 	if exists(e.p.NginxSiteAvailable("shop")) {
 		t.Error("the vhost was written before the pool's socket existed")
+	}
+}
+
+// A policy job holds the logrotate lock, saves new retention to agent.json
+// and lets go; a provision that started meanwhile renders its rules with
+// the policy's retention, not the one it began with.
+func TestPolicyAndProvisionShareTheLogrotateLock(t *testing.T) {
+	e := newEnv(t)
+	provisioned := make(chan error, 1)
+	err := logpolicy.WithLock(e.p, func() error {
+		go func() {
+			_, err := e.provision(static)
+			provisioned <- err
+		}()
+		time.Sleep(500 * time.Millisecond)
+		cfg, err := config.Load(e.p)
+		if err != nil {
+			return err
+		}
+		cfg.LogRetentionDays = 7
+		return config.Save(e.p, cfg)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := <-provisioned; err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	b, err := os.ReadFile(e.p.SiteLogrotateConf("shop"))
+	if err != nil || !strings.Contains(string(b), "maxage 7\n") {
+		t.Errorf("rules = %q, %v; want maxage 7", b, err)
 	}
 }

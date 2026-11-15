@@ -35,14 +35,15 @@ var runBudget = 18 * time.Minute
 // step ends rotationReserve before the run's budget, so the steps after it
 // still have time.
 type stepLimits struct {
-	reconcile, updates, caps, keyring time.Duration
-	rotationReserve                   time.Duration
+	reconcile, updates, caps, retention, keyring time.Duration
+	rotationReserve                              time.Duration
 }
 
 var limits = stepLimits{
 	reconcile:       2 * time.Minute,
 	updates:         3 * time.Minute,
 	caps:            3 * time.Minute,
+	retention:       2 * time.Minute,
 	keyring:         3 * time.Minute,
 	rotationReserve: 5 * time.Minute,
 }
@@ -72,7 +73,7 @@ type changes struct {
 	RestoredConfigs  []string `json:"restored_configs,omitempty"` // undone after their process died
 	ReconciledJobs   int      `json:"reconciled_jobs"`
 	KeyringRefreshed bool     `json:"keyring_refreshed"`           // the repository's files changed
-	DeletedArchives  []string `json:"deleted_archives,omitempty"`  // over a site's log cap (§11.4)
+	DeletedArchives  []string `json:"deleted_archives,omitempty"`  // over a site's log cap (§11.4), or past a retention period
 	PrunedJobs       int      `json:"pruned_jobs"`                 // older than the log retention period
 	RotationTimeouts []string `json:"rotation_timeouts,omitempty"` // rules files whose logrotate ran out of its budget
 }
@@ -132,6 +133,13 @@ func Run(ctx context.Context, d sysexec.Deps, j Jobs, homes Homes, w interface{ 
 	cancel()
 	if err != nil {
 		errs = append(errs, fmt.Errorf("enforcing the per-site log cap: %w", err))
+	}
+	sctx, cancel = step(runCtx, limits.retention)
+	swept, err := sweepQuietArchives(sctx, d, homes)
+	cancel()
+	c.DeletedArchives = append(c.DeletedArchives, swept...)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("applying retention to the quiet logs: %w", err))
 	}
 	c.PrunedJobs, err = pruneJobs(d)
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"zimam/agent/contract"
 	"zimam/agent/internal/configtx"
@@ -157,5 +158,43 @@ func TestApplySite(t *testing.T) {
 	}
 	if err := ApplySite(context.Background(), d, "shop", 0); err == nil {
 		t.Error("ApplySite accepted 0 days")
+	}
+}
+
+// WithLock holds the logrotate lock for its function, and two callers
+// never overlap.
+func TestWithLockSerialises(t *testing.T) {
+	d, _ := newDeps(t)
+	inside := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- WithLock(d.Paths, func() error {
+			close(inside)
+			<-release
+			return nil
+		})
+	}()
+	<-inside
+	second := make(chan struct{})
+	go func() {
+		WithLock(d.Paths, func() error { close(second); return nil })
+	}()
+	select {
+	case <-second:
+		t.Fatal("a second caller ran while the lock was held")
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-second:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the second caller never got the lock")
+	}
+	if fi, err := os.Stat(d.Paths.LogrotateLock()); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("lock file: %v, %v; want 0600", fi, err)
 	}
 }

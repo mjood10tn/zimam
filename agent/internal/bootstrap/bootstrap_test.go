@@ -248,6 +248,9 @@ func TestDirectoriesModes(t *testing.T) {
 			t.Errorf("%s: %v %d:%d, want a directory %v %d:%d", d.path, fi.Mode(), st.Uid, st.Gid, d.mode, d.uid, d.gid)
 		}
 	}
+	if fi, err := os.Lstat(p.LogrotateLock()); err != nil || fi.Mode().Perm() != 0o600 || int(fi.Sys().(*syscall.Stat_t).Uid) != ids.RootUID {
+		t.Errorf("logrotate.lock: %v, %v; want root 0600", fi, err)
+	}
 	if fi, err := os.Lstat(p.AuditLog()); err != nil || fi.Mode().Perm() != 0o600 {
 		t.Errorf("audit.log: %v, %v; want 0600", fi.Mode(), err)
 	}

@@ -135,7 +135,15 @@ func Provision(ctx context.Context, d sysexec.Deps, h Helper, lookup Lookup, p c
 	if err := ensureVhost(ctx, d, st); err != nil {
 		return contract.SiteProvisionResult{}, err
 	}
-	if err := logpolicy.ApplySite(ctx, d, p.Name, d.Config.LogRetentionDays); err != nil {
+	// The retention comes from agent.json read inside the lock, not from
+	// d.Config: a policy job that ran while this one waited has changed it.
+	if err := logpolicy.WithLock(d.Paths, func() error {
+		cfg, err := config.Load(d.Paths)
+		if err != nil {
+			return err
+		}
+		return logpolicy.ApplySite(ctx, d, p.Name, cfg.LogRetentionDays)
+	}); err != nil {
 		return contract.SiteProvisionResult{}, err
 	}
 	if err := Save(d.Paths, st); err != nil {

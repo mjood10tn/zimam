@@ -13,6 +13,7 @@ import (
 
 	"zimam/agent/contract"
 	"zimam/agent/internal/helper"
+	"zimam/agent/internal/logpolicy"
 	"zimam/agent/internal/nginx"
 	"zimam/agent/internal/sysexec"
 )
@@ -133,7 +134,7 @@ func Destroy(ctx context.Context, d sysexec.Deps, h Helper, lookup Lookup, name 
 			return contract.SiteNameResult{}, err
 		}
 	}
-	if err := removeFile(p.SiteLogrotateConf(name)); err != nil {
+	if err := logpolicy.WithLock(p, func() error { return removeFile(p.SiteLogrotateConf(name)) }); err != nil {
 		return contract.SiteNameResult{}, err
 	}
 	if exists(p.LetsEncryptCert("zimam-" + string(name))) {

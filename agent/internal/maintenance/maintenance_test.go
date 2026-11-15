@@ -645,8 +645,10 @@ func TestStepTimeoutDoesNotCancelLaterSteps(t *testing.T) {
 	if live, ran := r.live[logrotate]; !ran || !live {
 		t.Errorf("logrotate ran=%v with a live context=%v after reconcile timed out, want both", ran, live)
 	}
-	if len(h.live) != 1 || !h.live[0] {
-		t.Errorf("enforceCaps listed with live contexts %v, want one live listing", h.live)
+	// Two listings: the site's logs (enforceCaps) and the panel's (the
+	// retention sweep), each with a live context.
+	if len(h.live) != 2 || !h.live[0] || !h.live[1] {
+		t.Errorf("the cap and retention steps listed with live contexts %v, want two live listings", h.live)
 	}
 	if _, err := os.Stat(e.d.Paths.JobDir(contract.JobID(id))); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("pruneJobs didn't run after the timed-out step: %v", err)

@@ -45,6 +45,9 @@ func (p Paths) ReloadLock() string { return p.at("run/zimam/locks/reload.lock") 
 func (p Paths) MaintenanceLock() string { return p.at("run/zimam/locks/maintenance.lock") }
 func (p Paths) AptRepoLock() string     { return p.at("run/zimam/locks/apt-repo.lock") }
 
+// LogrotateLock serialises every write of logrotate rules (root 0600).
+func (p Paths) LogrotateLock() string { return p.at("run/zimam/locks/logrotate.lock") }
+
 // SubjectLock is a job subject's lock (§5.7), such as "site:shop" or "server".
 func (p Paths) SubjectLock(subject string) string {
 	return p.at("run/zimam/locks", subject+".lock")

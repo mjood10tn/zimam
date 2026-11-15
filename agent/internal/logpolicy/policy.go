@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"zimam/agent/contract"
 	"zimam/agent/internal/configtx"
+	"zimam/agent/internal/paths"
 	"zimam/agent/internal/sysexec"
 	"zimam/agent/internal/templates"
 )
@@ -108,4 +110,25 @@ func ApplySite(ctx context.Context, d sysexec.Deps, name contract.SiteName, days
 	return configtx.Apply(ctx, []configtx.Change{configtx.RootFile(path, content, 0o644)}, func(ctx context.Context) error {
 		return configtx.RunTest(ctx, d.Run, sysexec.Cmd{Path: logrotate, Args: []string{"-d", "--state", d.Paths.LogrotateState(), d.Paths.LogrotateConf()}})
 	})
+}
+
+// lockWait bounds how long a writer waits for the logrotate lock.
+var lockWait = 10 * time.Minute
+
+// WithLock runs fn holding the logrotate lock, which every writer of
+// logrotate rules takes (§5.9, R01-D6). A caller loads whatever it renders
+// from inside fn, so what it writes is never staler than the last writer.
+// The lock isn't re-entrant: fn must not call WithLock again.
+func WithLock(p paths.Paths, fn func() error) error {
+	if err := os.MkdirAll(p.LocksDir(), 0o700); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), lockWait)
+	defer cancel()
+	unlock, err := sysexec.Lock(ctx, p.LogrotateLock())
+	if err != nil {
+		return fmt.Errorf("waiting for the logrotate lock: %w", err)
+	}
+	defer unlock()
+	return fn()
 }

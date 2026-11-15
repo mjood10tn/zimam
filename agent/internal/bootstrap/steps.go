@@ -491,7 +491,9 @@ func (r *run) logsDone(ctx context.Context) (bool, error) {
 }
 
 func (r *run) logsApply(ctx context.Context) error {
-	return logpolicy.Apply(ctx, r.deps(), logpolicy.Policy{RetentionDays: r.cfg.LogRetentionDays, AuditRetentionDays: r.cfg.AuditRetentionDays, SiteCapBytes: r.cfg.SiteLogCapBytes}, nil)
+	return logpolicy.WithLock(r.Deps.Paths, func() error {
+		return logpolicy.Apply(ctx, r.deps(), logpolicy.Policy{RetentionDays: r.cfg.LogRetentionDays, AuditRetentionDays: r.cfg.AuditRetentionDays, SiteCapBytes: r.cfg.SiteLogCapBytes}, nil)
+	})
 }
 
 // Step 11: the setup link.
