@@ -499,7 +499,7 @@ return [
         'help' => [
             'log_retention_days' => 'Sites’ logs, the journal, the panel’s log and job logs: 1 to 365 days.',
             'audit_retention_days' => 'The audit log and the panel’s action history: 1 to 3650 days.',
-            'site_log_cap' => 'When a site’s logs and archives pass this, the oldest archives are deleted: 1 to 100 GiB.',
+            'site_log_cap' => 'A site’s own log archives are deleted oldest first when the site’s logs pass this. Nginx’s archives for the site are deleted by retention, or when they alone pass this: 1 to 100 GiB.',
             'ip_allowlist' => 'One address or CIDR range per line. Empty allows every address; two-factor sign-in still applies.',
         ],
         'confirm_lockout' => 'I understand this list leaves out the address I am using now. To get back in, I will run :command over SSH.',

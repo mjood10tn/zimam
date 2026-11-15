@@ -38,6 +38,9 @@ type FileInfo struct {
 	Mode    fs.FileMode `json:"mode"`
 	ModTime time.Time   `json:"mod_time"`
 	Target  string      `json:"target,omitempty"` // a symlink's target, from Stat
+	// BlocksBytes is the space a regular file takes on disk (st_blocks * 512),
+	// 0 for anything else. A sparse file's Size can be far above it.
+	BlocksBytes int64 `json:"blocks_bytes"`
 }
 
 // ReadResult is one read, and the file's size at the time.
@@ -200,7 +203,11 @@ func stat(root *os.Root, name string) (FileInfo, error) {
 }
 
 func fileInfo(fi fs.FileInfo) FileInfo {
-	return FileInfo{Name: fi.Name(), Size: fi.Size(), Mode: fi.Mode(), ModTime: fi.ModTime()}
+	info := FileInfo{Name: fi.Name(), Size: fi.Size(), Mode: fi.Mode(), ModTime: fi.ModTime()}
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok && fi.Mode().IsRegular() {
+		info.BlocksBytes = st.Blocks * 512
+	}
+	return info
 }
 
 // list describes dir's entries, sorted by name, without following

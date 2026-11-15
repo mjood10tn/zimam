@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"zimam/agent/contract"
@@ -43,10 +44,13 @@ type logFile struct {
 // /var/log/zimam/sites/<name>/, and its own logs/, listed by the helper.
 // First it deletes every archive last changed more than log_retention_days
 // ago: logrotate's maxage deletes only when the log itself rotates, so an
-// idle site's archives would never age out. Then, while the total is over
-// site_log_cap_bytes, it deletes the oldest archive. Only regular files
-// count, links never; only archives are deleted. It returns the paths it
-// deleted.
+// idle site's archives would never age out. Then the cap, in two budgets,
+// oldest archive first: the site user's archives go while root's files plus
+// the home's are over site_log_cap_bytes; root's Nginx archives go only
+// while root's files alone are. Sizes are allocated bytes, not apparent
+// ones, and an archive's age is min(mtime, now): the site user sets both.
+// Only regular files count, links never; only archives are deleted. It
+// returns the paths it deleted.
 func enforceCaps(ctx context.Context, d sysexec.Deps, homes Homes) ([]string, error) {
 	all, err := sites.All(d.Paths)
 	if err != nil {
@@ -62,20 +66,19 @@ func enforceCaps(ctx context.Context, d sysexec.Deps, homes Homes) ([]string, er
 			errs = append(errs, fmt.Errorf("site %s's logs: %w", st.Name, err))
 			continue
 		}
-		var total int64
+		var rootTotal, homeTotal int64
 		var archives []logFile
 		for _, f := range files {
-			total += f.size
+			if f.name == "" {
+				rootTotal += f.size
+			} else {
+				homeTotal += f.size
+			}
 			if f.archive {
 				archives = append(archives, f)
 			}
 		}
-		sort.SliceStable(archives, func(i, j int) bool {
-			if !archives[i].mod.Equal(archives[j].mod) {
-				return archives[i].mod.Before(archives[j].mod)
-			}
-			return archives[i].where < archives[j].where
-		})
+		sortOldest(archives, d.Now())
 		// remove deletes one archive and reports whether it went.
 		remove := func(a logFile, why string) bool {
 			var err error
@@ -90,7 +93,11 @@ func enforceCaps(ctx context.Context, d sysexec.Deps, homes Homes) ([]string, er
 			}
 			d.Logf("Deleted %s: %s", a.where, why)
 			deleted = append(deleted, a.where)
-			total -= a.size
+			if a.name == "" {
+				rootTotal -= a.size
+			} else {
+				homeTotal -= a.size
+			}
 			return true
 		}
 		var kept []logFile
@@ -99,14 +106,46 @@ func enforceCaps(ctx context.Context, d sysexec.Deps, homes Homes) ([]string, er
 				kept = append(kept, a)
 			}
 		}
+		// Two budgets. The site user's archives go while all the site's
+		// logs are over the cap; root's Nginx archives go only while root's
+		// own logs are, so what the site user plants in its home never
+		// costs root a file.
 		for _, a := range kept {
-			if total <= capBytes {
+			if rootTotal+homeTotal <= capBytes {
 				break
 			}
-			remove(a, fmt.Sprintf("site %s's logs were over the %d-byte cap", st.Name, capBytes))
+			if a.name != "" {
+				remove(a, fmt.Sprintf("site %s's logs were over the %d-byte cap", st.Name, capBytes))
+			}
+		}
+		for _, a := range kept {
+			if rootTotal <= capBytes {
+				break
+			}
+			if a.name == "" {
+				remove(a, fmt.Sprintf("site %s's Nginx logs were over the %d-byte cap", st.Name, capBytes))
+			}
 		}
 	}
 	return deleted, errors.Join(errs...)
+}
+
+// sortOldest orders archives oldest first by min(mtime, now), then path: a
+// file dated in the future, which the site user can set, sorts as new as
+// now, never newer.
+func sortOldest(a []logFile, now time.Time) {
+	at := func(f logFile) time.Time {
+		if f.mod.After(now) {
+			return now
+		}
+		return f.mod
+	}
+	sort.SliceStable(a, func(i, j int) bool {
+		if ti, tj := at(a[i]), at(a[j]); !ti.Equal(tj) {
+			return ti.Before(tj)
+		}
+		return a[i].where < a[j].where
+	})
 }
 
 func isLogFile(name string) (log, archive bool) {
@@ -132,7 +171,11 @@ func siteLogFiles(ctx context.Context, d sysexec.Deps, homes Homes, name contrac
 		if err != nil {
 			continue
 		}
-		files = append(files, logFile{where: filepath.Join(dir, de.Name()), size: fi.Size(), mod: fi.ModTime(), archive: archive})
+		size := fi.Size()
+		if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+			size = st.Blocks * 512
+		}
+		files = append(files, logFile{where: filepath.Join(dir, de.Name()), size: size, mod: fi.ModTime(), archive: archive})
 	}
 	if homes.Helper == nil || homes.Lookup == nil {
 		return files, helper.Account{}, nil
@@ -154,7 +197,7 @@ func siteLogFiles(ctx context.Context, d sysexec.Deps, homes Homes, name contrac
 			continue
 		}
 		rel := path.Join("logs", fi.Name)
-		files = append(files, logFile{where: path.Join(acct.Home, rel), name: rel, size: fi.Size, mod: fi.ModTime, archive: archive})
+		files = append(files, logFile{where: path.Join(acct.Home, rel), name: rel, size: fi.BlocksBytes, mod: fi.ModTime, archive: archive})
 	}
 	return files, acct, nil
 }

@@ -123,4 +123,11 @@ final class SettingsTest extends TestCase
         $page->fillForm(['confirm_lockout' => true])->call('save')->assertHasNoFormErrors();
         $this->assertSame(['10.0.0.0/8'], app(PanelSettings::class)->panelIpAllowlist());
     }
+
+    public function testCapHelpTextDescribesSeparateBudgets(): void
+    {
+        Livewire::test(Settings::class)
+            ->assertSee('A site’s own log archives are deleted oldest first when the site’s logs pass this.')
+            ->assertSee('Nginx’s archives for the site are deleted by retention, or when they alone pass this');
+    }
 }

@@ -90,7 +90,7 @@ func (e *capEnv) root(name string, size int, age time.Duration) {
 }
 
 func (e *capEnv) home(name string, size int64, age time.Duration, mode fs.FileMode) {
-	e.h.entries[name] = helper.FileInfo{Name: name, Size: size, Mode: mode, ModTime: capNow.Add(-age)}
+	e.h.entries[name] = helper.FileInfo{Name: name, Size: size, BlocksBytes: size, Mode: mode, ModTime: capNow.Add(-age)}
 }
 
 func (e *capEnv) rootNames() []string {
@@ -102,22 +102,27 @@ func (e *capEnv) rootNames() []string {
 	return out
 }
 
-// Over the cap, the oldest archives go first, wherever they are, until the
-// total fits.
+// blk is one allocation unit: root's test files take whole 4096-byte blocks
+// on disk, and the cap counts allocated bytes.
+const blk = 4096
+
+// Over the cap, home archives go first, oldest first, while root's files
+// plus the home's are over it; root's archives go only when root's files
+// alone are.
 func TestCapDeletesOldestFirst(t *testing.T) {
-	e := newCapEnv(t, 1000)
-	e.root("access.log", 300, 0)
-	e.root("access.log-20261101-1761955200.gz", 200, 50*time.Hour)
-	e.root("access.log-20261102-1762041600.gz", 200, 26*time.Hour)
-	e.home("php-error.log", 100, 0, 0o640)
-	e.home("php-error.log-20261031-1761868800.gz", 250, 70*time.Hour, 0o640)
-	e.home("php-error.log-20261102-1762041600.gz", 100, 20*time.Hour, 0o640)
+	e := newCapEnv(t, 10*blk)
+	e.root("access.log", 3*blk, 0)
+	e.root("access.log-20261101-1761955200.gz", 2*blk, 50*time.Hour)
+	e.root("access.log-20261102-1762041600.gz", 2*blk, 26*time.Hour)
+	e.home("php-error.log", blk, 0, 0o640)
+	e.home("php-error.log-20261031-1761868800.gz", 3*blk, 70*time.Hour, 0o640)
+	e.home("php-error.log-20261102-1762041600.gz", blk, 20*time.Hour, 0o640)
 
 	deleted, err := enforceCaps(context.Background(), e.d, e.homes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 1150 bytes: the 70 h home archive goes (900), and that fits.
+	// 12 units: the 70 h home archive goes (9), and that fits.
 	if want := []string{"/home/s_shop/logs/php-error.log-20261031-1761868800.gz"}; !slices.Equal(deleted, want) {
 		t.Errorf("deleted %v, want %v", deleted, want)
 	}
@@ -128,16 +133,138 @@ func TestCapDeletesOldestFirst(t *testing.T) {
 		t.Errorf("root files %v", got)
 	}
 
-	e.d.Config.SiteLogCapBytes = 500
+	e.d.Config.SiteLogCapBytes = 5 * blk
 	deleted, _ = enforceCaps(context.Background(), e.d, e.homes)
-	// 900 bytes: the two Nginx archives go, oldest first, and 500 fits.
-	want := []string{e.dir + "/access.log-20261101-1761955200.gz", e.dir + "/access.log-20261102-1762041600.gz"}
+	// 9 units: the remaining home archive goes (8), root is still at 7, so
+	// its oldest archive goes too (5), and that fits.
+	want := []string{"/home/s_shop/logs/php-error.log-20261102-1762041600.gz", e.dir + "/access.log-20261101-1761955200.gz"}
 	if !slices.Equal(deleted, want) {
 		t.Errorf("deleted %v, want %v", deleted, want)
 	}
 	// Current logs are never deleted, even while over the cap.
-	if got := e.rootNames(); !slices.Equal(got, []string{"access.log"}) {
+	if got := e.rootNames(); !slices.Equal(got, []string{"access.log", "access.log-20261102-1762041600.gz"}) {
 		t.Errorf("root files %v", got)
+	}
+}
+
+// Sparse, future-dated archives in the site's own logs/ use no disk, so they
+// never push root's Nginx archives out (audit variant A).
+func TestSparseHomeArchivesNeverDeleteRootArchives(t *testing.T) {
+	e := newCapEnv(t, 1<<30)
+	e.root("access.log-20261101-1761955200.gz", blk, 50*time.Hour)
+	e.root("error.log-20261102-1762041600.gz", blk, 26*time.Hour)
+	future := time.Date(2099, 12, 31, 0, 0, 0, 0, time.UTC)
+	for i := range 6 {
+		name := fmt.Sprintf("y%d.log-20991231-%d.gz", i, i)
+		e.h.entries[name] = helper.FileInfo{Name: name, Size: 200 << 20, BlocksBytes: 0, Mode: 0o640, ModTime: future}
+	}
+	deleted, err := enforceCaps(context.Background(), e.d, e.homes)
+	if err != nil || len(deleted) != 0 || len(e.h.removed) != 0 {
+		t.Errorf("deleted %v, removed %v, err %v", deleted, e.h.removed, err)
+	}
+	if got := e.rootNames(); len(got) != 2 {
+		t.Errorf("root files %v", got)
+	}
+}
+
+// Home archives with real bytes push the total over the cap: they go oldest
+// first, and root's archives stay while root's files alone fit.
+func TestRealHomeArchivesDeleteHomeFirst(t *testing.T) {
+	e := newCapEnv(t, 5*blk)
+	e.root("access.log", blk, 0)
+	e.root("access.log-20261101-1761955200.gz", blk, 50*time.Hour)
+	e.home("a.log-20261030-1.gz", 2*blk, 30*time.Hour, 0o640)
+	e.home("b.log-20261031-2.gz", 2*blk, 20*time.Hour, 0o640)
+	e.home("c.log-20261101-3.gz", 2*blk, 10*time.Hour, 0o640)
+	deleted, err := enforceCaps(context.Background(), e.d, e.homes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"/home/s_shop/logs/a.log-20261030-1.gz", "/home/s_shop/logs/b.log-20261031-2.gz"}
+	if !slices.Equal(deleted, want) {
+		t.Errorf("deleted %v, want %v", deleted, want)
+	}
+	if got := e.rootNames(); len(got) != 2 {
+		t.Errorf("root files %v", got)
+	}
+}
+
+// Root's own files over the cap: its archives go, oldest first.
+func TestRootOverCapAloneDeletesRootArchives(t *testing.T) {
+	e := newCapEnv(t, 2*blk)
+	e.root("access.log", blk, 0)
+	e.root("access.log-20261101-1761955200.gz", blk, 50*time.Hour)
+	e.root("access.log-20261102-1762041600.gz", blk, 26*time.Hour)
+	deleted, err := enforceCaps(context.Background(), e.d, e.homes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{e.dir + "/access.log-20261101-1761955200.gz"}; !slices.Equal(deleted, want) {
+		t.Errorf("deleted %v, want %v", deleted, want)
+	}
+}
+
+// A home archive dated in the future sorts at now, not at its date: two
+// future files tie, and the path decides, where their dates would not.
+func TestFutureMtimeIsClampedToNow(t *testing.T) {
+	e := newCapEnv(t, 2*blk)
+	e.root("access.log", blk, 0)
+	e.home("old.log-20261101-1.gz", blk, 10*time.Hour, 0o640)
+	e.home("a.log-20991231-2.gz", blk, -(24 * 365 * 70 * time.Hour), 0o640) // 2099-ish
+	e.home("b.log-20981231-3.gz", blk, -(24 * 365 * 60 * time.Hour), 0o640)
+	deleted, err := enforceCaps(context.Background(), e.d, e.homes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"/home/s_shop/logs/old.log-20261101-1.gz", "/home/s_shop/logs/a.log-20991231-2.gz"}
+	if !slices.Equal(deleted, want) {
+		t.Errorf("deleted %v, want %v", deleted, want)
+	}
+}
+
+// failingList is a helper whose listing fails for one site user.
+type failingList struct {
+	*homeHelper
+	user string
+}
+
+func (f failingList) List(ctx context.Context, a helper.Account, dir string) (helper.Listing, error) {
+	if a.Name == f.user {
+		return helper.Listing{}, fmt.Errorf("list %s: helper failed", dir)
+	}
+	return f.homeHelper.List(ctx, a, dir)
+}
+
+// The helper failing for one site skips that site only: its root archives
+// stay, and the next site's cap still runs.
+func TestCapHelperFailureSkipsOnlyThatSite(t *testing.T) {
+	e := newCapEnv(t, blk)
+	for _, n := range []contract.SiteName{"alpha", "beta"} {
+		if err := sites.Save(e.d.Paths, sites.State{Name: n, Domain: contract.Domain(string(n) + ".example.com"), Type: contract.SiteStatic, TemplateVersion: 1, Security: sites.DefaultSecurity()}); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(e.d.Paths.SiteLogDir(n), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range []string{"access.log-20261101-1761955200.gz", "access.log-20261102-1762041600.gz"} {
+			if err := os.WriteFile(filepath.Join(e.d.Paths.SiteLogDir(n), f), make([]byte, blk), 0o640); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	homes := e.homes
+	homes.Helper = failingList{e.h, "s_alpha"}
+	deleted, err := enforceCaps(context.Background(), e.d, homes)
+	if err == nil || !strings.Contains(err.Error(), "site alpha's logs") {
+		t.Errorf("err = %v, want site a's listing failure", err)
+	}
+	for _, d := range deleted {
+		if strings.Contains(d, "/alpha/") {
+			t.Errorf("deleted %s of the site whose listing failed", d)
+		}
+	}
+	if len(deleted) != 1 || !strings.Contains(deleted[0], "/beta/access.log-20261101") {
+		t.Errorf("deleted %v, want site beta's oldest archive", deleted)
 	}
 }
 

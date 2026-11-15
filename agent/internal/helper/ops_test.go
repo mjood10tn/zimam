@@ -592,3 +592,22 @@ func TestSearchStopsAtTextLimit(t *testing.T) {
 		t.Errorf("search = %d matches, next %d, %q, %v; want %d, stopped by size", len(res.Matches), res.Next, res.Stopped, err, want)
 	}
 }
+
+func TestListReportsAllocatedBytes(t *testing.T) {
+	root, home, _ := testHome(t)
+	f, err := os.Create(filepath.Join(home, "sparse.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(200 << 20); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	l, err := list(root, ".", 10)
+	if err != nil || len(l.Entries) != 1 {
+		t.Fatalf("list = %+v, %v", l, err)
+	}
+	if e := l.Entries[0]; e.Size != 200<<20 || e.BlocksBytes >= 64<<10 {
+		t.Errorf("Size %d, BlocksBytes %d; want 200 MiB apparent and under 64 KiB allocated", e.Size, e.BlocksBytes)
+	}
+}
