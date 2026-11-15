@@ -137,7 +137,7 @@ func Provision(ctx context.Context, d sysexec.Deps, h Helper, lookup Lookup, p c
 	}
 	// The retention comes from agent.json read inside the lock, not from
 	// d.Config: a policy job that ran while this one waited has changed it.
-	if err := logpolicy.WithLock(d.Paths, func() error {
+	if err := logpolicy.WithLock(ctx, d.Paths, func() error {
 		cfg, err := config.Load(d.Paths)
 		if err != nil {
 			return err

@@ -169,7 +169,7 @@ func TestWithLockSerialises(t *testing.T) {
 	release := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
-		done <- WithLock(d.Paths, func() error {
+		done <- WithLock(context.Background(), d.Paths, func() error {
 			close(inside)
 			<-release
 			return nil
@@ -178,7 +178,7 @@ func TestWithLockSerialises(t *testing.T) {
 	<-inside
 	second := make(chan struct{})
 	go func() {
-		WithLock(d.Paths, func() error { close(second); return nil })
+		WithLock(context.Background(), d.Paths, func() error { close(second); return nil })
 	}()
 	select {
 	case <-second:
@@ -196,5 +196,46 @@ func TestWithLockSerialises(t *testing.T) {
 	}
 	if fi, err := os.Stat(d.Paths.LogrotateLock()); err != nil || fi.Mode().Perm() != 0o600 {
 		t.Errorf("lock file: %v, %v; want 0600", fi, err)
+	}
+}
+
+// A caller whose context ends stops waiting for the lock and never runs
+// its function: a cancelled job doesn't sit behind another for minutes.
+func TestWithLockStopsWaitingWhenTheContextEnds(t *testing.T) {
+	d, _ := newDeps(t)
+	inside := make(chan struct{})
+	release := make(chan struct{})
+	held := make(chan error, 1)
+	go func() {
+		held <- WithLock(context.Background(), d.Paths, func() error {
+			close(inside)
+			<-release
+			return nil
+		})
+	}()
+	<-inside
+	defer func() {
+		close(release)
+		if err := <-held; err != nil {
+			t.Error(err)
+		}
+	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+	ran := false
+	done := make(chan error, 1)
+	go func() {
+		done <- WithLock(ctx, d.Paths, func() error { ran = true; return nil })
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("err = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("WithLock kept waiting after its context was cancelled")
+	}
+	if ran {
+		t.Error("the function ran without the lock")
 	}
 }

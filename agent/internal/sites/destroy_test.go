@@ -217,7 +217,7 @@ func count(s []string, v string) int {
 func TestDestroyTakesTheLogrotateLock(t *testing.T) {
 	e := provisioned(t)
 	done := make(chan error, 1)
-	err := logpolicy.WithLock(e.p, func() error {
+	err := logpolicy.WithLock(context.Background(), e.p, func() error {
 		go func() {
 			_, err := e.destroy()
 			done <- err

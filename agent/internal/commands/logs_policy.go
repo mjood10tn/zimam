@@ -23,7 +23,7 @@ func logsPolicy(ctx context.Context, j *jobs.Context, p contract.Params) (any, e
 	d := j.Deps()
 	// Everything the rules are rendered from is read inside the lock: the
 	// site list and agent.json may have changed while this job waited.
-	err := logpolicy.WithLock(d.Paths, func() error {
+	err := logpolicy.WithLock(ctx, d.Paths, func() error {
 		cfg, err := config.Load(d.Paths)
 		if err != nil {
 			return err

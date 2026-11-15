@@ -116,14 +116,15 @@ func ApplySite(ctx context.Context, d sysexec.Deps, name contract.SiteName, days
 var lockWait = 10 * time.Minute
 
 // WithLock runs fn holding the logrotate lock, which every writer of
-// logrotate rules takes (§5.9, R01-D6). A caller loads whatever it renders
-// from inside fn, so what it writes is never staler than the last writer.
+// logrotate rules takes (§5.9, R01-D6). It waits at most lockWait, and no
+// longer than ctx lasts. A caller loads whatever it renders from inside
+// fn, so what it writes is never staler than the last writer.
 // The lock isn't re-entrant: fn must not call WithLock again.
-func WithLock(p paths.Paths, fn func() error) error {
+func WithLock(ctx context.Context, p paths.Paths, fn func() error) error {
 	if err := os.MkdirAll(p.LocksDir(), 0o700); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), lockWait)
+	ctx, cancel := context.WithTimeout(ctx, lockWait)
 	defer cancel()
 	unlock, err := sysexec.Lock(ctx, p.LogrotateLock())
 	if err != nil {

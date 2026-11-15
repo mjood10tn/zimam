@@ -1,6 +1,7 @@
 package sites
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -337,7 +338,7 @@ func TestProvisionWaitsForPoolSocket(t *testing.T) {
 func TestPolicyAndProvisionShareTheLogrotateLock(t *testing.T) {
 	e := newEnv(t)
 	provisioned := make(chan error, 1)
-	err := logpolicy.WithLock(e.p, func() error {
+	err := logpolicy.WithLock(context.Background(), e.p, func() error {
 		go func() {
 			_, err := e.provision(static)
 			provisioned <- err

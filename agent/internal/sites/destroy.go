@@ -138,7 +138,7 @@ func Destroy(ctx context.Context, d sysexec.Deps, h Helper, lookup Lookup, name 
 			return contract.SiteNameResult{}, err
 		}
 	}
-	if err := logpolicy.WithLock(p, func() error { return removeFile(p.SiteLogrotateConf(name)) }); err != nil {
+	if err := logpolicy.WithLock(ctx, p, func() error { return removeFile(p.SiteLogrotateConf(name)) }); err != nil {
 		return contract.SiteNameResult{}, err
 	}
 	if exists(p.LetsEncryptCert("zimam-" + string(name))) {
