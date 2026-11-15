@@ -150,6 +150,18 @@ func TestRollbackMarksPHPVersion(t *testing.T) {
 	if calls := e.d.Run.(*sysexec.FakeRunner).Calls(); len(calls) != 0 {
 		t.Errorf("the rollback ran %v as root", calls)
 	}
+
+	// A retry finds the release live already (say its first try's mark or
+	// save failed after the swap) and marks again: marking is idempotent.
+	wantNoErr(t, os.RemoveAll(e.p.FPMReloadDir()))
+	from := len(e.h.ops)
+	if _, err := e.rollback(rel[0]); err != nil {
+		t.Fatal(err)
+	}
+	if ops := e.opsFrom(from); len(ops) != 0 {
+		t.Errorf("the retry did %q; want no swap", ops)
+	}
+	checkModeOf(t, e.p.FPMReloadMark("8.4"), 0o600)
 }
 
 // TestRollbackUnknownIsNotFound: only a release the state keeps and whose

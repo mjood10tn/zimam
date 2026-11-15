@@ -157,12 +157,21 @@ func Rollback(ctx context.Context, d sysexec.Deps, h RollbackHelper, lookup site
 		return contract.SiteRollbackResult{}, err
 	}
 	if previous == string(id) {
-		d.Logf("Release %s is already live; nothing to roll back", id)
+		// A retry of a rollback whose save or mark failed after the swap
+		// lands here: both are done again (marking is idempotent).
+		d.Logf("Release %s is already live; nothing to swap", id)
+		var after []error
 		if !activeIs(st.Releases, id) {
 			setActive(st.Releases, id)
 			if err := sites.Save(d.Paths, st); err != nil {
-				return res, fmt.Errorf("release %s is live, but recording it as the active one failed: %w", id, err)
+				after = append(after, fmt.Errorf("recording it as the active one failed: %w", err))
 			}
+		}
+		if err := markPHP(d, st); err != nil {
+			after = append(after, err)
+		}
+		if len(after) > 0 {
+			return res, liveBut(id, after)
 		}
 		return res, nil
 	}
@@ -185,17 +194,27 @@ func Rollback(ctx context.Context, d sysexec.Deps, h RollbackHelper, lookup site
 	if err := sites.Save(d.Paths, st); err != nil {
 		return res, liveBut(id, append(after, fmt.Errorf("recording it failed: %w", err)))
 	}
-	if st.Type.RunsPHP() {
-		d.Logf("Marking PHP %s's pools for a graceful reload by the next maintenance run", st.PHPVersion)
-		if err := php.MarkReload(d.Paths, st.PHPVersion); err != nil {
-			after = append(after, fmt.Errorf("marking PHP %s for a reload failed: %w", st.PHPVersion, err))
-		}
+	if err := markPHP(d, st); err != nil {
+		after = append(after, err)
 	}
 	if len(after) > 0 {
 		return res, liveBut(id, after)
 	}
 	d.Logf("Site %s serves %s again", p.Name, id)
 	return res, nil
+}
+
+// markPHP marks a PHP site's version for maintenance's graceful reload
+// (spike amendment A3); a static site has nothing to mark.
+func markPHP(d sysexec.Deps, st sites.State) error {
+	if !st.Type.RunsPHP() {
+		return nil
+	}
+	d.Logf("Marking PHP %s's pools for a graceful reload by the next maintenance run", st.PHPVersion)
+	if err := php.MarkReload(d.Paths, st.PHPVersion); err != nil {
+		return fmt.Errorf("marking PHP %s for a reload failed: %w", st.PHPVersion, err)
+	}
+	return nil
 }
 
 // activeIs reports whether id is the state's only active release.
