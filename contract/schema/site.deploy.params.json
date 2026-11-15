@@ -3,8 +3,15 @@
   "additionalProperties": false,
   "properties": {
     "commit": {
-      "pattern": "^[0-9a-f]{40}$",
-      "type": "string"
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "composer": {
       "type": "boolean"

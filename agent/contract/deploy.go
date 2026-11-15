@@ -65,8 +65,9 @@ func init() {
 // As in validate.go, RE2's $ matches only at the very end of the text; PHP
 // mirrors of these patterns anchor with \z.
 var (
-	repositoryRe          = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$`)
-	repositoryForbiddenRe = regexp.MustCompile(`\.git$|/\.\.?$`)
+	repositoryRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$`)
+	// .git in any case: spelled out, since JSON Schema has no (?i).
+	repositoryForbiddenRe = regexp.MustCompile(`\.[gG][iI][tT]$|/\.\.?$`)
 	branchRe              = regexp.MustCompile(`^[A-Za-z0-9._/-]{1,200}$`)
 	// A leading - or /, "..", "//", a component starting with "." (the very
 	// first one included), a trailing / or ".", or a component ending in
@@ -86,7 +87,7 @@ func (r Repository) Validate() error {
 		return errors.New("must be owner/name: an owner of 1–39 letters, digits or hyphens, not starting with a hyphen, and a name of 1–100 letters, digits, dots, underscores or hyphens")
 	}
 	if repositoryForbiddenRe.MatchString(string(r)) {
-		return errors.New(`must not end in .git, and the name must not be "." or ".."`)
+		return errors.New(`must not end in .git (in any case), and the name must not be "." or ".."`)
 	}
 	return nil
 }
@@ -260,7 +261,7 @@ func (KeepReleases) JSONSchema() Schema {
 // stores the new value and prunes by it.
 type SiteDeployParams struct {
 	Name         SiteName      `json:"name"`
-	Commit       CommitSHA     `json:"commit,omitempty"`
+	Commit       *CommitSHA    `json:"commit,omitempty"`
 	Script       DeployScript  `json:"script,omitempty"`
 	Composer     bool          `json:"composer"`
 	Trigger      DeployTrigger `json:"trigger"`
@@ -270,8 +271,8 @@ type SiteDeployParams struct {
 func (p *SiteDeployParams) Validate() error {
 	f := FieldErrors{}
 	f.Check("name", p.Name)
-	if p.Commit != "" {
-		f.Check("commit", p.Commit)
+	if p.Commit != nil {
+		f.Check("commit", *p.Commit)
 	}
 	f.Check("script", p.Script)
 	f.Check("trigger", p.Trigger)

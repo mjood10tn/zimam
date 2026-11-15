@@ -102,14 +102,14 @@ func FuzzLogSearch(f *testing.F) {
 var branchSafe = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 
 func FuzzBranch(f *testing.F) {
-	for _, s := range []string{"main", "release/1.2", "-rf", "a..b", "refs/heads/../x", ".hidden/x", "x.lock", "a//b", "a@{1}", "main\n"} {
+	for _, s := range []string{"main", "release/1.2", "-rf", "a..b", "refs/heads/../x", ".hidden/x", "x.lock", "a.lock/b", "a//b", "a@{1}", "main\n"} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, s string) {
 		ok := Branch(s).Validate() == nil
 		if ok && (!branchSafe.MatchString(s) || len(s) > 200 || s[0] == '-' || s[0] == '/' ||
 			strings.Contains(s, "..") || strings.Contains(s, "//") || strings.Contains(s, "/.") ||
-			strings.HasPrefix(s, ".") || strings.HasSuffix(s, "/") || strings.HasSuffix(s, ".") || strings.HasSuffix(s, ".lock")) {
+			strings.HasPrefix(s, ".") || strings.HasSuffix(s, "/") || strings.HasSuffix(s, ".") || strings.HasSuffix(s, ".lock") || strings.Contains(s, ".lock/")) {
 			t.Errorf("accepted %q", s)
 		}
 		checkSchemaAgrees(t, Branch(s), ok)
@@ -121,13 +121,13 @@ func FuzzBranch(f *testing.F) {
 var repositorySafe = regexp.MustCompile(`^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$`)
 
 func FuzzRepository(f *testing.F) {
-	for _, s := range []string{"octo/app", "octo/app.git", "octo/..", "-octo/app", "octo/app/x", "octo/a b", "octo/app\n"} {
+	for _, s := range []string{"octo/app", "octo/app.git", "octo/app.GIT", "octo/..", "-octo/app", "octo/app/x", "octo/a b", "octo/app\n"} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, s string) {
 		ok := Repository(s).Validate() == nil
 		_, name, _ := strings.Cut(s, "/")
-		if ok && (!repositorySafe.MatchString(s) || s[0] == '-' || strings.HasSuffix(s, ".git") || name == "." || name == "..") {
+		if ok && (!repositorySafe.MatchString(s) || s[0] == '-' || strings.HasSuffix(strings.ToLower(s), ".git") || name == "." || name == "..") {
 			t.Errorf("accepted %q", s)
 		}
 		checkSchemaAgrees(t, Repository(s), ok)

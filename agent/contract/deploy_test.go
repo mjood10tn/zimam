@@ -14,7 +14,7 @@ func TestRepository(t *testing.T) {
 			Repository(strings.Repeat("a", 39) + "/" + strings.Repeat("b", 100)),
 		},
 		[]Repository{
-			"", "octo", "octo/", "/app", "-octo/app", "octo/app.git", "octo/.", "octo/..",
+			"", "octo", "octo/", "/app", "-octo/app", "octo/app.git", "octo/app.GIT", "octo/app.Git", "octo/.", "octo/..",
 			"oc.to/app", "oc_to/app", "octo/app/x", "octo/a b", "octo/app\n", "octo/app;rm",
 			"https://github.com/octo/app", "git@github.com:octo/app",
 			Repository(strings.Repeat("a", 40) + "/app"),
@@ -128,17 +128,25 @@ func TestSiteRepoParams(t *testing.T) {
 
 func TestSiteDeployParams(t *testing.T) {
 	sha := CommitSHA(strings.Repeat("a", 40))
+	badSHA, empty := CommitSHA("ABC"), CommitSHA("")
 	for _, p := range []*SiteDeployParams{
 		{Name: "shop", Trigger: DeployManual},
-		{Name: "shop", Commit: sha, Script: "php artisan migrate --force", Composer: true, Trigger: DeployWebhook},
+		{Name: "shop", Commit: &sha, Script: "php artisan migrate --force", Composer: true, Trigger: DeployWebhook},
 		{Name: "shop", Trigger: DeployURL, Script: DeployScript(strings.Repeat("a", 65536))},
 	} {
 		if f := fields(t, p); f != nil {
 			t.Errorf("%+v: %v", p, f)
 		}
 	}
-	wantRefused(t, &SiteDeployParams{Name: "Shop", Commit: "ABC", Script: "a\x00", Trigger: "cron"}, "name", "commit", "script", "trigger")
+	wantRefused(t, &SiteDeployParams{Name: "Shop", Commit: &badSHA, Script: "a\x00", Trigger: "cron"}, "name", "commit", "script", "trigger")
 	wantRefused(t, &SiteDeployParams{Name: "shop"}, "trigger")
+	// A commit that is present must be one; "" is not "left out".
+	wantRefused(t, &SiteDeployParams{Name: "shop", Trigger: DeployManual, Commit: &empty}, "commit")
+	var p SiteDeployParams
+	if err := DecodeStrict([]byte(`{"name":"shop","composer":false,"trigger":"manual","commit":""}`), &p); err != nil {
+		t.Fatal(err)
+	}
+	wantRefused(t, &p, "commit")
 	wantRefused(t, &SiteDeployParams{Name: "shop", Trigger: DeployManual, Script: DeployScript(strings.Repeat("a", 65537))}, "script")
 }
 
