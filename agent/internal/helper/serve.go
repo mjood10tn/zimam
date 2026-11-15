@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"zimam/agent/contract"
 )
 
@@ -55,6 +57,13 @@ func Main(ids IDs, args []string, stdin io.Reader, stdout, stderr io.Writer) int
 		return exitUsage
 	}
 	home, op, opArgs := args[1], args[2], args[3:]
+	// Not dumpable: the user's other processes can't ptrace this one or open
+	// its /proc/<pid>/fd links, so they can't write into what the agent
+	// reads from it. A program it executes is dumpable again.
+	if err := unix.Prctl(unix.PR_SET_DUMPABLE, 0, 0, 0, 0); err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitFailed
+	}
 	syscall.Umask(0o027)
 	root, err := os.OpenRoot(home)
 	if err != nil {

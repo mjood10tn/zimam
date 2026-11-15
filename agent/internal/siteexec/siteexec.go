@@ -17,10 +17,12 @@ import (
 type Request struct {
 	Program Program
 	PHP     contract.PHPVersion // php, artisan and composer only
-	Args    []string
-	Dir     string            // relative to the site user's home; "" is the home
-	Env     map[string]string // the program's allowlisted keys only
-	Stdin   io.Reader         // the deploy script; nil (empty) for the others
+	// Args and Env travel in the helper's argv, readable by any local user
+	// in /proc/<pid>/cmdline: never put a secret in them.
+	Args  []string
+	Dir   string            // relative to the site user's home; "" is the home
+	Env   map[string]string // the program's allowlisted keys only
+	Stdin io.Reader         // the deploy script; nil (empty) for the others
 	// LogPrefix starts each output line in the job log.
 	LogPrefix string
 	// Capture, with CaptureMax > 0, takes the raw stdout instead of the job

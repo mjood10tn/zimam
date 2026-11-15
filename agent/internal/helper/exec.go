@@ -125,10 +125,14 @@ func (s execSpec) validate() error {
 	if p.noArg && len(s.Args) > 0 {
 		return fmt.Errorf("exec %s: takes no arguments", s.Program)
 	}
+	// Invalid UTF-8 would change on its way through JSON.
 	for _, a := range s.Args {
-		if strings.IndexByte(a, 0) >= 0 {
-			return fmt.Errorf("exec %s: an argument contains NUL", s.Program)
+		if strings.IndexByte(a, 0) >= 0 || !utf8.ValidString(a) {
+			return fmt.Errorf("exec %s: an argument contains NUL or invalid UTF-8", s.Program)
 		}
+	}
+	if !utf8.ValidString(s.Dir) {
+		return fmt.Errorf("exec %s: the directory is not valid UTF-8", s.Program)
 	}
 	if s.Dir != "" && !filepath.IsLocal(s.Dir) {
 		return fmt.Errorf("exec %s: the directory %q is not inside the home", s.Program, s.Dir)
@@ -252,13 +256,14 @@ func pumpLines(r io.Reader, emit func(line []byte, cut bool)) error {
 				line = append(line, chunk...)
 			}
 		}
-		if end || (err == io.EOF && (len(line) > 0 || cut)) {
+		stop := errors.Is(err, io.EOF) || errors.Is(err, os.ErrDeadlineExceeded)
+		if end || (stop && (len(line) > 0 || cut)) {
 			emit(line, cut)
 			line, cut = line[:0], false
 		}
 		switch {
 		case err == nil, errors.Is(err, bufio.ErrBufferFull):
-		case errors.Is(err, io.EOF), errors.Is(err, os.ErrDeadlineExceeded):
+		case stop:
 			return nil
 		default:
 			return err
@@ -300,7 +305,8 @@ func runExec(root *os.Root, arg string, stdin io.Reader, stdout io.Writer) (any,
 	}
 	// os.Root refuses a directory that leaves the home, symlinks included;
 	// the program starts in the directory that was opened, not a path.
-	d, err := root.Open(dir)
+	// O_DIRECTORY: a planted FIFO fails at once instead of blocking the open.
+	d, err := root.OpenFile(dir, os.O_RDONLY|syscall.O_DIRECTORY, 0)
 	if err != nil {
 		return nil, fmt.Errorf("exec %s: %w", s.Program, err)
 	}
@@ -356,7 +362,19 @@ func runExec(root *os.Root, arg string, stdin io.Reader, stdout io.Writer) (any,
 		return nil, fmt.Errorf("exec %s: %w", s.Program, err)
 	}
 	pgid := cmd.Process.Pid // a session leader leads its own process group
-	killGroup := func() { syscall.Kill(-pgid, syscall.SIGKILL) }
+	// The group is killed only while the program is unreaped (a zombie
+	// still holds its pid), so the kill can't reach a reused pgid.
+	var (
+		reapMu sync.Mutex
+		reaped bool
+	)
+	killGroup := func() {
+		reapMu.Lock()
+		defer reapMu.Unlock()
+		if !reaped {
+			syscall.Kill(-pgid, syscall.SIGKILL)
+		}
+	}
 
 	var (
 		failOnce sync.Once
@@ -387,19 +405,33 @@ func runExec(root *os.Root, arg string, stdin io.Reader, stdout io.Writer) (any,
 		})
 	}
 
-	waited := make(chan error, 1)
-	go func() { waited <- cmd.Wait() }()
-	var waitErr error
+	// Wait for the exit without reaping (WNOWAIT); cmd.Wait reaps after the
+	// last kill of the group.
+	exited := make(chan struct{})
+	go func() {
+		defer close(exited)
+		var info unix.Siginfo
+		for {
+			err := unix.Waitid(unix.P_PID, pgid, &info, unix.WEXITED|unix.WNOWAIT, nil)
+			if !errors.Is(err, unix.EINTR) {
+				return
+			}
+		}
+	}()
 	select {
-	case waitErr = <-waited:
+	case <-exited:
 	case <-ctx.Done():
 		killGroup()
-		waitErr = <-waited
+		<-exited
 	case <-failed:
-		waitErr = <-waited
+		<-exited
 	}
 	// Whatever the program left behind in its group goes with it.
 	killGroup()
+	reapMu.Lock()
+	reaped = true
+	reapMu.Unlock()
+	waitErr := cmd.Wait()
 	deadline := time.Now().Add(execKillWait)
 	logR.SetReadDeadline(deadline)
 	if capR != nil {
@@ -434,6 +466,11 @@ func closeOnExecFrom(first int) error {
 	if err := unix.CloseRange(uint(first), ^uint(0), unix.CLOSE_RANGE_CLOEXEC); err == nil {
 		return nil
 	}
+	return closeOnExecViaProc(first)
+}
+
+// closeOnExecViaProc is closeOnExecFrom without close_range.
+func closeOnExecViaProc(first int) error {
 	entries, err := os.ReadDir("/proc/self/fd")
 	if err != nil {
 		return err
@@ -479,10 +516,14 @@ func pumpCapture(r io.Reader, out *frameWriter, max int64) error {
 type ExecRequest struct {
 	Program string              // one of the fixed set: see ProgramArgv
 	PHP     contract.PHPVersion // php, artisan and composer only
-	Args    []string            // built by the agent from validated values
-	Dir     string              // relative to the home; "" is the home
-	Env     map[string]string   // allowlisted keys of the program only
-	Stdin   io.Reader           // deploy-script only; nil is empty
+	// Args, built by the agent from validated values, and Env, the
+	// program's allowlisted keys only, travel in the helper's argv, which
+	// any local user can read in /proc/<pid>/cmdline: never put a secret in
+	// them. Secrets go on Stdin.
+	Args  []string
+	Dir   string // relative to the home; "" is the home
+	Env   map[string]string
+	Stdin io.Reader // deploy-script only; nil is empty
 	// Capture, with CaptureMax > 0, receives the program's raw stdout instead
 	// of the job log (spike amendment A8). More than CaptureMax bytes fails
 	// the run.

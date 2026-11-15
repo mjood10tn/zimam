@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"zimam/agent/contract"
 )
 
@@ -503,8 +505,8 @@ func FuzzReadExecFrames(f *testing.F) {
 }
 
 func FuzzExecSpec(f *testing.F) {
-	f.Add(`{"program":"git","args":["fetch"],"dir":"repo.git","env":{"GIT_SSH_COMMAND":"ssh"}}`)
-	f.Add(`{"program":"composer","php":"8.3","env":{"COMPOSER_NO_INTERACTION":"1"}}`)
+	f.Add(`{"program":"git","args":["fetch"],"dir":"repo.git","env":["GIT_SSH_COMMAND=ssh"]}`)
+	f.Add(`{"program":"composer","php":"8.3","env":["COMPOSER_NO_INTERACTION=1"]}`)
 	f.Fuzz(func(t *testing.T, arg string) {
 		s, err := decodeExecSpec(arg)
 		if err != nil {
@@ -522,4 +524,136 @@ func FuzzExecSpec(f *testing.F) {
 			t.Fatalf("dir %q accepted", s.Dir)
 		}
 	})
+}
+
+// An inherited descriptor without close-on-exec must not reach the program:
+// Go closes only the descriptors it opened itself.
+func TestExecClosesInheritedFDs(t *testing.T) {
+	c, a := testClient(t)
+	f, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	fd := int(f.Fd())
+	if _, err := unix.FcntlInt(uintptr(fd), unix.F_SETFD, 0); err != nil {
+		t.Fatal(err)
+	}
+	lines, code, err := script(t, context.Background(), c, a, "ls /proc/$$/fd | sort -n | tr '\n' ' '; echo\n")
+	if err != nil || code != 0 || len(lines) != 1 {
+		t.Fatalf("script = %q, %d, %v", lines, code, err)
+	}
+	for _, s := range strings.Fields(lines[0]) {
+		if n, _ := strconv.Atoi(s); n > 2 && n != 255 {
+			t.Errorf("open descriptors = %q (inherited %d); want only 0-2", lines[0], fd)
+			break
+		}
+	}
+}
+
+func TestCloseOnExecViaProc(t *testing.T) {
+	f, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	fd := int(f.Fd())
+	if _, err := unix.FcntlInt(uintptr(fd), unix.F_SETFD, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := closeOnExecViaProc(fd); err != nil {
+		t.Fatal(err)
+	}
+	flags, err := unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
+	if err != nil || flags&unix.FD_CLOEXEC == 0 {
+		t.Errorf("flags of fd %d = %#x, %v; want FD_CLOEXEC", fd, flags, err)
+	}
+}
+
+// The helper is not dumpable, so another process of the site user can't
+// open /proc/<helper>/fd/1 and write frames into the agent's stream.
+func TestExecHelperIsNotDumpable(t *testing.T) {
+	c, a := testClient(t)
+	lines, code, err := script(t, context.Background(), c, a,
+		"readlink /proc/$PPID/fd/1 >/dev/null 2>&1 && echo open || echo denied\n")
+	if err != nil || code != 0 || !slices.Equal(lines, []string{"denied"}) {
+		t.Errorf("reading the helper's stdout link = %q, %d, %v; want denied", lines, code, err)
+	}
+}
+
+func TestExecRefusesInvalidUTF8(t *testing.T) {
+	root, _, _ := testHome(t)
+	for _, spec := range []execSpec{
+		{Program: "git", Args: []string{"a\xffb"}},
+		{Program: "git", Dir: "re\xffpo"},
+	} {
+		// Written by hand: json.Marshal would replace the bad bytes.
+		arg := `{"program":"git","args":["` + strings.Join(spec.Args, "") + `"]}`
+		if spec.Dir != "" {
+			arg = `{"program":"git","dir":"` + spec.Dir + `"}`
+		}
+		if code, out, _ := serveExec(t, root, arg); code != exitUsage || out != "" {
+			t.Errorf("exec %q = %d, %q; want 2", arg, code, out)
+		}
+		if err := spec.validate(); err == nil {
+			t.Errorf("validate(%+v) = nil; want an error", spec)
+		}
+	}
+}
+
+func TestExecDirFIFODoesntHang(t *testing.T) {
+	root, home, _ := testHome(t)
+	if err := unix.Mkfifo(filepath.Join(home, "fifo"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan int, 1)
+	go func() {
+		code, _, _ := serveExec(t, root, map[string]any{"program": "deploy-script", "dir": "fifo"})
+		done <- code
+	}()
+	select {
+	case code := <-done:
+		if code == exitOK {
+			t.Error("exec in a FIFO succeeded")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("exec in a FIFO hung")
+	}
+}
+
+// The helper's own cap, without the client's: capture past capture_max
+// fails the run and sends no more than the cap.
+func TestExecHelperCaptureCap(t *testing.T) {
+	root, _, _ := testHome(t)
+	t.Chdir(t.TempDir()) // runExec fchdirs this process
+	arg, _ := json.Marshal(execSpec{Program: "deploy-script", CaptureMax: 100})
+	var stdout, stderr bytes.Buffer
+	code := Serve(root, "exec", []string{string(arg)}, strings.NewReader("head -c 100000 /dev/zero\n"), &stdout, &stderr)
+	if code != exitFailed || !strings.Contains(stderr.String(), "100 bytes") {
+		t.Errorf("exec = %d, %q; want 1 and the cap", code, stderr.String())
+	}
+	var captured bytes.Buffer
+	if _, err := readExecFrames(&stdout, func(string) {}, &captured, 1<<20); !errors.Is(err, errNoResult) || captured.Len() > 100 {
+		t.Errorf("frames = %v, %d captured bytes; want no result and at most 100", err, captured.Len())
+	}
+}
+
+// deadlineReader returns its data, then os.ErrDeadlineExceeded.
+type deadlineReader struct{ data []byte }
+
+func (r *deadlineReader) Read(p []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, os.ErrDeadlineExceeded
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	return n, nil
+}
+
+func TestPumpLinesKeepsPartialLineOnDeadline(t *testing.T) {
+	var got []string
+	err := pumpLines(&deadlineReader{data: []byte("one\npart")}, func(l []byte, _ bool) { got = append(got, string(l)) })
+	if err != nil || !slices.Equal(got, []string{"one", "part"}) {
+		t.Errorf("pumpLines = %q, %v; want one and part", got, err)
+	}
 }
