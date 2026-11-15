@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"zimam/agent/contract"
 	"zimam/agent/internal/configtx"
@@ -216,8 +217,8 @@ func applySecurityFiles(ctx context.Context, d sysexec.Deps, st State, changes [
 	return waitForSocket(ctx, d.Paths.PHPSocket(st.Name, st.PHPVersion))
 }
 
-// allApplied reports whether every change is already on disk, content and
-// mode, or already absent for a removal.
+// allApplied reports whether every change is already on disk, content, mode
+// and owner (a uid or gid of -1 keeps whatever it is), or already absent for a removal.
 func allApplied(changes []configtx.Change) bool {
 	for _, c := range changes {
 		if c.Remove {
@@ -228,6 +229,9 @@ func allApplied(changes []configtx.Change) bool {
 		}
 		fi, err := os.Lstat(c.Path)
 		if err != nil || fi.Mode().Perm() != c.Mode.Perm() || !fileIs(c.Path, c.Content) {
+			return false
+		}
+		if st, ok := fi.Sys().(*syscall.Stat_t); ok && (c.UID >= 0 && int(st.Uid) != c.UID || c.GID >= 0 && int(st.Gid) != c.GID) {
 			return false
 		}
 	}

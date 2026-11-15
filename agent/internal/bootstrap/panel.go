@@ -305,10 +305,11 @@ func (r *run) download(ctx context.Context, m *release.Manifest, name string) (s
 
 // artisan runs a panel command as zimam (§4): runuser, the panel's PHP,
 // and the runner's environment plus HOME. It runs in /, so root never
-// enters zimam's home.
+// enters zimam's home, and in its own session, so it has no controlling
+// terminal to open root's /dev/tty through.
 func artisan(ctx context.Context, d sysexec.Deps, script string, args ...string) (sysexec.Result, error) {
 	argv := append([]string{"-u", "zimam", "--", "/usr/bin/php" + string(d.Config.PanelPHP), script}, args...)
-	return d.Run.Run(ctx, sysexec.Cmd{Path: runuser, Args: argv, Env: []string{"HOME=" + zimamHome}, Dir: "/"})
+	return d.Run.Run(ctx, sysexec.Cmd{Path: runuser, Args: argv, Env: []string{"HOME=" + zimamHome}, Dir: "/", Setsid: true})
 }
 
 var setupLinkLine = regexp.MustCompile(`^https://[^\s/]+/setup/[A-Za-z0-9_-]{43}$`)

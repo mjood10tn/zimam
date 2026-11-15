@@ -3,6 +3,7 @@ package sysexec
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -252,6 +253,86 @@ func TestKillGroupKillsGrandchildren(t *testing.T) {
 		if time.Now().After(deadline) {
 			syscall.Kill(pid, syscall.SIGKILL)
 			t.Fatalf("grandchild %d is still alive after the run's context ended", pid)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// sessionHelper is the test binary run as a child: it prints its own
+// session id (field 6 of /proc/self/stat) and pid.
+func TestMain(m *testing.M) {
+	if os.Getenv("ZIMAM_SESSION_HELPER") == "1" {
+		b, err := os.ReadFile("/proc/self/stat")
+		if err != nil {
+			os.Exit(2)
+		}
+		// pid (comm) state ppid pgrp session ...: comm may hold spaces.
+		rest := strings.Fields(string(b[strings.LastIndexByte(string(b), ')')+1:]))
+		fmt.Printf("%d %s\n", os.Getpid(), rest[3])
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
+func TestRunnerSetsid(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name       string
+		setsid     bool
+		killGroup  bool
+		wantLeader bool
+	}{{"plain", false, false, false}, {"setsid", true, false, true}, {"setsid and killgroup", true, true, true}} {
+		t.Run(c.name, func(t *testing.T) {
+			res, err := ExecRunner{}.Run(context.Background(), Cmd{
+				Path: exe, Env: []string{"ZIMAM_SESSION_HELPER=1"}, Setsid: c.setsid, KillGroup: c.killGroup,
+			})
+			if err != nil {
+				t.Fatalf("Run = %v (stderr %q)", err, res.Stderr)
+			}
+			var pid, sid int
+			if _, err := fmt.Sscanf(string(res.Stdout), "%d %d", &pid, &sid); err != nil {
+				t.Fatalf("helper printed %q", res.Stdout)
+			}
+			if leader := sid == pid; leader != c.wantLeader {
+				t.Errorf("session id %d, pid %d: leader = %v, want %v", sid, pid, leader, c.wantLeader)
+			}
+		})
+	}
+}
+
+// Setsid with KillGroup still kills the whole group on cancel.
+func TestSetsidKillGroupKillsGrandchildren(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "grandchild.pid")
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	_, err := ExecRunner{}.Run(ctx, Cmd{
+		Path:      "/bin/sh",
+		Args:      []string{"-c", "sleep 60 & echo $! >" + pidFile + "; wait"},
+		KillGroup: true,
+		Setsid:    true,
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Run = %v, want context.DeadlineExceeded", err)
+	}
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
+			return
+		}
+		if time.Now().After(deadline) {
+			syscall.Kill(pid, syscall.SIGKILL)
+			t.Fatalf("grandchild %d is still alive", pid)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}

@@ -35,6 +35,11 @@ type Cmd struct {
 	// ends, kills the whole group, not only the program: logrotate's gzip
 	// child would otherwise outlive it.
 	KillGroup bool
+	// Setsid starts the program in a new session, so it has no controlling
+	// terminal: a program root starts for zimam can't open root's /dev/tty.
+	// A session leader leads its own process group, so KillGroup still kills
+	// the whole group with it.
+	Setsid bool
 }
 
 type Result struct {
@@ -134,8 +139,12 @@ func (ExecRunner) Run(ctx context.Context, c Cmd) (Result, error) {
 	cmd.Env = append(append([]string{}, baseEnv...), c.Env...)
 	cmd.Stdin = c.Stdin
 	cmd.Dir = c.Dir
+	if c.KillGroup || c.Setsid {
+		// Setsid with Setpgid fails: after setsid the child already leads its
+		// group. So Setsid alone stands for both.
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: c.Setsid, Setpgid: !c.Setsid}
+	}
 	if c.KillGroup {
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	}
 	cmd.WaitDelay = 5 * time.Second // don't hang on pipes a killed child's children still hold

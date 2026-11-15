@@ -13,6 +13,7 @@ import (
 
 	"zimam/agent/contract"
 	"zimam/agent/internal/audit"
+	"zimam/agent/internal/configtx"
 )
 
 const (
@@ -294,4 +295,33 @@ func securityEqual(a, b Security) bool {
 	ja, _ := json.Marshal(a)
 	jb, _ := json.Marshal(b)
 	return bytes.Equal(ja, jb)
+}
+
+// A save rewrites an htpasswd whose content and mode are right but whose
+// group was changed by hand: allApplied compares the owner too.
+func TestSecuritySaveCorrectsHtpasswdGroup(t *testing.T) {
+	e := securityEnv(t)
+	p := defaults()
+	p.PasswordProtection = contract.PasswordProtection{Enabled: true, Users: contract.BasicAuthUsers{{Username: "alice", PasswordHash: hashAlice}}}
+	if _, err := e.secure(p); err != nil {
+		t.Fatal(err)
+	}
+	path := e.p.SiteHtpasswd("shop")
+	content := e.read(path)
+	same := configtx.Change{Path: path, Content: content, Mode: 0o640, UID: -1, GID: os.Getgid()}
+	if !allApplied([]configtx.Change{same}) {
+		t.Fatal("allApplied = false for a file with the right content, mode and group")
+	}
+	// A test user can't chown to gid 0, so the wanted group is one the file
+	// doesn't have, which is the same mismatch seen from the other side.
+	wrong := same
+	wrong.GID = os.Getgid() + 1
+	if allApplied([]configtx.Change{wrong}) {
+		t.Error("allApplied = true for a file whose group differs from the wanted one")
+	}
+	wrong = same
+	wrong.UID = os.Getuid() + 1
+	if allApplied([]configtx.Change{wrong}) {
+		t.Error("allApplied = true for a file whose owner differs from the wanted one")
+	}
 }

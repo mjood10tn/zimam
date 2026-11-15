@@ -611,3 +611,23 @@ func TestRerunAppliesChangedFlags(t *testing.T) {
 		t.Fatalf("the re-run applied %q, want agent-config, php and setup-link", got)
 	}
 }
+
+// Panel commands run in their own session, so they have no controlling
+// terminal to reach root's /dev/tty through.
+func TestArtisanRunsInNewSession(t *testing.T) {
+	w := newWorld(t)
+	w.mustRun(opts())
+	seen := 0
+	for _, c := range w.sys.commands() {
+		if !strings.Contains(argv(c), "/artisan") {
+			continue
+		}
+		seen++
+		if !c.Setsid {
+			t.Errorf("%s runs without Setsid", argv(c))
+		}
+	}
+	if seen < 2 {
+		t.Fatalf("saw %d artisan calls, want the migrate and the setup link at least", seen)
+	}
+}
