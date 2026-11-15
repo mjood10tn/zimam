@@ -45,6 +45,9 @@ func (p Paths) ReloadLock() string { return p.at("run/zimam/locks/reload.lock") 
 func (p Paths) MaintenanceLock() string { return p.at("run/zimam/locks/maintenance.lock") }
 func (p Paths) AptRepoLock() string     { return p.at("run/zimam/locks/apt-repo.lock") }
 
+// ComposerLock keeps two downloads of the pinned Composer apart.
+func (p Paths) ComposerLock() string { return p.at("run/zimam/locks/composer.lock") }
+
 // LogrotateLock serialises every write of logrotate rules (root 0600).
 func (p Paths) LogrotateLock() string { return p.at("run/zimam/locks/logrotate.lock") }
 

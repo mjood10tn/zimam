@@ -24,7 +24,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"zimam/agent/contract"
-	"zimam/agent/internal/composer"
+	"zimam/agent/internal/composer/pin"
 	"zimam/agent/internal/paths"
 )
 
@@ -62,7 +62,7 @@ const (
 
 // composerPhar is the pinned Composer (R02-D6, spike amendment A9), at its
 // production path: the helper runs on the server, never under a test root.
-var composerPhar = paths.Paths{}.ComposerPhar(composer.Version)
+var composerPhar = paths.Paths{}.ComposerPhar(pin.Version)
 
 // execProgram is one program the helper may run.
 type execProgram struct {

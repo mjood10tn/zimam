@@ -38,6 +38,10 @@ type fakeHelper struct {
 	keys  int                  // key pairs made so far
 	// badPublic, when set, is what ssh-keygen -y prints.
 	badPublic string
+	// yFails is how many ssh-keygen -y runs exit 1, as for a corrupt key.
+	yFails int
+	// failRemove makes RemoveTree of a name fail.
+	failRemove map[string]error
 }
 
 type fakeNode struct {
@@ -101,6 +105,9 @@ func (h *fakeHelper) RemoveTree(_ context.Context, a helper.Account, name string
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.record(a, "remove-tree", name)
+	if err := h.failRemove[name]; err != nil {
+		return err
+	}
 	for n := range h.nodes {
 		if n == name || strings.HasPrefix(n, name+"/") {
 			delete(h.nodes, n)
@@ -132,6 +139,10 @@ func (h *fakeHelper) Exec(_ context.Context, a helper.Account, r helper.ExecRequ
 	case slices.Contains(r.Args, "-y"):
 		n := h.nodes[keyFile]
 		if n == nil {
+			return 1, nil
+		}
+		if h.yFails > 0 {
+			h.yFails--
 			return 1, nil
 		}
 		if r.Capture == nil || r.CaptureMax <= 0 {
@@ -334,15 +345,73 @@ func TestRepoRotatesKeyWhenAsked(t *testing.T) {
 	}
 }
 
-func TestRepoReplacesHalfAKey(t *testing.T) {
+// A missing .pub alone keeps the key: ssh-keygen -y reads the public half
+// from the private one.
+func TestRepoKeepsKeyWithoutPub(t *testing.T) {
+	e := newEnv(t)
+	first := e.mustRepo(contract.SiteRepoParams{Repository: "octo/app", Branch: "main"})
+	delete(e.h.nodes, keyFile+".pub")
+	e.h.ops = nil
+	second := e.mustRepo(contract.SiteRepoParams{Repository: "octo/app", Branch: "main"})
+	got := e.h.changes()
+	if slices.Contains(got, "s_shop exec ssh-keygen "+keygenArgs) || slices.Contains(got, "s_shop remove-tree .ssh/zimam_deploy") {
+		t.Errorf("the key was replaced for a missing .pub; changes %q", got)
+	}
+	if second.Fingerprint != first.Fingerprint || second.PublicKey != first.PublicKey {
+		t.Errorf("key changed: %+v then %+v", first, second)
+	}
+}
+
+func TestRepoReplacesMissingPrivateKey(t *testing.T) {
+	e := newEnv(t)
+	first := e.mustRepo(contract.SiteRepoParams{Repository: "octo/app", Branch: "main"})
+	delete(e.h.nodes, keyFile) // the .pub is left alone
+	e.h.ops = nil
+	second := e.mustRepo(contract.SiteRepoParams{Repository: "octo/app", Branch: "main"})
+	got := e.h.changes()
+	rmPub := slices.Index(got, "s_shop remove-tree .ssh/zimam_deploy.pub")
+	gen := slices.Index(got, "s_shop exec ssh-keygen "+keygenArgs)
+	if rmPub < 0 || gen < rmPub {
+		t.Errorf("want the stray .pub removed, then ssh-keygen; changes %q", got)
+	}
+	if second.Fingerprint == first.Fingerprint {
+		t.Errorf("fingerprint unchanged: %s", second.Fingerprint)
+	}
+}
+
+func TestRepoReplacesUnreadableKey(t *testing.T) {
+	e := newEnv(t)
+	first := e.mustRepo(contract.SiteRepoParams{Repository: "octo/app", Branch: "main"})
+	e.h.yFails = 1
+	e.h.ops = nil
+	second := e.mustRepo(contract.SiteRepoParams{Repository: "octo/app", Branch: "main"})
+	got := e.h.changes()
+	rmKey := slices.Index(got, "s_shop remove-tree .ssh/zimam_deploy")
+	gen := slices.Index(got, "s_shop exec ssh-keygen "+keygenArgs)
+	if rmKey < 0 || gen < rmKey {
+		t.Errorf("want the unreadable key removed, then ssh-keygen; changes %q", got)
+	}
+	if second.Fingerprint == first.Fingerprint || e.state().DeployKeyFingerprint != second.Fingerprint {
+		t.Errorf("fingerprint %s, then %s; state %s", first.Fingerprint, second.Fingerprint, e.state().DeployKeyFingerprint)
+	}
+}
+
+// The mirror goes before the state changes: when it can't be dropped, the
+// state file still names the old repository and branch.
+func TestRepoMirrorDropFailureKeepsState(t *testing.T) {
 	e := newEnv(t)
 	e.mustRepo(contract.SiteRepoParams{Repository: "octo/app", Branch: "main"})
-	delete(e.h.nodes, keyFile+".pub") // a run killed between the two files, say
-	e.h.ops = nil
-	e.mustRepo(contract.SiteRepoParams{Repository: "octo/app", Branch: "main"})
-	got := e.h.changes()
-	if !slices.Contains(got, "s_shop remove-tree .ssh/zimam_deploy") || !slices.Contains(got, "s_shop exec ssh-keygen "+keygenArgs) {
-		t.Errorf("half a key pair wasn't replaced; changes %q", got)
+	before, err := os.ReadFile(e.d.Paths.SiteState("shop"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.h.failRemove = map[string]error{MirrorDir: errors.New("fake helper: remove failed")}
+	if _, err := e.repo(contract.SiteRepoParams{Repository: "octo/app", Branch: "release"}); err == nil {
+		t.Fatal("Repo succeeded although the mirror stayed")
+	}
+	after, err := os.ReadFile(e.d.Paths.SiteState("shop"))
+	if err != nil || string(after) != string(before) {
+		t.Errorf("state changed:\n%s\nwant\n%s", after, before)
 	}
 }
 

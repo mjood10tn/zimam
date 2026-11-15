@@ -15,6 +15,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"zimam/agent/internal/sysexec"
 )
@@ -22,13 +23,60 @@ import (
 // maxPharBytes caps the download: 2.11.2 is 3.8 MB.
 const maxPharBytes = 32 << 20
 
+// tempPattern names a download in progress, in the Composer directory.
+const tempPattern = ".composer-*"
+
+// httpsOnly is c with redirects allowed only to https URLs; c's own
+// redirect policy still applies on top.
+func httpsOnly(c *http.Client) *http.Client {
+	copied := *c
+	next := c.CheckRedirect
+	copied.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if req.URL.Scheme != "https" {
+			return fmt.Errorf("refusing a redirect to %s: not https", req.URL.Redacted())
+		}
+		if next != nil {
+			return next(req, via)
+		}
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
+	}
+	return &copied
+}
+
+// removeStaleTemps deletes downloads that a killed run left in dir.
+func removeStaleTemps(dir string) error {
+	stale, err := filepath.Glob(filepath.Join(dir, tempPattern))
+	if err != nil {
+		return err
+	}
+	for _, name := range stale {
+		if err := os.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
 // Ensure returns the path of the pinned phar, downloading it first when it
 // is missing or its hash doesn't match the pin.
 func Ensure(ctx context.Context, d sysexec.Deps) (path string, err error) {
 	return ensure(ctx, d, pinned)
 }
 
-func ensure(ctx context.Context, d sysexec.Deps, p pin) (string, error) {
+func ensure(ctx context.Context, d sysexec.Deps, p release) (string, error) {
+	// Held throughout, so one job's download never removes another's
+	// temporary file below.
+	unlock, err := sysexec.Lock(ctx, d.Paths.ComposerLock())
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+	if err := removeStaleTemps(d.Paths.ComposerDir()); err != nil {
+		return "", err
+	}
 	path := d.Paths.ComposerPhar(p.version)
 	switch ok, err := matches(path, p.sha256); {
 	case err != nil:
@@ -44,12 +92,12 @@ func ensure(ctx context.Context, d sysexec.Deps, p pin) (string, error) {
 		return "", err
 	}
 	d.Logf("Downloading Composer %s from %s", p.version, p.url)
-	tmp, err := os.CreateTemp(dir, ".composer-*")
+	tmp, err := os.CreateTemp(dir, tempPattern)
 	if err != nil {
 		return "", err
 	}
 	defer os.Remove(tmp.Name()) // fails harmlessly once renamed
-	sum, err := download(ctx, d.HTTPClient(), p.url, tmp)
+	sum, err := download(ctx, httpsOnly(d.HTTPClient()), p.url, tmp)
 	if err == nil {
 		err = tmp.Sync()
 	}

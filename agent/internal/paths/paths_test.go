@@ -109,6 +109,7 @@ var production = map[string]string{
 	"SiteTmpDir":            "/home/s_shop/tmp",
 	"SiteHomeLogsDir":       "/home/s_shop/logs",
 	"SitePHPErrorLog":       "/home/s_shop/logs/php-error.log",
+	"ComposerLock":          "/run/zimam/locks/composer.lock",
 	"ComposerDir":           "/usr/local/lib/zimam/composer",
 	"ComposerPhar":          "/usr/local/lib/zimam/composer/composer-site:shop.phar", // the version argument is "site:shop" too
 	"GitBinary":             "/usr/bin/git",

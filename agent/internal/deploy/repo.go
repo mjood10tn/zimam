@@ -88,14 +88,14 @@ func loadSite(d sysexec.Deps, name contract.SiteName) (sites.State, error) {
 //
 //  1. git and unzip are installed if missing (R02-D7);
 //  2. ~/.ssh is 0700, made through the helper;
-//  3. the deploy key is made by ssh-keygen as the site user, unless both
-//     halves exist and rotate_key is off (R02-D4); a rotation, or a half
-//     left alone, deletes both halves first, since ssh-keygen won't
-//     overwrite (A7);
+//  3. the deploy key is kept while its private half exists and ssh-keygen
+//     -y reads it, unless rotate_key is set (R02-D4); otherwise both
+//     halves are deleted, since ssh-keygen won't overwrite (A7), and
+//     ssh-keygen makes a new key as the site user. The public key always
+//     comes from ssh-keygen -y, so it is the private key's own, and its
+//     fingerprint is computed here; a missing .pub alone changes nothing;
 //  4. ~/.ssh/known_hosts is GitHub's pinned keys, rewritten every time
 //     (R02-D3);
-//  5. the public key comes from ssh-keygen -y, so it is the private key's
-//     own, and its fingerprint is computed here;
 //  6. a changed repository or branch drops the bare mirror, so the next
 //     deploy starts fresh;
 //  7. the state file records the repository, the branch and the
@@ -121,15 +121,12 @@ func Repo(ctx context.Context, d sysexec.Deps, h Helper, lookup sites.Lookup, p 
 	if err := h.Mkdir(ctx, a, sshDir, 0o700); err != nil {
 		return contract.SiteRepoResult{}, err
 	}
-	if err := ensureKey(ctx, d, h, a, p); err != nil {
+	pub, fp, err := ensureKey(ctx, d, h, a, p)
+	if err != nil {
 		return contract.SiteRepoResult{}, err
 	}
 	d.Logf("Writing GitHub's pinned host keys to ~/%s", knownHosts)
 	if err := h.Write(ctx, a, knownHosts, 0o600, strings.NewReader(GitHubKnownHosts)); err != nil {
-		return contract.SiteRepoResult{}, err
-	}
-	pub, fp, err := publicKey(ctx, d, h, a)
-	if err != nil {
 		return contract.SiteRepoResult{}, err
 	}
 	if st.Repository != p.Repository || st.Branch != p.Branch {
@@ -166,37 +163,45 @@ func ensurePackages(ctx context.Context, d sysexec.Deps) error {
 	return php.InstallPackages(ctx, d, missing...)
 }
 
-// ensureKey makes the deploy key unless it exists whole and isn't to be
-// rotated.
-func ensureKey(ctx context.Context, d sysexec.Deps, h Helper, a helper.Account, p contract.SiteRepoParams) error {
-	priv, err := present(ctx, h, a, keyFile)
-	if err != nil {
-		return err
-	}
-	pub, err := present(ctx, h, a, keyFile+".pub")
-	if err != nil {
-		return err
-	}
-	if priv && pub && !p.RotateKey {
-		d.Logf("Keeping the site's deploy key")
-		return nil
-	}
-	if priv || pub {
-		d.Logf("Removing the old deploy key")
-		for _, name := range []string{keyFile, keyFile + ".pub"} {
-			if err := h.RemoveTree(ctx, a, name); err != nil {
-				return err
+// ensureKey keeps the deploy key when its private half exists and
+// ssh-keygen -y reads it, unless rotate_key is set; otherwise it makes a
+// new one. It returns the public key and its fingerprint.
+func ensureKey(ctx context.Context, d sysexec.Deps, h Helper, a helper.Account, p contract.SiteRepoParams) (key, fpr string, err error) {
+	if !p.RotateKey {
+		priv, err := present(ctx, h, a, keyFile)
+		if err != nil {
+			return "", "", err
+		}
+		if priv {
+			key, fpr, err := publicKey(ctx, d, h, a)
+			var exit *sysexec.ExitError
+			switch {
+			case err == nil:
+				d.Logf("Keeping the site's deploy key")
+				return key, fpr, nil
+			case !errors.As(err, &exit):
+				return "", "", err
 			}
+			d.Logf("ssh-keygen can't read the deploy key; replacing it")
+		}
+	}
+	// ssh-keygen won't overwrite either half (A7). RemoveTree of a missing
+	// name succeeds.
+	for _, name := range []string{keyFile, keyFile + ".pub"} {
+		if err := h.RemoveTree(ctx, a, name); err != nil {
+			return "", "", err
 		}
 	}
 	d.Logf("Making a new deploy key as %s", a.Name)
 	comment := "zimam-" + string(p.Name) + "@" + string(d.Config.PanelDomain)
-	_, err = siteexec.Run(ctx, d, h, a, siteexec.Request{
+	if _, err := siteexec.Run(ctx, d, h, a, siteexec.Request{
 		Program:   siteexec.SSHKeygen,
 		Args:      []string{"-t", "ed25519", "-N", "", "-C", comment, "-f", keyFile, "-q"},
 		LogPrefix: "ssh-keygen: ",
-	})
-	return err
+	}); err != nil {
+		return "", "", err
+	}
+	return publicKey(ctx, d, h, a)
 }
 
 // publicKey reads the deploy key's public half as ssh-keygen -y derives it
