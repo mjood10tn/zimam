@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"zimam/agent/internal/configtx"
 	"zimam/agent/internal/paths"
@@ -139,39 +140,53 @@ func groupGID(path, group string) (int, bool, error) {
 	return 0, false, nil
 }
 
-const groupadd = "/usr/sbin/groupadd"
+const (
+	groupadd = "/usr/sbin/groupadd"
+	uidWait  = time.Minute
+)
 
-// newSiteIDs makes the group for username with a fresh gid and returns it;
-// the uid is the same number. The mark is saved before anything is created,
-// so a crash leaves a skipped number, never a reused one. A group left by an
-// attempt that stopped after groupadd is reused as it is.
-func newSiteIDs(ctx context.Context, d sysexec.Deps, username string) (int, error) {
-	if gid, ok, err := groupGID(d.Paths.EtcGroup(), username); err != nil {
-		return 0, err
+// createSiteUser makes the group and user username with a fresh id. The
+// lock is held from reading the mark to the end of useradd, so two
+// provisions never pick one number; the mark is saved before anything is
+// created, so a crash skips a number and never reuses one. A group of that
+// name without a user is what a stopped provision or destroy left. Its gid
+// may be a deleted site's uid, so it is removed and a new id taken.
+func createSiteUser(ctx context.Context, d sysexec.Deps, username string) error {
+	if err := os.MkdirAll(d.Paths.LocksDir(), 0o700); err != nil {
+		return err
+	}
+	lctx, cancel := context.WithTimeout(ctx, uidWait)
+	defer cancel()
+	unlock, err := sysexec.Lock(lctx, d.Paths.UIDLock())
+	if err != nil {
+		return fmt.Errorf("waiting for the uid lock: %w", err)
+	}
+	defer unlock()
+	if _, ok, err := groupGID(d.Paths.EtcGroup(), username); err != nil {
+		return err
 	} else if ok {
-		if mark, err := readUIDMark(d.Paths); err != nil {
-			return 0, err
-		} else if mark < gid {
-			if err := saveUIDMark(d.Paths, gid); err != nil {
-				return 0, err
-			}
+		d.Logf("Removing the leftover group %s", username)
+		if _, err := d.Run.Run(ctx, sysexec.Cmd{Path: groupdel, Args: []string{username}}); err != nil {
+			return err
 		}
-		return gid, nil
 	}
 	passwd, err := os.ReadFile(d.Paths.EtcPasswd())
 	if err != nil {
-		return 0, err
+		return err
 	}
 	uid, err := nextSiteUID(d.Paths, string(passwd))
 	if err != nil {
-		return 0, err
+		return err
 	}
 	if err := saveUIDMark(d.Paths, uid); err != nil {
-		return 0, err
+		return err
 	}
+	id := strconv.Itoa(uid)
 	d.Logf("Creating the group %s (id %d)", username, uid)
-	if _, err := d.Run.Run(ctx, sysexec.Cmd{Path: groupadd, Args: []string{"-g", strconv.Itoa(uid), username}}); err != nil {
-		return 0, err
+	if _, err := d.Run.Run(ctx, sysexec.Cmd{Path: groupadd, Args: []string{"-g", id, username}}); err != nil {
+		return err
 	}
-	return uid, nil
+	d.Logf("Creating the user %s", username)
+	_, err = d.Run.Run(ctx, sysexec.Cmd{Path: useradd, Args: []string{"-M", "-d", "/home/" + username, "-s", "/usr/sbin/nologin", "-u", id, "-g", id, username}})
+	return err
 }

@@ -28,6 +28,7 @@ var production = map[string]string{
 	"MaintenanceLock":       "/run/zimam/locks/maintenance.lock",
 	"AptRepoLock":           "/run/zimam/locks/apt-repo.lock",
 	"LogrotateLock":         "/run/zimam/locks/logrotate.lock",
+	"UIDLock":               "/run/zimam/locks/uid.lock",
 	"SubjectLock":           "/run/zimam/locks/site:shop.lock",
 	"StateDir":              "/var/lib/zimam",
 	"ConfigTxDir":           "/var/lib/zimam/configtx",

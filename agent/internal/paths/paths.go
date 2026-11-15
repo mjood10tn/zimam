@@ -280,3 +280,7 @@ func (p Paths) SiteHomeLogsDir(name contract.SiteName) string {
 func (p Paths) SitePHPErrorLog(name contract.SiteName) string {
 	return filepath.Join(p.SiteHomeLogsDir(name), "php-error.log")
 }
+
+// UIDLock is held while a new site user's uid is chosen and used, so two
+// provisions never take the same one (root 0600).
+func (p Paths) UIDLock() string { return p.at("run/zimam/locks/uid.lock") }

@@ -1,6 +1,7 @@
 package sites
 
 import (
+	"context"
 	"os"
 	"slices"
 	"strings"
@@ -62,18 +63,64 @@ func TestProvisionRetryKeepsExistingUser(t *testing.T) {
 	}
 }
 
-// groupadd ran but useradd didn't: the retry reuses that group's id.
-func TestProvisionRetryAfterGroupaddReusesTheGroup(t *testing.T) {
+const (
+	groupadd1001 = "/usr/sbin/groupadd -g 1001 s_shop"
+	useradd1001  = "/usr/sbin/useradd -M -d /home/s_shop -s /usr/sbin/nologin -u 1001 -g 1001 s_shop"
+)
+
+// A group without its user is what a stopped provision or destroy leaves;
+// its gid may be a deleted site's uid, so it is removed and a new id taken.
+func TestProvisionRemovesALeftoverGroupAndTakesANewUID(t *testing.T) {
+	// From a provision that stopped after groupadd.
 	e := newEnv(t)
 	e.appendGroup("s_shop:x:1000:\n")
 	mkdir(t, e.p.StateDir())
 	writeFile(t, e.p.UIDHighwater(), "{\"highest\": 1000}\n")
+	e.run.Add(scriptOut(groupadd1001, ""))
+	e.run.Add(scriptOut(useradd1001, ""))
 	if _, err := e.provision(static); err != nil {
 		t.Fatalf("Provision: %v", err)
 	}
+	checkFreshIDs(t, e)
+
+	// From a destroy that stopped between userdel and groupdel.
+	e = provisioned(t)
+	delete(e.users, "s_shop")
+	pw, _ := os.ReadFile(e.p.EtcPasswd())
+	var kept []string
+	for line := range strings.Lines(string(pw)) {
+		if !strings.HasPrefix(line, "s_shop:") {
+			kept = append(kept, line)
+		}
+	}
+	writeFile(t, e.p.EtcPasswd(), strings.Join(kept, ""))
+	if err := os.Remove(e.p.SiteState("shop")); err != nil {
+		t.Fatal(err)
+	}
+	e.run.Add(scriptOut(groupadd1001, ""))
+	e.run.Add(scriptOut(useradd1001, ""))
+	n := len(e.run.Calls())
+	e.fpmActive("8.4", false)
+	if _, err := e.provision(php84); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	checkFreshIDs(t, e, n)
+}
+
+func checkFreshIDs(t *testing.T, e *env, since ...int) {
+	t.Helper()
 	calls := e.calls()
-	if slices.Contains(calls, groupaddCmd) || !slices.Contains(calls, useraddCmd) {
-		t.Errorf("ran\n%s", strings.Join(calls, "\n"))
+	if len(since) > 0 {
+		calls = calls[since[0]:]
+	}
+	g, a, u := slices.Index(calls, groupdelCmd), slices.Index(calls, groupadd1001), slices.Index(calls, useradd1001)
+	if g < 0 || a < g || u < a {
+		t.Errorf("want groupdel, groupadd -g 1001, useradd -u 1001 in that order:\n%s", strings.Join(calls, "\n"))
+	}
+	for _, c := range calls {
+		if strings.Contains(c, "-u 1000") || strings.Contains(c, "-g 1000") {
+			t.Errorf("the old id came back: %q", c)
+		}
 	}
 }
 
@@ -83,10 +130,58 @@ func TestReprovisionedSiteGetsANewUID(t *testing.T) {
 	if _, err := e.destroy(); err != nil {
 		t.Fatal(err)
 	}
-	e.run.Add(scriptOut("/usr/sbin/groupadd -g 1001 s_shop", ""))
-	e.run.Add(scriptOut("/usr/sbin/useradd -M -d /home/s_shop -s /usr/sbin/nologin -u 1001 -g 1001 s_shop", ""))
+	e.run.Add(scriptOut(groupadd1001, ""))
+	e.run.Add(scriptOut(useradd1001, ""))
 	e.fpmActive("8.4", false)
+	n := len(e.run.Calls())
 	if _, err := e.provision(php84); err != nil {
 		t.Fatalf("Provision: %v", err)
+	}
+	calls := e.callsSince(n)
+	if !slices.Contains(calls, useradd1001) {
+		t.Errorf("useradd -u 1001 -g 1001 didn't run:\n%s", strings.Join(calls, "\n"))
+	}
+	for _, c := range calls {
+		if strings.Contains(c, "-u 1000") {
+			t.Errorf("the old uid came back: %q", c)
+		}
+	}
+}
+
+// Two sites provisioned at once never get one uid: the lock is held from
+// reading the mark to the end of useradd.
+func TestConcurrentProvisionsGetDifferentUIDs(t *testing.T) {
+	e := newEnv(t)
+	for _, n := range []string{"s_aa", "s_bb"} {
+		for _, id := range []string{"1000", "1001"} {
+			e.run.Add(scriptOut("/usr/sbin/groupadd -g "+id+" "+n, ""))
+			e.run.Add(scriptOut("/usr/sbin/useradd -M -d /home/"+n+" -s /usr/sbin/nologin -u "+id+" -g "+id+" "+n, ""))
+		}
+	}
+	errs := make(chan error, 2)
+	for _, n := range []string{"s_aa", "s_bb"} {
+		go func() { errs <- createSiteUser(context.Background(), e.d, n) }()
+	}
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatalf("createSiteUser: %v", err)
+		}
+	}
+	pw, _ := os.ReadFile(e.p.EtcPasswd())
+	seen := map[string]string{}
+	for line := range strings.Lines(string(pw)) {
+		f := strings.Split(line, ":")
+		if strings.HasPrefix(f[0], "s_") {
+			if other, dup := seen[f[2]]; dup {
+				t.Fatalf("%s and %s share uid %s", other, f[0], f[2])
+			}
+			seen[f[2]] = f[0]
+		}
+	}
+	if len(seen) != 2 {
+		t.Fatalf("users = %v", seen)
+	}
+	if fi, err := os.Stat(e.p.UIDLock()); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("uid.lock: %v, %v; want 0600", fi, err)
 	}
 }
