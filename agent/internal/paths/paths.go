@@ -80,6 +80,10 @@ func (p Paths) SiteState(name contract.SiteName) string {
 func (p Paths) DownloadsDir() string { return p.at("var/lib/zimam/downloads") }
 func (p Paths) CertsDir() string     { return p.at("var/lib/zimam/certs") }
 
+// UIDHighwater (root 0600) records the highest uid ever given to a site
+// user, so a deleted site's uid is never handed out again.
+func (p Paths) UIDHighwater() string { return p.at("var/lib/zimam/uid-highwater.json") }
+
 // CertRecord is a certificate's expiry record (§10): name is "panel" or a
 // site's name.
 func (p Paths) CertRecord(name string) string { return p.at("var/lib/zimam/certs", name+".json") }
@@ -113,6 +117,16 @@ func (p Paths) ProcNetTCP6() string { return p.at("proc/net/tcp6") }
 // EtcGroup lists each group's members: site.provision reads whether www-data
 // is in a site's group yet (§9.2).
 func (p Paths) EtcGroup() string { return p.at("etc/group") }
+
+// EtcPasswd and EtcLoginDefs give site.provision the uids in use and the
+// range new ones come from.
+func (p Paths) EtcPasswd() string    { return p.at("etc/passwd") }
+func (p Paths) EtcLoginDefs() string { return p.at("etc/login.defs") }
+
+// Crontab and Atq exist while cron and at are installed; site.destroy
+// clears a deleted user's jobs only then.
+func (p Paths) Crontab() string { return p.at("usr/bin/crontab") }
+func (p Paths) Atq() string     { return p.at("usr/bin/atq") }
 
 // /var/log/zimam
 

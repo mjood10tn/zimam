@@ -22,7 +22,8 @@ var (
 )
 
 const (
-	useraddCmd   = "/usr/sbin/useradd -M -d /home/s_shop -s /usr/sbin/nologin -U s_shop"
+	useraddCmd   = "/usr/sbin/useradd -M -d /home/s_shop -s /usr/sbin/nologin -u 1000 -g 1000 s_shop"
+	groupaddCmd  = "/usr/sbin/groupadd -g 1000 s_shop"
 	usermodCmd   = "/usr/sbin/usermod -aG s_shop www-data"
 	nginxTest    = "/usr/sbin/nginx -t"
 	nginxReload  = "/usr/bin/systemctl reload-or-restart nginx"
@@ -49,7 +50,7 @@ func TestProvisionStaticSequence(t *testing.T) {
 	if res != (contract.SiteProvisionResult{Name: "shop", TemplateVersion: templates.Version}) {
 		t.Errorf("result = %+v", res)
 	}
-	want := []string{useraddCmd, usermodCmd, nginxTest, nginxReload, e.logrotateTest()}
+	want := []string{groupaddCmd, useraddCmd, usermodCmd, nginxTest, nginxReload, e.logrotateTest()}
 	if got := e.calls(); !slices.Equal(got, want) {
 		t.Errorf("ran\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
@@ -87,7 +88,7 @@ func TestProvisionPHPSequence(t *testing.T) {
 	if _, err := e.provision(php84); err != nil {
 		t.Fatalf("Provision: %v", err)
 	}
-	want := []string{useraddCmd, usermodCmd, fpmTest84, fpmTest84, fpmActive84, fpmEnable84, nginxTest, nginxReload, e.logrotateTest()}
+	want := []string{groupaddCmd, useraddCmd, usermodCmd, fpmTest84, fpmTest84, fpmActive84, fpmEnable84, nginxTest, nginxReload, e.logrotateTest()}
 	if got := e.calls(); !slices.Equal(got, want) {
 		t.Errorf("ran\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}

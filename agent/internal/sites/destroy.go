@@ -115,6 +115,10 @@ func Destroy(ctx context.Context, d sysexec.Deps, h Helper, lookup Lookup, name 
 		if err := killAll(ctx, d, username); err != nil {
 			return contract.SiteNameResult{}, err
 		}
+		// Its cron and at jobs would otherwise run as whoever gets this uid.
+		if err := removeSchedules(ctx, d, username); err != nil {
+			return contract.SiteNameResult{}, err
+		}
 		// Step 4: the helper empties the home as the site user, inside an
 		// os.Root, so a symlink planted there leads nowhere outside it.
 		if exists(p.SiteHome(name)) {
@@ -246,3 +250,52 @@ func groupExists(path, group string) (bool, error) {
 }
 
 var _ Helper = (*helper.Client)(nil)
+
+const (
+	crontab = "/usr/bin/crontab"
+	atq     = "/usr/bin/atq"
+	atrm    = "/usr/bin/atrm"
+)
+
+// removeSchedules removes username's crontab and at jobs, each only when its
+// program is installed. It runs while the user still exists: crontab -u
+// needs it, and atq names no owner for a deleted user's jobs.
+func removeSchedules(ctx context.Context, d sysexec.Deps, username string) error {
+	if exists(d.Paths.Crontab()) {
+		d.Logf("Removing the crontab of %s", username)
+		_, err := d.Run.Run(ctx, sysexec.Cmd{Path: crontab, Args: []string{"-r", "-u", username}})
+		var exit *sysexec.ExitError
+		if err != nil && !(errors.As(err, &exit) && exit.Code == 1 && strings.Contains(string(exit.Stderr), "no crontab for")) {
+			return err
+		}
+	}
+	if exists(d.Paths.Atq()) {
+		res, err := d.Run.Run(ctx, sysexec.Cmd{Path: atq})
+		if err != nil {
+			return err
+		}
+		ids := atJobsOf(string(res.Stdout), username)
+		if len(ids) > 0 {
+			d.Logf("Removing %d at job(s) of %s", len(ids), username)
+			if _, err := d.Run.Run(ctx, sysexec.Cmd{Path: atrm, Args: ids}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// atJobsOf picks the ids of username's jobs out of atq's output, one job a
+// line: "<id>\t<date> <queue> <user>". The user is the whole last field, so
+// s_shop doesn't take s_shop2's jobs.
+func atJobsOf(out, username string) []string {
+	var ids []string
+	for line := range strings.Lines(out) {
+		id, rest, ok := strings.Cut(strings.TrimSpace(line), "\t")
+		f := strings.Fields(rest)
+		if ok && id != "" && len(f) > 0 && f[len(f)-1] == username {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}

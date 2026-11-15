@@ -26,10 +26,11 @@ afterwards.
 | Validation: usernames | `:`, a newline, a carriage return, an empty name | `validation.sh` |
 | Symlinks: `logs/php-error.log -> /etc/shadow`, then `logs.read` | `s_php84` swaps its PHP error log for the link (and plants an archive-named one); the read answers an error, never shadow's content, and `logs.list` doesn't list the link | `log-symlink.sh` |
 | Symlinks: a link in `site/` to `/`, then `site.destroy` | the throwaway site `probe-static` is provisioned, its user plants `site/escape -> /`, and it is destroyed: its home and user are gone, nothing else changed | `destroy-symlink.sh` |
+| Schedules and uids: `site.destroy` | the throwaway site `sb` is given a crontab (and an at job when `at` is installed) as its user and destroyed: no entry of its old uid is left in `/var/spool/cron`; provisioned again, it gets a different uid | `destroy-schedules.sh` |
 | Log archives | `../../../../etc/shadow`, absolute paths and other malformed names answer `validation_failed`; a well-formed name not in the listing answers `not_found`; a listed archive reads | `archive-names.sh` |
 | Maintenance | `s_php84` plants archive-named links to `/etc/passwd`, `/root` and `/home/s_php85` and a backdated archive; `logs.policy` sets a 1 KiB cap; `zimam-agent maintenance` deletes only regular archives in sites' own log folders, every one audited; the old policy is sent back | `maintenance.sh` |
 | Job limits | `e2e.memhog` (e2e builds only) touches 512 MiB under `MemoryMax=64M`; the job ends `failed` with `oom-kill` | `oom.sh` |
-| Proof | `fs-hash.sh` before the first probe and after the last: every entry under `/etc`, `/usr/local/sbin`, `/root` and `/home` with its type, mode, owner, link target and hash | `run-all.sh` with `../scripts/fs-hash.sh` |
+| Proof | `fs-hash.sh` before the first probe and after the last: every entry under `/etc`, `/usr/local/sbin`, `/root`, `/home` and `/var/spool/cron` with its type, mode, owner, link target and hash | `run-all.sh` with `../scripts/fs-hash.sh` |
 
 Beyond §14.4, `journal-paging.sh` checks `logs.read`'s journal paging
 (design §11.2) against the real `journalctl`: pages of 3 back and forward

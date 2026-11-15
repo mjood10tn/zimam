@@ -168,10 +168,14 @@ func (r hookRunner) Run(ctx context.Context, c sysexec.Cmd) (sysexec.Result, err
 		return res, err
 	}
 	switch c.Path {
+	case "/usr/sbin/groupadd":
+		// groupadd -g N name
+		r.env.appendGroup(fmt.Sprintf("%s:x:%s:\n", c.Args[2], c.Args[1]))
 	case "/usr/sbin/useradd":
+		// useradd -M -d home -s shell -u N -g N name
 		name := c.Args[len(c.Args)-1]
 		r.env.users[name] = true
-		r.env.appendGroup(fmt.Sprintf("%s:x:%d:\n", name, os.Getgid()))
+		r.env.appendPasswd(fmt.Sprintf("%s:x:%s:%s::/home/%s:/usr/sbin/nologin\n", name, c.Args[slices.Index(c.Args, "-u")+1], c.Args[slices.Index(c.Args, "-g")+1], name))
 	case "/usr/bin/systemctl":
 		// FPM makes each pool's socket once it has started or reloaded.
 		if len(c.Args) >= 2 && (c.Args[0] == "reload" || c.Args[0] == "enable") && !r.env.noSockets {
@@ -179,6 +183,20 @@ func (r hookRunner) Run(ctx context.Context, c sysexec.Cmd) (sysexec.Result, err
 		}
 	case "/usr/sbin/userdel":
 		delete(r.env.users, c.Args[0])
+		n := r.env.p.EtcPasswd()
+		b, err := os.ReadFile(n)
+		if err != nil {
+			return res, err
+		}
+		var kept []string
+		for line := range strings.Lines(string(b)) {
+			if !strings.HasPrefix(line, c.Args[0]+":") {
+				kept = append(kept, line)
+			}
+		}
+		if err := os.WriteFile(n, []byte(strings.Join(kept, "")), 0o644); err != nil {
+			return res, err
+		}
 	case "/usr/sbin/groupdel":
 		b, err := os.ReadFile(r.env.p.EtcGroup())
 		if err != nil {
@@ -261,8 +279,10 @@ func newEnv(t *testing.T) *env {
 		writeFile(t, e.p.PHPFPMBinary(v), "")
 	}
 	writeFile(t, e.p.EtcGroup(), "root:x:0:\nwww-data:x:33:\n")
+	writeFile(t, e.p.EtcPasswd(), "root:x:0:0:root:/root:/bin/bash\nwww-data:x:33:33:www-data:/var/www:/usr/sbin/nologin\nnobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\n")
 	for _, s := range []sysexec.Script{
-		{Path: "/usr/sbin/useradd", Args: []string{"-M", "-d", "/home/s_shop", "-s", "/usr/sbin/nologin", "-U", "s_shop"}},
+		{Path: "/usr/sbin/groupadd", Args: []string{"-g", "1000", "s_shop"}},
+		{Path: "/usr/sbin/useradd", Args: []string{"-M", "-d", "/home/s_shop", "-s", "/usr/sbin/nologin", "-u", "1000", "-g", "1000", "s_shop"}},
 		{Path: "/usr/sbin/usermod", Args: []string{"-aG", "s_shop", "www-data"}},
 		{Path: "/usr/sbin/nginx", Args: []string{"-t"}},
 		{Path: "/usr/bin/systemctl", Args: []string{"reload-or-restart", "nginx"}},
@@ -290,6 +310,17 @@ func (e *env) account(name string) (helper.Account, error) {
 		return helper.Account{}, user.UnknownUserError(name)
 	}
 	return helper.Account{Name: name, UID: uint32(os.Getuid()), GID: uint32(os.Getgid()), Home: "/home/" + name}, nil
+}
+
+func (e *env) appendPasswd(line string) {
+	f, err := os.OpenFile(e.p.EtcPasswd(), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(line); err != nil {
+		e.t.Fatal(err)
+	}
 }
 
 func (e *env) appendGroup(line string) {

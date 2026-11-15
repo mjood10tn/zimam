@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/user"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -161,8 +162,13 @@ func ensureUser(ctx context.Context, d sysexec.Deps, lookup Lookup, name contrac
 	username := "s_" + string(name)
 	a, err := lookup(username)
 	if errors.As(err, new(user.UnknownUserError)) {
+		var uid int
+		if uid, err = newSiteIDs(ctx, d, username); err != nil {
+			return helper.Account{}, err
+		}
 		d.Logf("Creating the user %s", username)
-		if _, err := d.Run.Run(ctx, sysexec.Cmd{Path: useradd, Args: []string{"-M", "-d", "/home/" + username, "-s", "/usr/sbin/nologin", "-U", username}}); err != nil {
+		id := strconv.Itoa(uid)
+		if _, err = d.Run.Run(ctx, sysexec.Cmd{Path: useradd, Args: []string{"-M", "-d", "/home/" + username, "-s", "/usr/sbin/nologin", "-u", id, "-g", id, username}}); err != nil {
 			return helper.Account{}, err
 		}
 		a, err = lookup(username)
