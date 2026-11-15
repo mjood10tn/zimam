@@ -63,7 +63,7 @@ func fixed(s sysexec.Script) script { return func(paths.Paths) sysexec.Script { 
 // logrotateRun is maintenance's logrotate run, exiting with code.
 func logrotateRun(code int) script {
 	return func(p paths.Paths) sysexec.Script {
-		s := sysexec.Script{Path: logrotate, Args: []string{"--state", p.LogrotateState(), p.LogrotateConf()}}
+		s := sysexec.Script{Path: logrotate, Args: []string{"--state", p.LogrotateState(), p.OwnLogrotateConf()}}
 		s.Result.ExitCode = code
 		if code != 0 {
 			s.Result.Stderr = []byte("error: skipping")
@@ -289,13 +289,13 @@ func TestMaintenanceRestoresAnAbandonedConfigChange(t *testing.T) {
 }
 
 // Zimam's own rules rotate with Zimam's own state file, never Ubuntu's
-// (§11.3).
+// (§11.3). With no site, only its own rules file runs.
 func TestMaintenanceRunsLogrotateWithZimamState(t *testing.T) {
 	e := newEnv(t)
 	if err := e.maintain(); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	want := logrotate + " --state " + e.d.Paths.LogrotateState() + " " + e.d.Paths.LogrotateConf()
+	want := logrotate + " --state " + e.d.Paths.LogrotateState() + " " + e.d.Paths.OwnLogrotateConf()
 	if got := e.commandLines(); !slices.Equal(got, []string{want}) {
 		t.Errorf("ran %q, want only %q", got, want)
 	}
@@ -574,5 +574,69 @@ func TestMaintenanceWaitsForItsLock(t *testing.T) {
 	}
 	if calls := e.commandLines(); len(calls) != 0 || e.jobs.calls.Load() != 0 {
 		t.Errorf("ran %q and reconciled %d times while another run held the lock", calls, e.jobs.calls.Load())
+	}
+}
+
+// blockingJobs is a job manager whose Reconcile hangs until its context ends.
+type blockingJobs struct{}
+
+func (blockingJobs) Reconcile(ctx context.Context) (int, error) {
+	<-ctx.Done()
+	return 0, ctx.Err()
+}
+
+// ctxRunner records whether each command's context was still live when it ran.
+type ctxRunner struct {
+	sysexec.Runner
+	mu   sync.Mutex
+	live map[string]bool
+}
+
+func (r *ctxRunner) Run(ctx context.Context, c sysexec.Cmd) (sysexec.Result, error) {
+	r.mu.Lock()
+	r.live[c.Path] = ctx.Err() == nil
+	r.mu.Unlock()
+	return r.Runner.Run(ctx, c)
+}
+
+// A step that uses up its budget is cancelled alone: the steps after it get
+// their own contexts.
+func TestStepTimeoutDoesNotCancelLaterSteps(t *testing.T) {
+	defer func(l stepLimits) { limits = l }(limits)
+	limits.reconcile = 100 * time.Millisecond
+	e := newEnv(t)
+	r := &ctxRunner{Runner: e.d.Run, live: map[string]bool{}}
+	e.d.Run = r
+	err := Run(context.Background(), e.d, blockingJobs{}, Homes{}, audit.Writer{Paths: e.d.Paths})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Run = %v, want the reconcile step's timeout", err)
+	}
+	if live, ran := r.live[logrotate]; !ran || !live {
+		t.Errorf("logrotate ran=%v with a live context=%v after reconcile timed out, want both", ran, live)
+	}
+}
+
+// A run that hit a rotation budget is a run that changed something: it is
+// audited, with the rules files that timed out.
+func TestRotationTimeoutIsAudited(t *testing.T) {
+	defer func(d time.Duration) { perFileBudget = d }(perFileBudget)
+	perFileBudget = 100 * time.Millisecond
+	e := newEnv(t)
+	writeRules(t, e.d.Paths, "site-a.conf")
+	a := filepath.Join(e.d.Paths.LogrotateDir(), "site-a.conf")
+	e.d.Run = &rotateRunner{block: map[string]bool{a: true}}
+	if err := e.maintain(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	entries := auditEntries(t, e.d.Paths)
+	if len(entries) != 1 {
+		t.Fatalf("audit log has %d entries, want 1: %v", len(entries), entries)
+	}
+	params, _ := entries[0]["params"].(map[string]any)
+	if got, _ := params["rotation_timeouts"].([]any); len(got) != 1 || got[0] != a {
+		t.Errorf("params %v, want rotation_timeouts [%s]", params, a)
+	}
+	if entries[0]["outcome"] != "ok" {
+		t.Errorf("outcome %v, want ok: a timed-out file isn't a failed run", entries[0]["outcome"])
 	}
 }

@@ -10,6 +10,9 @@
 # site's log folders and the links with their targets must otherwise be as
 # they were. logs.policy rewrites /etc, so the old policy is sent back at
 # the end, which run-all.sh's snapshots check; it runs this probe last.
+# Then s_php84 leaves a sparse logs/x.log of 8 GiB; a run of maintenance
+# must still rotate s_php85's 201 MiB access log, each site having its own
+# logrotate run and time budget.
 # shellcheck source=lib.sh
 source "$(dirname "$0")/lib.sh"
 
@@ -34,6 +37,7 @@ restore() {
 	for name in "${!links[@]}" "$planted"; do
 		as_site rm -f "$logs/$name"
 	done
+	as_site bash -c "rm -f $logs/x.log $logs/x.log-*"
 	run_job logs.policy "$policy"
 	in_c systemctl start zimam-maintenance.timer
 }
@@ -115,4 +119,24 @@ for name in "${!links[@]}"; do
 		fail "logs/$name is gone or changed"
 	fi
 done
+
+# One site's huge sparse log mustn't hold up another site's rotation.
+other=/var/log/zimam/sites/php85
+as_site truncate -s 8G "$logs/x.log"
+[[ $(in_c stat -c %s "$logs/x.log") == 8589934592 ]] || die "logs/x.log isn't 8 GiB"
+in_c truncate -s 201M "$other/access.log"
+pass "$user left a sparse logs/x.log of 8 GiB, and $other/access.log is 201 MiB"
+if out=$(in_c /usr/local/sbin/zimam-agent maintenance 2>&1); then
+	pass "zimam-agent maintenance exited 0 with the sparse log in place"
+else
+	fail "zimam-agent maintenance failed with the sparse log in place: ${out:0:500}"
+fi
+size=$(in_c stat -c %s "$other/access.log")
+if ((size < 1048576)); then
+	pass "$other/access.log was rotated in the same run ($size bytes now)"
+else
+	fail "$other/access.log is still $size bytes: the sparse log held up its rotation"
+fi
+as_site bash -c "rm -f $logs/x.log $logs/x.log-*"
+pass "logs/x.log and its archives are removed"
 exit "$failed"

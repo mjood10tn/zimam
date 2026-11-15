@@ -1,6 +1,6 @@
 // Package maintenance is `zimam-agent maintenance`, which
 // zimam-maintenance.timer runs every 15 minutes (design §11.3). It settles
-// dead jobs, rotates Zimam's logs, counts the pending updates hourly and
+// dead jobs, rotates Zimam's and every site's logs, counts the pending updates hourly and
 // refreshes the sury keyring weekly.
 package maintenance
 
@@ -25,6 +25,33 @@ import (
 
 const logrotate = "/usr/sbin/logrotate"
 
+// runBudget bounds the whole run, under the unit's TimeoutStartSec=20min.
+// Each step gets its own context from it, so one step that runs out of time
+// doesn't cancel the steps after it.
+var runBudget = 18 * time.Minute
+
+// stepLimits is the longest each step may take; the run's budget caps them
+// all. Rotation has its own: perFileBudget for each rules file, and the whole
+// step ends rotationReserve before the run's budget, so the steps after it
+// still have time.
+type stepLimits struct {
+	reconcile, updates, caps, keyring time.Duration
+	rotationReserve                   time.Duration
+}
+
+var limits = stepLimits{
+	reconcile:       2 * time.Minute,
+	updates:         3 * time.Minute,
+	caps:            3 * time.Minute,
+	keyring:         3 * time.Minute,
+	rotationReserve: 5 * time.Minute,
+}
+
+// step returns the context of one step: at most limit, never past the run's.
+func step(ctx context.Context, limit time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, limit)
+}
+
 // Jobs is the part of the job manager maintenance uses.
 type Jobs interface {
 	Reconcile(ctx context.Context) (int, error)
@@ -44,9 +71,10 @@ const keyringRefreshEvery = 7 * 24 * time.Hour
 type changes struct {
 	RestoredConfigs  []string `json:"restored_configs,omitempty"` // undone after their process died
 	ReconciledJobs   int      `json:"reconciled_jobs"`
-	KeyringRefreshed bool     `json:"keyring_refreshed"`          // the repository's files changed
-	DeletedArchives  []string `json:"deleted_archives,omitempty"` // over a site's log cap (§11.4)
-	PrunedJobs       int      `json:"pruned_jobs"`                // older than the log retention period
+	KeyringRefreshed bool     `json:"keyring_refreshed"`           // the repository's files changed
+	DeletedArchives  []string `json:"deleted_archives,omitempty"`  // over a site's log cap (§11.4)
+	PrunedJobs       int      `json:"pruned_jobs"`                 // older than the log retention period
+	RotationTimeouts []string `json:"rotation_timeouts,omitempty"` // rules files whose logrotate ran out of its budget
 }
 
 // Run is one maintenance run, which never overlaps another. Its steps don't
@@ -64,6 +92,8 @@ func Run(ctx context.Context, d sysexec.Deps, j Jobs, homes Homes, w interface{ 
 	}
 	defer unlock()
 
+	runCtx, cancelRun := context.WithTimeout(ctx, runBudget)
+	defer cancelRun()
 	var c changes
 	var errs []error
 	// First, so nothing below runs or reloads against an untested file.
@@ -74,20 +104,30 @@ func Run(ctx context.Context, d sysexec.Deps, j Jobs, homes Homes, w interface{ 
 	for _, path := range c.RestoredConfigs {
 		d.Logf("Restored %s, left untested by a change whose process died", path)
 	}
-	c.ReconciledJobs, err = j.Reconcile(ctx)
+	sctx, cancel := step(runCtx, limits.reconcile)
+	c.ReconciledJobs, err = j.Reconcile(sctx)
+	cancel()
 	if err != nil {
 		errs = append(errs, fmt.Errorf("reconciling jobs: %w", err))
 	}
 	if c.ReconciledJobs > 0 {
 		d.Logf("Reconciled %d jobs", c.ReconciledJobs)
 	}
-	if err := refreshUpdates(ctx, d); err != nil {
+	sctx, cancel = step(runCtx, limits.updates)
+	err = refreshUpdates(sctx, d)
+	cancel()
+	if err != nil {
 		errs = append(errs, err)
 	}
-	if err := rotateLogs(ctx, d); err != nil {
+	rctx, cancel := rotationStep(runCtx)
+	c.RotationTimeouts, err = rotateEach(rctx, d, perFileBudget)
+	cancel()
+	if err != nil {
 		errs = append(errs, err)
 	}
-	c.DeletedArchives, err = enforceCaps(ctx, d, homes)
+	sctx, cancel = step(runCtx, limits.caps)
+	c.DeletedArchives, err = enforceCaps(sctx, d, homes)
+	cancel()
 	if err != nil {
 		errs = append(errs, fmt.Errorf("enforcing the per-site log cap: %w", err))
 	}
@@ -95,12 +135,14 @@ func Run(ctx context.Context, d sysexec.Deps, j Jobs, homes Homes, w interface{ 
 	if err != nil {
 		errs = append(errs, fmt.Errorf("pruning old jobs: %w", err))
 	}
-	c.KeyringRefreshed, err = refreshKeyring(ctx, d)
+	sctx, cancel = step(runCtx, limits.keyring)
+	c.KeyringRefreshed, err = refreshKeyring(sctx, d)
+	cancel()
 	if err != nil {
 		errs = append(errs, err)
 	}
 	err = errors.Join(errs...)
-	if len(c.RestoredConfigs) == 0 && c.ReconciledJobs == 0 && !c.KeyringRefreshed && len(c.DeletedArchives) == 0 && c.PrunedJobs == 0 {
+	if len(c.RestoredConfigs) == 0 && c.ReconciledJobs == 0 && !c.KeyringRefreshed && len(c.DeletedArchives) == 0 && c.PrunedJobs == 0 && len(c.RotationTimeouts) == 0 {
 		return err
 	}
 	outcome := "ok"
@@ -116,16 +158,6 @@ func Run(ctx context.Context, d sysexec.Deps, j Jobs, homes Homes, w interface{ 
 		DurationMS: d.Now().Sub(start).Milliseconds(),
 	})
 	return errors.Join(err, aerr)
-}
-
-// rotateLogs runs logrotate over Zimam's rules with Zimam's own state file,
-// never Ubuntu's (§11.3).
-func rotateLogs(ctx context.Context, d sysexec.Deps) error {
-	_, err := d.Run.Run(ctx, sysexec.Cmd{Path: logrotate, Args: []string{"--state", d.Paths.LogrotateState(), d.Paths.LogrotateConf()}})
-	if err != nil {
-		return fmt.Errorf("rotating logs: %w", err)
-	}
-	return nil
 }
 
 // refreshRecord is keyring-refresh.json: maintenance's last try at

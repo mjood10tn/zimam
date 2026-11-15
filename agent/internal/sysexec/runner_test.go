@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -216,4 +218,41 @@ func TestTryLock(t *testing.T) {
 		t.Fatalf("TryLock after unlock = %v, %v; want it taken", ok, err)
 	}
 	unlock()
+}
+
+// A killed run takes its whole process group with it: logrotate's gzip child
+// would otherwise keep running as the tenant after logrotate is gone.
+func TestKillGroupKillsGrandchildren(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "grandchild.pid")
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	_, err := ExecRunner{}.Run(ctx, Cmd{
+		Path:      "/bin/sh",
+		Args:      []string{"-c", "sleep 60 & echo $! >" + pidFile + "; wait"},
+		KillGroup: true,
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Run = %v, want context.DeadlineExceeded", err)
+	}
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		// A killed child stays a zombie until its parent reaps it; the
+		// orphan is reaped by init, which may take a moment.
+		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
+			return
+		}
+		if time.Now().After(deadline) {
+			syscall.Kill(pid, syscall.SIGKILL)
+			t.Fatalf("grandchild %d is still alive after the run's context ended", pid)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
