@@ -49,11 +49,22 @@ test('Settings: the display time zone moves the times the panel shows', async ({
     await page.reload();
     await expect(page.getByRole('button', { name: /^Time zone/ })).toContainText(zone);
   };
-  // A finished job's "Finished" time as the page shows it, in milliseconds.
+  // One succeeded job's page, picked once, so both zones read the same
+  // job's Finished time: a job that finishes in between, or one still
+  // running, can't take its place.
+  let job = '';
+  // That job's "Finished" time as the page shows it, in milliseconds.
   const finished = async (): Promise<number> => {
-    await page.goto(`${panel}/admin/agent-jobs`);
-    // A finished job, so the page has a Finished time.
-    await page.locator('table tbody tr').filter({ hasText: 'Succeeded' }).first().locator('td').first().click();
+    if (job === '') {
+      await page.goto(`${panel}/admin/agent-jobs`);
+      const row = page.locator('table tbody tr').filter({ has: page.getByText('Succeeded', { exact: true }) }).first();
+      await expect(row).toBeVisible();
+      await row.locator('td').first().click();
+      await page.waitForURL(/\/admin\/agent-jobs\/\d+$/);
+      job = page.url();
+    } else {
+      await page.goto(job);
+    }
     const entry = page.locator('.fi-in-entry').filter({ hasText: 'Finished' }).first();
     await expect(entry).toContainText(stamp);
     const m = stamp.exec((await entry.textContent()) ?? '');
