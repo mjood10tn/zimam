@@ -9,8 +9,9 @@ name: release
 #   itself, takes nothing from panel but the tarball (hashed, never
 #   unpacked), signs, and runs every gate.
 # - vps runs vps.yml: every e2e scenario and probe on fresh Hetzner Cloud
-#   servers, amd64 and arm64 (design §14.3). It gets HCLOUD_TOKEN only,
-#   never the signing key, since it runs Composer and npm.
+#   servers, amd64 and arm64 (design §14.3). It never gets the signing key,
+#   since it runs Composer and npm; HCLOUD_TOKEN reaches only its create and
+#   delete jobs, which run neither.
 # - publish, the one job with write access, creates the GitHub release once
 #   every gate has passed.
 on:
@@ -47,6 +48,9 @@ jobs:
 
   build:
     needs: panel
+    # RELEASE_SIGNING_KEY lives in this environment, which only v* tags reach,
+    # after the owner approves.
+    environment: release
     runs-on: ubuntu-26.04
     outputs:
       # publish downloads this exact artifact: another job in the run could

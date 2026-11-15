@@ -4,8 +4,10 @@ name: vps
 # fresh Hetzner Cloud server per architecture (D2), installed from an e2e
 # release against Let's Encrypt staging with UFW on, its names from
 # sslip.io. release.yml calls it before publishing; it can also be started
-# by hand. See e2e/vps/README.md. HCLOUD_TOKEN reaches only the steps that
-# create and delete the server, never the build or the tests.
+# by hand. See e2e/vps/README.md. HCLOUD_TOKEN reaches only the create and
+# delete jobs, which check the repository out fresh, set nothing up and run
+# no package code. The vps job between them builds and tests with Composer
+# and npm code and gets only this run's server: its address and SSH key.
 on:
   workflow_call:
     secrets:
@@ -29,7 +31,39 @@ env:
     497c36c1b50c0daff30870d5908c9b97af29223d5510c5e6c24957d0cc502fb8
 
 jobs:
+  create:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      E2E_GOARCH: ${{ matrix.arch }}
+      E2E_VPS_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: work directory
+        run: echo "E2E_WORK=$RUNNER_TEMP/zimam-e2e" >>"$GITHUB_ENV"
+      - name: create the server, wait for SSH and sslip.io
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: bash e2e/vps/create.sh
+      # The server's address and the throwaway key that opens it, for the vps
+      # job. The key opens only this run's server, for a day at most.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vps-access-${{ matrix.arch }}
+          path: ${{ runner.temp }}/zimam-e2e/access/
+          retention-days: 1
+          if-no-files-found: error
+
   vps:
+    needs: create
     strategy:
       fail-fast: false
       matrix:
@@ -43,6 +77,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: work directory
+        run: echo "E2E_WORK=$RUNNER_TEMP/zimam-e2e" >>"$GITHUB_ENV"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: vps-access-${{ matrix.arch }}
+          path: ${{ runner.temp }}/zimam-e2e/access
+      - name: reach the server create made
+        run: bash e2e/vps/attach.sh >>"$GITHUB_ENV"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: agent/go.mod
@@ -60,14 +102,6 @@ jobs:
           cache-dependency-path: |
             panel/package-lock.json
             e2e/browser/package-lock.json
-      - name: work directory
-        run: echo "E2E_WORK=$RUNNER_TEMP/zimam-e2e" >>"$GITHUB_ENV"
-      - name: create the server, wait for SSH and sslip.io
-        env:
-          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
-        run: |
-          bash e2e/vps/create.sh
-          cat "$E2E_WORK/vps.env" >>"$GITHUB_ENV"
       - name: build the e2e release, the contract copy and the probe tools
         run: bash e2e/scripts/build.sh
       - name: serve the release on the server
@@ -102,8 +136,27 @@ jobs:
         with:
           name: vps-logs-${{ matrix.arch }}
           path: ${{ runner.temp }}/zimam-e2e/logs
+
+  # Runs whatever create and vps did, failed or cancelled included, so a
+  # half-created server goes too; keep_server leaves both for vps-sweep.yml.
+  delete:
+    needs: [create, vps]
+    if: always() && !inputs.keep_server
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      E2E_VPS_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: delete the server
-        if: always() && !inputs.keep_server
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
         run: bash e2e/vps/destroy.sh

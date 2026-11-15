@@ -5,9 +5,11 @@
 # SSH and cloud-init, stops apt's own timers so nothing upgrades packages
 # while the probes compare /etc, fetches Let's Encrypt's staging roots and
 # checks them against the pins in STAGING_ROOT_SHA256, and waits for
-# sslip.io to answer the test names. Writes state.env, and vps.env with the
-# settings the later steps need (vps.yml adds it to GITHUB_ENV).
-# Needs HCLOUD_TOKEN.
+# sslip.io to answer the test names. Writes everything the later steps need
+# under $E2E_WORK/access/: server.env, state.env, staging-roots.pem,
+# known_hosts, the key pair in ssh/, and vps.env with the settings for
+# GITHUB_ENV. vps.yml hands that directory to the job that builds and tests,
+# which has no token. Needs HCLOUD_TOKEN.
 set -Eeuo pipefail
 
 : "${E2E_WORK:?}" "${E2E_GOARCH:?amd64 or arm64}" "${E2E_VPS_TAG:?}" "${HCLOUD_TOKEN:?}" "${STAGING_ROOT_SHA256:?}"
@@ -18,17 +20,18 @@ die() {
 	exit 1
 }
 
-mkdir -p "$E2E_WORK/ssh"
-chmod 0700 "$E2E_WORK/ssh"
-key=$E2E_WORK/ssh/id_ed25519
+access=$E2E_WORK/access
+mkdir -p "$access/ssh"
+chmod 0700 "$access" "$access/ssh"
+key=$access/ssh/id_ed25519
 rm -f "$key" "$key.pub"
 ssh-keygen -q -t ed25519 -N '' -C "zimam-vps-$E2E_VPS_TAG" -f "$key"
 
-python3 -I "$here/hcloud.py" create "$E2E_VPS_TAG" "$E2E_GOARCH" "$key.pub" >"$E2E_WORK/server.env"
+python3 -I "$here/hcloud.py" create "$E2E_VPS_TAG" "$E2E_GOARCH" "$key.pub" >"$access/server.env"
 # shellcheck source=/dev/null
-source "$E2E_WORK/server.env"
+source "$access/server.env"
 domain=${IPV4//./-}.sslip.io
-cat >"$E2E_WORK/vps.env" <<EOF
+cat >"$access/vps.env" <<EOF
 E2E_TARGET=vps
 E2E_SSH=root@$IPV4
 E2E_SSH_KEY=$key
@@ -36,7 +39,7 @@ E2E_DOMAIN=$domain
 EOF
 set -a
 # shellcheck source=/dev/null
-source "$E2E_WORK/vps.env"
+source "$access/vps.env"
 set +a
 lxc() { E2E_WORK=$E2E_WORK "$here/lxc-ssh" "$@"; }
 log "server $SERVER_ID ($SERVER_TYPE, $LOCATION, $IMAGE): $IPV4, $IPV6; names under $domain"
@@ -47,16 +50,18 @@ until lxc exec c -- true 2>/dev/null; do
 	sleep 5
 done
 log "SSH answers"
+# The host key this run accepted, so the next job checks it instead of
+# accepting whatever answers.
+cp "$E2E_WORK/known_hosts" "$access/known_hosts"
 lxc exec c -- cloud-init status --wait >/dev/null || log "cloud-init ended with an error; carrying on"
 lxc exec c -- systemctl stop apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service unattended-upgrades.service
 lxc exec c -- bash -c 'while pgrep -x "apt|apt-get|dpkg|unattended-upgr" >/dev/null; do sleep 2; done'
-# shellcheck disable=SC2016 # expanded on the server
-client=$(lxc exec c -- bash -c 'echo ${SSH_CLIENT%% *}')
-[[ -n $client ]] || die "the server didn't report this host's address"
-printf 'BRIDGE=127.0.0.1\nCIP=%s\nCIP6=%s\nCLIENT=%s\n' "$IPV4" "$IPV6" "$client" >"$E2E_WORK/state.env"
-log "this host is $client to the server; uname: $(lxc exec c -- uname -m)"
+# CLIENT, this host's address as the server sees it, is added by attach.sh
+# in the job that tests: that job runs on another runner.
+printf 'BRIDGE=127.0.0.1\nCIP=%s\nCIP6=%s\n' "$IPV4" "$IPV6" >"$access/state.env"
+log "uname on the server: $(lxc exec c -- uname -m)"
 
-roots=$E2E_WORK/staging-roots.pem
+roots=$access/staging-roots.pem
 : >"$roots"
 for name in letsencrypt-stg-root-x1 letsencrypt-stg-root-x2; do
 	curl -fsS -o "$E2E_WORK/$name.pem" "https://letsencrypt.org/certs/staging/$name.pem"
