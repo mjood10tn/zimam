@@ -120,7 +120,7 @@ func Run(ctx context.Context, d sysexec.Deps, h DeployHelper, lookup sites.Looku
 	}
 	id := releaseID(now, sha)
 	rel := releasesDir + "/" + string(id)
-	previous, err := b.liveRelease(ctx)
+	previous, err := liveRelease(ctx, h, a)
 	if err != nil {
 		return contract.SiteDeployResult{}, err
 	}
@@ -140,24 +140,18 @@ func Run(ctx context.Context, d sysexec.Deps, h DeployHelper, lookup sites.Looku
 	d.Logf("Making %s live", id)
 	// after collects what fails once the release is live.
 	var after []error
-	if err := h.SymlinkSwap(ctx, a, currentLink, "releases/"+string(id)); err != nil {
-		// A swap can fail after its rename landed: a cancel seen late, or a
-		// failed sync of site/. Only current itself says whether the new
-		// release is live, and a live one must never be removed.
-		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
-		now, serr := b.liveRelease(sctx)
-		cancel()
-		switch {
-		case serr == nil && now == string(id):
-			d.Logf("Swapping current reported an error, but current points at %s: it is live", id)
-			after = append(after, fmt.Errorf("swapping current reported: %w", err))
-		case serr == nil && now == previous:
-			b.discard(rel, previous)
-			return contract.SiteDeployResult{}, err
-		default:
-			d.Logf("Where current points is unknown after the failed swap; ~/%s stays for the next deploy's prune", rel)
-			return contract.SiteDeployResult{}, errors.Join(err, serr)
-		}
+	// A release a failed swap made live stays, and is recorded.
+	switch live, settled, err := swapCurrent(ctx, h, a, string(id), previous); {
+	case err == nil:
+	case live:
+		d.Logf("Swapping current reported an error, but current points at %s: it is live", id)
+		after = append(after, fmt.Errorf("swapping current reported: %w", err))
+	case settled:
+		b.discard(rel, previous)
+		return contract.SiteDeployResult{}, err
+	default:
+		d.Logf("Where current points is unknown after the failed swap; ~/%s stays for the next deploy's prune", rel)
+		return contract.SiteDeployResult{}, err
 	}
 	res := contract.SiteDeployResult{Name: p.Name, Release: id, Commit: sha}
 	if prev := contract.ReleaseID(previous); prev.Validate() == nil {
@@ -346,8 +340,8 @@ func (b *build) repairRepo(ref string) error {
 
 // liveRelease is the name of the release current points at, such as
 // "initial" or a release id, or "" when current points elsewhere.
-func (b *build) liveRelease(ctx context.Context) (string, error) {
-	fi, err := b.h.Stat(ctx, b.a, currentLink)
+func liveRelease(ctx context.Context, h statter, a helper.Account) (string, error) {
+	fi, err := h.Stat(ctx, a, currentLink)
 	if errors.Is(err, fs.ErrNotExist) {
 		return "", nil
 	}
@@ -359,6 +353,44 @@ func (b *build) liveRelease(ctx context.Context) (string, error) {
 		return "", nil
 	}
 	return name, nil
+}
+
+// statter and swapper are the helper operations liveRelease and
+// swapCurrent need.
+type statter interface {
+	Stat(ctx context.Context, a helper.Account, name string) (helper.FileInfo, error)
+}
+
+type swapper interface {
+	statter
+	SymlinkSwap(ctx context.Context, a helper.Account, link, target string) error
+}
+
+// swapCurrent points current at releases/<name>, for a deploy and a
+// rollback alike. A swap can fail after its rename landed: a cancel seen
+// late, or a failed sync of site/. Only current itself then says whether
+// name is live, and a live release must never be removed or left out of
+// the state, so on an error current is read back, even after a cancel:
+//
+//   - it points at name: live is true, with the swap's error;
+//   - it still points at previous: settled is true, and nothing changed;
+//   - otherwise, or when it can't be read, neither is: the error is the
+//     swap's joined with the read's, and what is live is unknown.
+func swapCurrent(ctx context.Context, h swapper, a helper.Account, name, previous string) (live, settled bool, err error) {
+	err = h.SymlinkSwap(ctx, a, currentLink, "releases/"+name)
+	if err == nil {
+		return true, true, nil
+	}
+	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+	defer cancel()
+	now, serr := liveRelease(sctx, h, a)
+	switch {
+	case serr == nil && now == name:
+		return true, true, err
+	case serr == nil && now == previous:
+		return false, true, err
+	}
+	return false, false, errors.Join(err, serr)
 }
 
 // build is steps 4 to 8 into rel.

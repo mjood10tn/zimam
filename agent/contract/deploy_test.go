@@ -259,6 +259,15 @@ func TestSiteDeployKeepReleases(t *testing.T) {
 // site.deploy's result names the release live before the deploy, when that
 // was a deployed release: a provisioned site's first deploy replaces
 // "initial", which is no release id, so the field is left out.
+// site.releases reports what the state and the disk disagree on in lists of
+// their own, and every list is an array, never null (the schema says so).
+func TestSiteReleasesResultLists(t *testing.T) {
+	b, err := json.Marshal(NewSiteReleasesResult("shop"))
+	if want := `{"name":"shop","releases":[],"missing":[],"unlisted":[]}`; err != nil || string(b) != want {
+		t.Errorf("Marshal = %s, %v; want %s", b, err, want)
+	}
+}
+
 func TestSiteDeployResultPreviousRelease(t *testing.T) {
 	prev := ReleaseID("20261115120000-1111111")
 	for _, c := range []struct {

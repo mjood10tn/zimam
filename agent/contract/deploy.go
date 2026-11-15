@@ -320,10 +320,24 @@ type Release struct {
 	Active  bool      `json:"active"`
 }
 
-// SiteReleasesResult is a site's kept releases, newest first.
+// SiteReleasesResult is a site's kept releases, newest first: those the
+// state file lists and whose directory is there, the only ones a rollback
+// takes. Where the state and the disk disagree, nothing is trusted, only
+// reported: Missing is what the state lists without a directory (a rollback
+// refuses it), and Unlisted is release directories the state doesn't list,
+// such as a deploy's that is still building or failed to clean up (never
+// offered). Both are newest first.
 type SiteReleasesResult struct {
-	Name     SiteName  `json:"name"`
-	Releases []Release `json:"releases"`
+	Name     SiteName    `json:"name"`
+	Releases []Release   `json:"releases"`
+	Missing  []ReleaseID `json:"missing"`
+	Unlisted []ReleaseID `json:"unlisted"`
+}
+
+// NewSiteReleasesResult is name's result with every list empty, so each
+// encodes as [], never null.
+func NewSiteReleasesResult(name SiteName) SiteReleasesResult {
+	return SiteReleasesResult{Name: name, Releases: []Release{}, Missing: []ReleaseID{}, Unlisted: []ReleaseID{}}
 }
 
 // SiteEnvReadResult is a site's shared .env (R02-D10).
