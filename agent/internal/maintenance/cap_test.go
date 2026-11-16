@@ -19,20 +19,32 @@ import (
 	"zimam/agent/internal/sysexec"
 )
 
-// homeHelper is a site's logs/ folder in memory, as the helper lists it.
+// homeHelper is a site's logs/ folder in memory, as the helper lists it,
+// and a laravel site's site/shared/storage/logs when shared is set.
 type homeHelper struct {
 	entries map[string]helper.FileInfo // by name inside logs/
+	shared  map[string]helper.FileInfo // by name inside site/shared/storage/logs; nil: not there
 	removed []string
 	listed  int
+	dirs    []string // the directories listed, in order
 }
+
+const laravelLogs = "site/shared/storage/logs"
 
 func (h *homeHelper) List(_ context.Context, a helper.Account, dir string) (helper.Listing, error) {
 	h.listed++
-	if dir != "logs" {
+	h.dirs = append(h.dirs, dir)
+	entries := h.entries
+	switch {
+	case dir == laravelLogs && h.shared == nil:
+		return helper.Listing{}, fmt.Errorf("list %s: %w", dir, fs.ErrNotExist)
+	case dir == laravelLogs:
+		entries = h.shared
+	case dir != "logs":
 		return helper.Listing{}, fmt.Errorf("listed %s", dir)
 	}
 	var l helper.Listing
-	for _, fi := range h.entries {
+	for _, fi := range entries {
 		l.Entries = append(l.Entries, fi)
 	}
 	sort.Slice(l.Entries, func(i, j int) bool { return l.Entries[i].Name < l.Entries[j].Name })
@@ -41,6 +53,10 @@ func (h *homeHelper) List(_ context.Context, a helper.Account, dir string) (help
 
 func (h *homeHelper) RemoveTree(_ context.Context, a helper.Account, name string) error {
 	h.removed = append(h.removed, a.Name+" "+name)
+	if rest, ok := strings.CutPrefix(name, laravelLogs+"/"); ok {
+		delete(h.shared, rest)
+		return nil
+	}
 	delete(h.entries, strings.TrimPrefix(name, "logs/"))
 	return nil
 }
@@ -349,5 +365,110 @@ func TestRetentionDeletesOldArchives(t *testing.T) {
 	}
 	if want := []string{"s_shop logs/php-error.log-20261031-1761868800.gz"}; !slices.Equal(e.h.removed, want) {
 		t.Errorf("helper removed %v", e.h.removed)
+	}
+}
+
+// laravel makes shop a laravel site, with its shared storage logs.
+func (e *capEnv) laravel() {
+	e.t.Helper()
+	if err := sites.Save(e.d.Paths, sites.State{Name: "shop", Domain: "shop.example.com", Type: contract.SiteLaravel, PHPVersion: "8.4", TemplateVersion: 2, Security: sites.DefaultSecurity()}); err != nil {
+		e.t.Fatal(err)
+	}
+	e.h.shared = map[string]helper.FileInfo{}
+}
+
+func (e *capEnv) shared(name string, size int64, age time.Duration, mode fs.FileMode) {
+	e.h.shared[name] = helper.FileInfo{Name: name, Size: size, BlocksBytes: size, Mode: mode, ModTime: capNow.Add(-age)}
+}
+
+// A laravel site's Laravel logs count as the home's (R02-D8): its archives
+// go oldest first, with logs/'s, through the helper as the site user, while
+// the site is over the cap. The live laravel.log is never deleted, and
+// root's Nginx archives stay while root's files alone fit.
+func TestCapCountsLaravelLogs(t *testing.T) {
+	e := newCapEnv(t, 6*blk)
+	e.laravel()
+	e.root("access.log", blk, 0)
+	e.root("access.log-20261101-1761955200.gz", blk, 80*time.Hour)
+	e.home("php-error.log-20261101-1761955200.gz", blk, 40*time.Hour, 0o640)
+	e.shared("laravel.log", 3*blk, 0, 0o640)
+	e.shared("laravel.log-20261031-1761868800.gz", 2*blk, 60*time.Hour, 0o640)
+	e.shared("laravel.log-20261102-1762041600.gz", 2*blk, 20*time.Hour, 0o640)
+	e.shared("evil.log-20261030-1.gz", 1<<40, 90*time.Hour, fs.ModeSymlink|0o777)
+
+	deleted, err := enforceCaps(context.Background(), e.d, e.homes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 10 units: the 60 h laravel archive goes (8), then the 40 h php-error
+	// one (7), then the 20 h laravel one (5), and that fits. Root's 80 h
+	// archive stays: root's files alone are 2.
+	want := []string{
+		"/home/s_shop/" + laravelLogs + "/laravel.log-20261031-1761868800.gz",
+		"/home/s_shop/logs/php-error.log-20261101-1761955200.gz",
+		"/home/s_shop/" + laravelLogs + "/laravel.log-20261102-1762041600.gz",
+	}
+	if !slices.Equal(deleted, want) {
+		t.Errorf("deleted %v, want %v", deleted, want)
+	}
+	wantRemoved := []string{
+		"s_shop " + laravelLogs + "/laravel.log-20261031-1761868800.gz",
+		"s_shop logs/php-error.log-20261101-1761955200.gz",
+		"s_shop " + laravelLogs + "/laravel.log-20261102-1762041600.gz",
+	}
+	if !slices.Equal(e.h.removed, wantRemoved) {
+		t.Errorf("helper removed %v, want %v", e.h.removed, wantRemoved)
+	}
+	if _, ok := e.h.shared["laravel.log"]; !ok {
+		t.Error("the live laravel.log was deleted")
+	}
+	if _, ok := e.h.shared["evil.log-20261030-1.gz"]; !ok {
+		t.Error("a symlink in the Laravel logs was deleted")
+	}
+	if got := e.rootNames(); len(got) != 2 {
+		t.Errorf("root files %v", got)
+	}
+
+	// Still over the cap with only the live log left: nothing more goes.
+	e.d.Config.SiteLogCapBytes = blk
+	if deleted, err := enforceCaps(context.Background(), e.d, e.homes); err != nil || slices.ContainsFunc(deleted, func(d string) bool { return strings.Contains(d, laravelLogs) }) {
+		t.Errorf("deleted %v, %v", deleted, err)
+	}
+	if _, ok := e.h.shared["laravel.log"]; !ok {
+		t.Error("the live laravel.log was deleted over the cap")
+	}
+}
+
+// Old Laravel archives age out with the retention like the home's others.
+func TestRetentionDeletesOldLaravelArchives(t *testing.T) {
+	e := newCapEnv(t, 1<<30)
+	e.laravel()
+	e.shared("laravel.log-20261001-1.gz", blk, time.Duration(e.d.Config.LogRetentionDays+1)*24*time.Hour, 0o640)
+	e.shared("laravel.log-20261102-2.gz", blk, time.Hour, 0o640)
+	deleted, err := enforceCaps(context.Background(), e.d, e.homes)
+	if err != nil || !slices.Equal(deleted, []string{"/home/s_shop/" + laravelLogs + "/laravel.log-20261001-1.gz"}) {
+		t.Errorf("deleted %v, %v", deleted, err)
+	}
+}
+
+// A laravel site without the shared logs folder yet is fine; a static or
+// PHP site's shared storage is never listed, whatever is there.
+func TestCapLaravelLogsOnlyForLaravelSites(t *testing.T) {
+	e := newCapEnv(t, blk)
+	e.laravel()
+	e.h.shared = nil
+	if _, err := enforceCaps(context.Background(), e.d, e.homes); err != nil {
+		t.Errorf("a laravel site without shared logs: %v", err)
+	}
+
+	e = newCapEnv(t, blk)
+	e.h.shared = map[string]helper.FileInfo{}
+	e.shared("laravel.log-20261031-1761868800.gz", 4*blk, 60*time.Hour, 0o640)
+	deleted, err := enforceCaps(context.Background(), e.d, e.homes)
+	if err != nil || len(deleted) != 0 {
+		t.Errorf("a static site: deleted %v, %v", deleted, err)
+	}
+	if !slices.Equal(e.h.dirs, []string{"logs"}) {
+		t.Errorf("a static site listed %v, want only logs", e.h.dirs)
 	}
 }

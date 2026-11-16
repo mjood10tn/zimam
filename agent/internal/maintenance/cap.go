@@ -41,7 +41,9 @@ type logFile struct {
 
 // enforceCaps keeps each site's logs within the log policy (§11.3, §11.4).
 // It lists the site's Nginx logs and archives, read by root from
-// /var/log/zimam/sites/<name>/, and its own logs/, listed by the helper.
+// /var/log/zimam/sites/<name>/, and its own logs/, listed by the helper,
+// with a laravel site's site/shared/storage/logs counted as the home's too
+// (R02-D8).
 // First it deletes every archive last changed more than log_retention_days
 // ago: logrotate's maxage deletes only when the log itself rotates, so an
 // idle site's archives would never age out. Then the cap, in two budgets,
@@ -61,7 +63,7 @@ func enforceCaps(ctx context.Context, d sysexec.Deps, homes Homes) ([]string, er
 	var deleted []string
 	var errs []error
 	for _, st := range all {
-		files, acct, err := siteLogFiles(ctx, d, homes, st.Name)
+		files, acct, err := siteLogFiles(ctx, d, homes, st)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("site %s's logs: %w", st.Name, err))
 			continue
@@ -153,9 +155,16 @@ func isLogFile(name string) (log, archive bool) {
 	return archive || strings.HasSuffix(name, ".log"), archive
 }
 
+// laravelLogDir is where a laravel site's own logs are, inside its home:
+// the shared storage every release links to (R02-D8).
+const laravelLogDir = "site/shared/storage/logs"
+
 // siteLogFiles lists a site's log files: root's, then the home's through
-// the helper (skipped while the site user doesn't exist).
-func siteLogFiles(ctx context.Context, d sysexec.Deps, homes Homes, name contract.SiteName) ([]logFile, helper.Account, error) {
+// the helper (skipped while the site user doesn't exist): logs/, and for a
+// laravel site its shared storage's logs. A home folder that isn't there
+// has nothing to count.
+func siteLogFiles(ctx context.Context, d sysexec.Deps, homes Homes, st sites.State) ([]logFile, helper.Account, error) {
+	name := st.Name
 	var files []logFile
 	dir := d.Paths.SiteLogDir(name)
 	entries, err := os.ReadDir(dir)
@@ -184,20 +193,26 @@ func siteLogFiles(ctx context.Context, d sysexec.Deps, homes Homes, name contrac
 	if err != nil {
 		return files, helper.Account{}, nil // no site user: nothing in a home to count
 	}
-	l, err := homes.Helper.List(ctx, acct, "logs")
-	if errors.Is(err, fs.ErrNotExist) {
-		return files, acct, nil
+	dirs := []string{"logs"}
+	if st.Type == contract.SiteLaravel {
+		dirs = append(dirs, laravelLogDir)
 	}
-	if err != nil {
-		return nil, acct, err
-	}
-	for _, fi := range l.Entries {
-		ok, archive := isLogFile(fi.Name)
-		if !ok || !fi.Mode.IsRegular() {
+	for _, dir := range dirs {
+		l, err := homes.Helper.List(ctx, acct, dir)
+		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
-		rel := path.Join("logs", fi.Name)
-		files = append(files, logFile{where: path.Join(acct.Home, rel), name: rel, size: fi.BlocksBytes, mod: fi.ModTime, archive: archive})
+		if err != nil {
+			return nil, acct, err
+		}
+		for _, fi := range l.Entries {
+			ok, archive := isLogFile(fi.Name)
+			if !ok || !fi.Mode.IsRegular() {
+				continue
+			}
+			rel := path.Join(dir, fi.Name)
+			files = append(files, logFile{where: path.Join(acct.Home, rel), name: rel, size: fi.BlocksBytes, mod: fi.ModTime, archive: archive})
+		}
 	}
 	return files, acct, nil
 }
