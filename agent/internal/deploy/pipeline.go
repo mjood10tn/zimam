@@ -288,6 +288,9 @@ func (b *build) ensureRepo(ref string) error {
 	b.d.Logf("Making the site's repository ~/%s, with %s as origin", MirrorDir, b.st.Repository)
 	err = b.git(b.d, "", nil, 0, "init", "--quiet", "--bare", MirrorDir)
 	if err == nil {
+		err = b.h.Chmod(b.ctx, b.a, MirrorDir, mirrorMode)
+	}
+	if err == nil {
 		err = b.git(b.d, MirrorDir, nil, 0, "remote", "add", "origin", RemoteURL(b.st.Repository))
 	}
 	if err != nil {
@@ -304,11 +307,19 @@ func (b *build) ensureRepo(ref string) error {
 // maxRemoteURL caps what git config prints for origin's URL.
 const maxRemoteURL = 4 << 10
 
+// mirrorMode is site/repo.git's mode (Site layout). git init leaves the
+// mode the helper's umask gives, so it is set after.
+const mirrorMode fs.FileMode = 0o700
+
 // repairRepo undoes what a killed or older run can leave in site/repo.git:
+// a mode other than 0700, which deploys before the Site layout's mode left;
 // the branch's lock file (or packed-refs') from a fetch killed half way,
 // which is stale because the site's job lock keeps every other git of this
 // repository out; and an origin that is missing or points elsewhere.
 func (b *build) repairRepo(ref string) error {
+	if err := b.h.Chmod(b.ctx, b.a, MirrorDir, mirrorMode); err != nil {
+		return err
+	}
 	for _, lock := range []string{MirrorDir + "/" + ref + ".lock", MirrorDir + "/packed-refs.lock"} {
 		stale, err := present(b.ctx, b.h, b.a, lock)
 		if err != nil {
@@ -487,6 +498,11 @@ func (b *build) composer(rel string) error {
 	if _, err := ensureComposer(b.ctx, b.d); err != nil {
 		return err
 	}
+	for _, dir := range composerDirs {
+		if err := b.privateDir(dir); err != nil {
+			return err
+		}
+	}
 	b.d.Logf("Running Composer with PHP %s", b.st.PHPVersion)
 	_, err = siteexec.Run(b.ctx, b.d, b.h, b.a, siteexec.Request{
 		Program: siteexec.Composer,
@@ -501,6 +517,26 @@ func (b *build) composer(rel string) error {
 		LogPrefix: "composer: ",
 	})
 	return err
+}
+
+// composerDirs are Composer's home and cache in the site's home. They can
+// hold credentials (auth.json), so they are the site user's alone.
+var composerDirs = []string{".composer", ".cache/composer"}
+
+// privateDir makes name a directory with mode 0700: it creates a missing
+// one and corrects the mode of an existing one. Anything else at name, a
+// symlink included, fails, and what a symlink points at is left alone.
+func (b *build) privateDir(name string) error {
+	fi, err := b.h.Stat(b.ctx, b.a, name)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return b.h.Mkdir(b.ctx, b.a, name, 0o700)
+	case err != nil:
+		return err
+	case !fi.Mode.IsDir():
+		return fmt.Errorf("~/%s isn't a directory (%v)", name, fi.Mode.Type())
+	}
+	return b.h.Chmod(b.ctx, b.a, name, 0o700)
 }
 
 // script is step 7: the owner's script on bash's stdin, never in argv

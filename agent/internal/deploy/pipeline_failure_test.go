@@ -176,6 +176,12 @@ func TestFetchRecoversRepository(t *testing.T) {
 				t.Fatal(err)
 			}
 		}},
+		{"open mode", func(t *testing.T, e *deployEnv) {
+			// What a deploy before the Site layout's 0700 left.
+			if err := os.Chmod(e.home("site/repo.git"), 0o750); err != nil {
+				t.Fatal(err)
+			}
+		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			e := newDeployEnv(t, contract.SiteStatic)
@@ -190,6 +196,7 @@ func TestFetchRecoversRepository(t *testing.T) {
 			if url := gitIn(t, e.home("site/repo.git"), "config", "remote.origin.url"); url != "git@github.com:octo/app.git" {
 				t.Errorf("origin is %q", url)
 			}
+			checkModeOf(t, e.home("site/repo.git"), fs.ModeDir|0o700)
 		})
 	}
 }

@@ -509,6 +509,7 @@ func TestDeployStepsInOrder(t *testing.T) {
 	}
 	want := []string{
 		"exec git dir= init --quiet --bare site/repo.git",
+		"chmod site/repo.git 700",
 		"exec git dir=site/repo.git remote add origin git@github.com:octo/app.git",
 		"exec git dir=site/repo.git fetch --prune --no-tags --refmap= origin +refs/heads/main:refs/heads/main",
 		"exec git dir=site/repo.git rev-parse --verify --end-of-options refs/heads/main^{commit}",
@@ -518,6 +519,8 @@ func TestDeployStepsInOrder(t *testing.T) {
 		"symlink-swap " + rel + "/.env ../../shared/.env",
 		"remove-tree " + rel + "/storage",
 		"symlink-swap " + rel + "/storage ../../shared/storage",
+		"mkdir .composer 700",
+		"mkdir .cache/composer 700",
 		"exec composer dir=" + rel + " install --no-dev --no-interaction --prefer-dist --optimize-autoloader --no-progress",
 		"exec deploy-script dir=" + rel,
 		"chmod " + rel + "/bootstrap/cache 700",
@@ -603,6 +606,69 @@ func TestDeployComposerEnvironment(t *testing.T) {
 	}
 }
 
+// TestComposerDirsPrivate: Composer's home and cache are 0700 before it
+// runs, made when missing and corrected when an older run left them open.
+func TestComposerDirsPrivate(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing=%v", existing), func(t *testing.T) {
+			e := newDeployEnv(t, contract.SitePHP)
+			if existing {
+				for _, dir := range []string{".composer", ".cache/composer"} {
+					if err := os.MkdirAll(e.home(dir), 0o755); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Chmod(e.home(dir), 0o755); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			composer := e.h.hook
+			var modes []fs.FileMode
+			e.h.hook = func(a helper.Account, r helper.ExecRequest) (int, bool) {
+				if r.Program == "composer" {
+					for _, dir := range []string{".composer", ".cache/composer"} {
+						fi, err := os.Lstat(filepath.Join(a.Home, dir))
+						if err != nil {
+							t.Errorf("when Composer runs: %v", err)
+							continue
+						}
+						modes = append(modes, fi.Mode())
+					}
+				}
+				return composer(a, r)
+			}
+			e.up.commit(map[string]string{"composer.json": "{}"})
+			e.mustDeploy(contract.SiteDeployParams{Composer: true})
+			want := []fs.FileMode{fs.ModeDir | 0o700, fs.ModeDir | 0o700}
+			if !slices.Equal(modes, want) {
+				t.Errorf("when Composer runs, ~/.composer and ~/.cache/composer are %v, want %v", modes, want)
+			}
+		})
+	}
+}
+
+// TestComposerDirSymlinkRefused: a ~/.composer that is a symlink fails the
+// deploy before Composer runs and leaves what it points at alone.
+func TestComposerDirSymlinkRefused(t *testing.T) {
+	e := newDeployEnv(t, contract.SitePHP)
+	if err := os.Symlink("site/releases/initial/public", e.home(".composer")); err != nil {
+		t.Fatal(err)
+	}
+	e.up.commit(map[string]string{"composer.json": "{}"})
+	if _, err := e.deploy(contract.SiteDeployParams{Composer: true}); err == nil {
+		t.Fatal("deploy succeeded with ~/.composer a symlink")
+	}
+	for _, r := range e.h.reqs {
+		if r.Program == "composer" {
+			t.Error("Composer ran")
+		}
+	}
+	checkModeOf(t, e.home("site/releases/initial/public"), fs.ModeDir|0o750)
+	if e.current() != initialRel {
+		t.Errorf("current -> %s", e.current())
+	}
+}
+
 // TestFirstDeployInitsBareRepo (spike amendment A2): the first deploy
 // makes an empty bare repository with GitHub as origin, not a mirror clone;
 // later ones only fetch.
@@ -622,6 +688,8 @@ func TestFirstDeployInitsBareRepo(t *testing.T) {
 	if url := gitIn(t, e.home("site/repo.git"), "config", "remote.origin.url"); url != "git@github.com:octo/app.git" {
 		t.Errorf("origin is %q", url)
 	}
+	// Site layout: repo.git is 0700, whatever git init's umask gave it.
+	checkModeOf(t, e.home("site/repo.git"), fs.ModeDir|0o700)
 	n := len(e.h.ops)
 	e.up.commit(map[string]string{"index.html": "two"})
 	e.mustDeploy(contract.SiteDeployParams{})
