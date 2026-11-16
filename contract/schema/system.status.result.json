@@ -113,6 +113,56 @@
     "reboot_required": {
       "type": "boolean"
     },
+    "services": {
+      "additionalProperties": false,
+      "properties": {
+        "mysql": {
+          "additionalProperties": false,
+          "properties": {
+            "active": {
+              "type": "boolean"
+            },
+            "installed": {
+              "type": "boolean"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "active",
+            "installed",
+            "version"
+          ],
+          "type": "object"
+        },
+        "valkey": {
+          "additionalProperties": false,
+          "properties": {
+            "active": {
+              "type": "boolean"
+            },
+            "installed": {
+              "type": "boolean"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "active",
+            "installed",
+            "version"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "mysql",
+        "valkey"
+      ],
+      "type": "object"
+    },
     "updates": {
       "additionalProperties": false,
       "properties": {
@@ -164,6 +214,7 @@
     "php",
     "protocols",
     "reboot_required",
+    "services",
     "updates"
   ],
   "title": "system.status result",

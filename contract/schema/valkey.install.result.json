@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "version"
+  ],
+  "title": "valkey.install result",
+  "type": "object"
+}

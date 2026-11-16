@@ -7,8 +7,8 @@ import "testing"
 // against its row and refuses one that isn't there, this proves the list is
 // complete.
 func TestAllCommandsRegistered(t *testing.T) {
-	if len(designCommands) != 24 {
-		t.Fatalf("the table lists %d commands, want 24 (§5.3's 18 and v0.2.0's 6)", len(designCommands))
+	if len(designCommands) != 31 {
+		t.Fatalf("the table lists %d commands, want 31 (§5.3's 18, v0.2.0's 6 and v0.3.0's 7)", len(designCommands))
 	}
 	for _, row := range designCommands {
 		if _, ok := Lookup(row.name); !ok {

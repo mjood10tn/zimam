@@ -14,7 +14,7 @@ func TestSiteDestroyWired(t *testing.T) {
 	if !ok || d.Kind != contract.KindJob || !d.Audited {
 		t.Fatalf("site.destroy = %+v, %v; want an audited job", d, ok)
 	}
-	if got := d.Subject(&contract.SiteNameParams{Name: "shop"}); got != "site:shop" {
+	if got := d.Subject(&contract.SiteDestroyParams{Name: "shop"}); got != "site:shop" {
 		t.Errorf("subject %q, want site:shop", got)
 	}
 	if l, ok := jobs.LimitsFor("site.destroy"); !ok || l != (jobs.Limits{MemoryMax: "512M", RuntimeMaxSec: 300}) {
@@ -30,5 +30,5 @@ func TestSiteDestroyWired(t *testing.T) {
 	if pre == nil {
 		t.Fatal("site.destroy has no precheck")
 	}
-	wantCode(t, pre(context.Background(), &contract.SiteNameParams{Name: "shop"}), contract.ErrNotFound)
+	wantCode(t, pre(context.Background(), &contract.SiteDestroyParams{Name: "shop"}), contract.ErrNotFound)
 }

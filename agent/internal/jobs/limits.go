@@ -25,6 +25,13 @@ var limits = map[string]Limits{
 	"site.deploy":    {MemoryMax: "2G", RuntimeMaxSec: 1800},
 	"site.rollback":  {MemoryMax: "512M", RuntimeMaxSec: 300},
 	"site.env.write": {MemoryMax: "256M", RuntimeMaxSec: 120},
+	// v0.3.0 database and cache commands.
+	"mysql.install":  {MemoryMax: "1G", RuntimeMaxSec: 900},
+	"db.create":      {MemoryMax: "256M", RuntimeMaxSec: 120},
+	"db.drop":        {MemoryMax: "256M", RuntimeMaxSec: 300},
+	"db.user":        {MemoryMax: "256M", RuntimeMaxSec: 120},
+	"valkey.install": {MemoryMax: "512M", RuntimeMaxSec: 600},
+	"cache.user":     {MemoryMax: "256M", RuntimeMaxSec: 120},
 }
 
 // LimitsFor returns a job command's limits. Every job command has them; a

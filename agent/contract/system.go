@@ -18,14 +18,15 @@ func (SystemStatusParams) Validate() error { return nil }
 // SystemStatusResult is §7.5's system.status. Its slices are empty, never
 // null: the schema expects arrays.
 type SystemStatusResult struct {
-	AgentVersion   string       `json:"agent_version"`
-	Protocols      []int        `json:"protocols"`
-	NginxVersion   string       `json:"nginx_version"`
-	PHP            PHPStatus    `json:"php"`
-	RebootRequired bool         `json:"reboot_required"` // /run/reboot-required exists
-	Updates        UpdateCounts `json:"updates"`
-	PanelDomain    Domain       `json:"panel_domain"`
-	ACMEDirectory  string       `json:"acme_directory"`
+	AgentVersion   string         `json:"agent_version"`
+	Protocols      []int          `json:"protocols"`
+	NginxVersion   string         `json:"nginx_version"`
+	PHP            PHPStatus      `json:"php"`
+	RebootRequired bool           `json:"reboot_required"` // /run/reboot-required exists
+	Updates        UpdateCounts   `json:"updates"`
+	PanelDomain    Domain         `json:"panel_domain"`
+	ACMEDirectory  string         `json:"acme_directory"`
+	Services       ServicesStatus `json:"services"`
 }
 
 // PHPStatus carries the allowlist and its end dates as well as what is
@@ -55,4 +56,19 @@ type UpdateCounts struct {
 	Total     *int       `json:"total"`
 	Security  *int       `json:"security"`
 	CheckedAt *time.Time `json:"checked_at"`
+}
+
+// ServicesStatus is the optional services Zimam installs on request.
+type ServicesStatus struct {
+	MySQL  ServiceStatus `json:"mysql"`
+	Valkey ServiceStatus `json:"valkey"`
+}
+
+// ServiceStatus is one service: whether its package is installed, its
+// version, and whether its unit is active. All three are zero for a service
+// that is not installed.
+type ServiceStatus struct {
+	Installed bool   `json:"installed"`
+	Version   string `json:"version"`
+	Active    bool   `json:"active"`
 }

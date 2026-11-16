@@ -1099,6 +1099,11 @@ final class FakeAgentClient implements AgentClient
             ],
             'panel_domain' => 'panel.example.com',
             'acme_directory' => 'https://acme-v02.api.letsencrypt.org/directory',
+            // Neither optional service is installed until a command installs it.
+            'services' => [
+                'mysql' => ['installed' => false, 'version' => '', 'active' => false],
+                'valkey' => ['installed' => false, 'version' => '', 'active' => false],
+            ],
         ];
     }
 }

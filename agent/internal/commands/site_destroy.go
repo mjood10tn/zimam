@@ -13,7 +13,7 @@ import (
 func init() {
 	jobPrechecks["site.destroy"] = func(d sysexec.Deps) jobs.Precheck {
 		return func(_ context.Context, p contract.Params) error {
-			return sites.CheckDestroy(d, helper.LookupAccount, p.(*contract.SiteNameParams).Name)
+			return sites.CheckDestroy(d, helper.LookupAccount, p.(*contract.SiteDestroyParams).Name)
 		}
 	}
 	jobHandlers["site.destroy"] = siteDestroy
@@ -22,7 +22,7 @@ func init() {
 // siteDestroy removes the site (§9.8). A site already gone answers
 // not_found, as the precheck does.
 func siteDestroy(ctx context.Context, j *jobs.Context, p contract.Params) (any, error) {
-	name := p.(*contract.SiteNameParams).Name
+	name := p.(*contract.SiteDestroyParams).Name
 	d := j.Deps()
 	if err := sites.CheckDestroy(d, helper.LookupAccount, name); err != nil {
 		return nil, err

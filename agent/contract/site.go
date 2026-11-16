@@ -27,9 +27,9 @@ func init() {
 		Name:    "site.destroy",
 		Kind:    KindJob,
 		Audited: true,
-		Params:  func() Params { return &SiteNameParams{} },
+		Params:  func() Params { return &SiteDestroyParams{} },
 		Result:  SiteNameResult{},
-		Subject: siteNameSubject,
+		Subject: func(p Params) string { return "site:" + string(p.(*SiteDestroyParams).Name) },
 	})
 	Register(Descriptor{
 		Name:    "cert.issue",
@@ -119,7 +119,7 @@ type SitePHPResult struct {
 	PHPVersion PHPVersion `json:"php_version"`
 }
 
-// SiteNameParams is the params of site.destroy and cert.issue (§5.3): the
+// SiteNameParams is the params of cert.issue (§5.3): the
 // site alone.
 type SiteNameParams struct {
 	Name SiteName `json:"name"`
@@ -142,4 +142,18 @@ func siteNameSubject(p Params) string { return "site:" + string(p.(*SiteNamePara
 // certificate expires (§10).
 type CertIssueResult struct {
 	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// SiteDestroyParams is site.destroy's params. The site's databases are
+// dropped only when DropDatabases is set; without it a site that still has
+// databases is refused.
+type SiteDestroyParams struct {
+	Name          SiteName `json:"name"`
+	DropDatabases bool     `json:"drop_databases,omitempty"`
+}
+
+func (p *SiteDestroyParams) Validate() error {
+	f := FieldErrors{}
+	f.Check("name", p.Name)
+	return f.Err()
 }

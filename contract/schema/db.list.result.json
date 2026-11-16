@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "databases": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "not": {
+              "enum": [
+                "mysql",
+                "sys",
+                "information_schema",
+                "performance_schema",
+                "zimam"
+              ]
+            },
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "type": "string"
+          },
+          "site": {
+            "not": {
+              "enum": [
+                "zimam",
+                "panel",
+                "default",
+                "acme"
+              ]
+            },
+            "pattern": "^[a-z][a-z0-9-]{0,22}[a-z0-9]$",
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "site",
+          "size_bytes"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "databases"
+  ],
+  "title": "db.list result",
+  "type": "object"
+}

@@ -27,6 +27,13 @@ func TestLimitsMatchDesign(t *testing.T) {
 		"site.deploy":    {MemoryMax: "2G", RuntimeMaxSec: 1800},
 		"site.rollback":  {MemoryMax: "512M", RuntimeMaxSec: 300},
 		"site.env.write": {MemoryMax: "256M", RuntimeMaxSec: 120},
+		// v0.3.0 database and cache commands.
+		"mysql.install":  {MemoryMax: "1G", RuntimeMaxSec: 900},
+		"db.create":      {MemoryMax: "256M", RuntimeMaxSec: 120},
+		"db.drop":        {MemoryMax: "256M", RuntimeMaxSec: 300},
+		"db.user":        {MemoryMax: "256M", RuntimeMaxSec: 120},
+		"valkey.install": {MemoryMax: "512M", RuntimeMaxSec: 600},
+		"cache.user":     {MemoryMax: "256M", RuntimeMaxSec: 120},
 	}
 	for name, w := range want {
 		if got, ok := LimitsFor(name); !ok || got != w {
@@ -36,7 +43,7 @@ func TestLimitsMatchDesign(t *testing.T) {
 	for name := range limits {
 		// e2e builds add their test-only commands (D22).
 		if _, ok := want[name]; !ok && !strings.HasPrefix(name, "e2e.") {
-			t.Errorf("%s has limits but isn't in §5.7 or the v0.2.0 plan", name)
+			t.Errorf("%s has limits but isn't in §5.7 or a release plan", name)
 		}
 	}
 }

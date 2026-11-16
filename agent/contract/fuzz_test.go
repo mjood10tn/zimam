@@ -133,3 +133,21 @@ func FuzzRepository(f *testing.F) {
 		checkSchemaAgrees(t, Repository(s), ok)
 	})
 }
+
+// databaseSafe is every character an accepted database name may carry into
+// a backquoted SQL identifier.
+var databaseSafe = regexp.MustCompile(`^[a-z0-9_]+$`)
+
+func FuzzDatabaseName(f *testing.F) {
+	for _, s := range []string{"s_shop_main", "a`b", "a;b", "mysql", "A", "1a", "a\n", "ش", strings.Repeat("a", 65)} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		v := DatabaseName(s)
+		ok := v.Validate() == nil
+		if ok && !databaseSafe.MatchString(s) {
+			t.Errorf("accepted %q", s)
+		}
+		checkSchemaAgrees(t, v, ok)
+	})
+}
