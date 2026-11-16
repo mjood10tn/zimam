@@ -66,6 +66,9 @@ func (s *Server) dispatch(ctx context.Context, cl *call, line []byte) any {
 	// Handlers that audit, such as job.cancel's, need the caller.
 	ctx = audit.WithCaller(ctx, audit.Caller{PeerUID: cl.uid, Actor: clip(req.Actor), RequestID: req.ID})
 	v, err := s.run(ctx, h, p)
+	if d.Kind == contract.KindRead && d.Audited {
+		return s.auditedRead(cl, v, err)
+	}
 	if err != nil {
 		return failure(req.Command, err)
 	}
@@ -104,6 +107,48 @@ func (s *Server) reject(cl *call, code contract.ErrorCode, message string, field
 		log.Printf("audit: %v", err)
 	}
 	return errorLine(code, message, fields)
+}
+
+// auditedRead answers a read whose descriptor says Audited because it
+// returns a secret (site.env.read, R02-D10). Job commands are audited by
+// their submission and job.cancel by its handler; a routine read never is
+// (§5.8). The entry holds the params and the result through Redact, and is
+// written before the reply. A result whose entry can't be written isn't
+// sent: a secret that can't be audited doesn't leave the agent.
+func (s *Server) auditedRead(cl *call, v any, err error) any {
+	e := audit.Entry{
+		TS:        cl.start.UTC(),
+		PeerUID:   cl.uid,
+		Actor:     clip(cl.req.Actor),
+		RequestID: clip(cl.req.ID),
+		Command:   clip(cl.req.Command),
+		Params:    audit.Redact(cl.params),
+		Outcome:   "ok",
+	}
+	var reply any
+	if err != nil {
+		fail := failure(cl.req.Command, err)
+		e.Outcome = "error:" + string(fail.Code)
+		reply = fail
+	} else {
+		data, merr := json.Marshal(v)
+		if merr != nil {
+			log.Printf("%s: encoding the result: %v", cl.req.Command, merr)
+			e.Outcome = "error:" + string(contract.ErrInternal)
+			reply = errorLine(contract.ErrInternal, "Internal error", nil)
+		} else {
+			e.Result = audit.Redact(v)
+			reply = contract.Result{Type: "result", OK: true, Data: data}
+		}
+	}
+	e.DurationMS = time.Since(cl.start).Milliseconds()
+	if werr := s.Audit.Write(e); werr != nil {
+		log.Printf("audit: %v", werr)
+		if err == nil {
+			return errorLine(contract.ErrInternal, "The read could not be audited, so its result is withheld", nil)
+		}
+	}
+	return reply
 }
 
 func errorLine(code contract.ErrorCode, message string, fields contract.FieldErrors) contract.Error {

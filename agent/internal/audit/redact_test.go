@@ -120,3 +120,23 @@ func TestRedactEnvContent(t *testing.T) {
 		t.Errorf("Redact(site.env.write params) = %#v, want %#v", got, want)
 	}
 }
+
+// An audited read's entry carries its redacted result (R02-D10); every
+// other entry leaves the field out, so its line is as before.
+func TestEntryResult(t *testing.T) {
+	const env = "DB_PASSWORD=dummy-secret\n"
+	line, err := json.Marshal(Entry{Command: "site.env.read", Outcome: "ok", Result: Redact(contract.SiteEnvReadResult{Content: env})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(line), `"result":{"content":"[redacted]"}`) || strings.Contains(string(line), "dummy-secret") {
+		t.Errorf("entry = %s, want the result with the content redacted", line)
+	}
+	line, err = json.Marshal(Entry{Command: "job.cancel", Outcome: "ok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(line), "result") {
+		t.Errorf("entry = %s, want no result field", line)
+	}
+}

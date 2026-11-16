@@ -28,6 +28,7 @@ type Entry struct {
 	Outcome    string         `json:"outcome"` // accepted | ok | error:<code>
 	Job        contract.JobID `json:"job,omitempty"`
 	DurationMS int64          `json:"duration_ms"`
+	Result     any            `json:"result,omitempty"` // an audited read's result, through Redact (R02-D10); nil elsewhere
 }
 
 // lockWait bounds how long Write waits for audit.lock. Write takes no
