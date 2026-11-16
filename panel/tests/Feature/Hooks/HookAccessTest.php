@@ -54,21 +54,44 @@ final class HookAccessTest extends HooksTestCase
         $this->postRaw("/hooks/deploy/shop/{$token}", '')->assertStatus(202);
     }
 
-    /** One address that keeps failing is stopped, the same way for every site name, so the answer tells nothing. */
-    public function testFailuresThrottledPerAddress(): void
+    /**
+     * Failures are counted per address and site name. A made-up name is
+     * throttled exactly like a real one, so the answer tells nothing.
+     */
+    public function testFailuresThrottledPerAddressAndName(): void
     {
         $repository = $this->connected($this->site(), ['auto_deploy' => true]);
         $token = $repository->regenerateDeployToken();
 
-        for ($i = 0; $i < 30; $i++) {
-            $this->postRaw('/hooks/deploy/'.($i % 2 ? 'shop' : 'nosuchsite').'/'.str_repeat('0', 64), '', ip: '198.51.100.7')->assertNotFound();
+        foreach (['shop', 'nosuchsite'] as $name) {
+            for ($i = 0; $i < 30; $i++) {
+                $this->postRaw("/hooks/deploy/{$name}/".str_repeat('0', 64), '', ip: '198.51.100.7')->assertNotFound();
+            }
+            $this->postRaw("/hooks/deploy/{$name}/".str_repeat('0', 64), '', ip: '198.51.100.7')->assertStatus(429);
+            $this->deliver($name, 'x', 'push', $this->push(), ip: '198.51.100.7')->assertStatus(429);
         }
 
         $this->postRaw("/hooks/deploy/shop/{$token}", '', ip: '198.51.100.7')->assertStatus(429);
-        $this->postRaw('/hooks/deploy/nosuchsite/'.str_repeat('0', 64), '', ip: '198.51.100.7')->assertStatus(429);
-        $this->deliver('nosuchsite', 'x', 'push', $this->push(), ip: '198.51.100.7')->assertStatus(429);
-        // Other addresses, GitHub's among them, are unaffected.
+        // Other addresses are unaffected.
         $this->postRaw("/hooks/deploy/shop/{$token}", '', ip: '203.0.113.9')->assertStatus(202);
+    }
+
+    /**
+     * GitHub, or a shared CI runner, sends for many sites from one address:
+     * failures for one site name don't hold back another site's deliveries.
+     */
+    public function testFailuresForOneNameDontBlockAnother(): void
+    {
+        $this->connected($this->site(name: 'shopx'), ['auto_deploy' => true]);
+        $y = $this->connected($this->site(name: 'shopy'), ['auto_deploy' => true]);
+
+        for ($i = 0; $i < 30; $i++) {
+            $this->deliver('shopx', 'not the secret', 'push', $this->push(), ip: '140.82.115.1')->assertNotFound();
+        }
+        $this->deliver('shopx', 'not the secret', 'push', $this->push(), ip: '140.82.115.1')->assertStatus(429);
+
+        $this->deliver('shopy', $y->webhook_secret, 'push', $this->push(), ip: '140.82.115.1')->assertStatus(202);
+        $this->postRaw('/hooks/deploy/shopy/'.$y->regenerateDeployToken(), '', ip: '140.82.115.1')->assertStatus(202);
     }
 
     public function testHooksBypassAllowlist(): void

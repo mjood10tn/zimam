@@ -8,6 +8,7 @@ use App\Models\WebhookDelivery;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Throwable;
 
 /**
  * POST /hooks/github/{site}: GitHub's webhook (R02-D11, A10). The signature
@@ -23,14 +24,14 @@ final class GithubWebhookController
 
     public function __invoke(Request $request, HookGate $gate, string $site): JsonResponse
     {
-        $gate->admit($request);
+        $gate->admit($request, $site);
         $body = $request->getContent();
         $repository = $gate->repository($site);
         $signature = (string) $request->header('X-Hub-Signature-256', '');
         // An unknown site gets its HMAC worked out too, so it takes as long.
         $expected = 'sha256='.hash_hmac('sha256', $body, $repository?->webhook_secret ?? random_bytes(32));
         if ($repository === null || ! hash_equals($expected, $signature)) {
-            $gate->refuse($request);
+            $gate->refuse($request, $site);
         }
         $gate->throttle($repository);
 
@@ -75,9 +76,15 @@ final class GithubWebhookController
         } catch (UniqueConstraintViolationException) {
             return HookGate::answer(202, 'duplicate');
         }
-        $response = $gate->deploy($repository, Deployment::WEBHOOK, $commit);
-        if ($response->getStatusCode() !== 202) {
+        try {
+            $response = $gate->deploy($repository, Deployment::WEBHOOK, $commit);
+        } catch (Throwable $e) {
             // Nothing was deployed, so GitHub's redelivery may try again.
+            $seen->delete();
+
+            throw $e;
+        }
+        if ($response->getStatusCode() !== 202) {
             $seen->delete();
         }
 

@@ -18,10 +18,12 @@ use Illuminate\Support\Facades\RateLimiter;
  * A caller that can't sign or doesn't hold the token gets the framework's
  * 404 whatever went wrong: no site, no repository, a bad token or signature.
  * Only after that may an answer say anything about the site. Failures count
- * against the caller's address, the same for every site name, so one address
- * can't keep the panel hashing; they don't count against the site, so a
- * stranger can't use up its throttle. Authenticated requests count against
- * the site: six a minute, both hooks together.
+ * against the caller's address and the site name it used, the same for real
+ * and made-up names, so one address can't keep the panel hashing. They don't
+ * count against the address alone, since GitHub or a shared CI runner sends
+ * for many sites from one address, nor against the site, so a stranger can't
+ * hold back its deliveries. Authenticated requests count against the site:
+ * six a minute, both hooks together.
  */
 final class HookGate
 {
@@ -31,10 +33,10 @@ final class HookGate
 
     public function __construct(private readonly StartDeployment $start) {}
 
-    /** Stops an address that failed too often lately, before any lookup. */
-    public function admit(Request $request): void
+    /** Stops an address that failed too often lately for this name, before any lookup. */
+    public function admit(Request $request, string $site): void
     {
-        $key = $this->failureKey($request);
+        $key = $this->failureKey($request, $site);
         if (RateLimiter::tooManyAttempts($key, self::FAILURES_PER_MINUTE)) {
             abort(429, '', ['Retry-After' => RateLimiter::availableIn($key)]);
         }
@@ -46,9 +48,9 @@ final class HookGate
         return Site::where('name', $site)->first()?->repository;
     }
 
-    public function refuse(Request $request): never
+    public function refuse(Request $request, string $site): never
     {
-        RateLimiter::hit($this->failureKey($request), 60);
+        RateLimiter::hit($this->failureKey($request, $site), 60);
         abort(404);
     }
 
@@ -90,8 +92,8 @@ final class HookGate
         return new JsonResponse(['message' => __("zimam.hooks.{$key}")], $status);
     }
 
-    private function failureKey(Request $request): string
+    private function failureKey(Request $request, string $site): string
     {
-        return 'hooks:failures:'.$request->ip();
+        return 'hooks:failures:'.sha1($request->ip().'|'.$site);
     }
 }

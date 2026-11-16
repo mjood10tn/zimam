@@ -15,10 +15,10 @@ final class DeployUrlController
 {
     public function __invoke(Request $request, HookGate $gate, string $site, #[SensitiveParameter] string $token): JsonResponse
     {
-        $gate->admit($request);
+        $gate->admit($request, $site);
         $repository = $gate->repository($site);
         if ($repository === null || ! $repository->matchesDeployToken($token)) {
-            $gate->refuse($request);
+            $gate->refuse($request, $site);
         }
         $gate->throttle($repository);
 

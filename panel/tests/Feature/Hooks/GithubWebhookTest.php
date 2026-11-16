@@ -9,6 +9,7 @@ use App\Models\Deployment;
 use App\Models\SiteRepository;
 use App\Models\WebhookDelivery;
 use Filament\Notifications\NotificationMailbox;
+use RuntimeException;
 
 /** POST /hooks/github/{site}: GitHub's push deliveries deploy the branch (R02-D11, A10). */
 final class GithubWebhookTest extends HooksTestCase
@@ -254,6 +255,24 @@ final class GithubWebhookTest extends HooksTestCase
         $mailbox->shouldNotHaveReceived('push');
 
         // The agent is back: GitHub's redelivery keeps the delivery id.
+        $this->agent = (new FakeAgentClient)->connectRepository('shop', 'octo/shop', 'main');
+        $this->app->instance(AgentClient::class, $this->agent);
+        $this->deliver('shop', $repository->webhook_secret, 'push', $this->push(), ['X-GitHub-Delivery' => 'd-1'])->assertStatus(202);
+        $this->assertCount(1, $this->deploys());
+    }
+
+    /** Any other failure before the job is submitted forgets the delivery too, and is still reported. */
+    public function testUnexpectedErrorForgetsTheDelivery(): void
+    {
+        $repository = $this->connected($this->site(), ['auto_deploy' => true]);
+        $this->agent->respond('site.deploy', fn () => throw new RuntimeException('socket broke'));
+
+        $this->deliver('shop', $repository->webhook_secret, 'push', $this->push(), ['X-GitHub-Delivery' => 'd-1'])
+            ->assertStatus(500);
+
+        $this->assertSame(0, WebhookDelivery::count());
+        $this->assertSame(0, Deployment::count());
+
         $this->agent = (new FakeAgentClient)->connectRepository('shop', 'octo/shop', 'main');
         $this->app->instance(AgentClient::class, $this->agent);
         $this->deliver('shop', $repository->webhook_secret, 'push', $this->push(), ['X-GitHub-Delivery' => 'd-1'])->assertStatus(202);
