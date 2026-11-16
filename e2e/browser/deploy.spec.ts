@@ -10,7 +10,7 @@
 // a refused save keeps what was typed, and a reload hides it. The checks
 // from outside the browser are e2e/scenarios/v02-deploy.sh's.
 import { readFileSync, writeFileSync } from 'node:fs';
-import { expect, type Page, type Response } from '@playwright/test';
+import { expect, type Locator, type Page, type Response } from '@playwright/test';
 import { domain, loadAdmin, panel, scenario, signInAsAdmin, untilText, work, test } from './support.ts';
 
 const minutes = 60_000;
@@ -30,11 +30,35 @@ async function openTab(page: Page, url: string, tab: string): Promise<void> {
   await page.getByRole('tab', { name: tab, exact: true }).click();
 }
 
-// confirm fills the password dialog an action opened and submits it.
-async function confirm(page: Page, heading: string | RegExp, submit: string): Promise<void> {
+// livewireCall waits for the Livewire round trip that carries a call to
+// method, such as Filament's mountAction.
+function livewireCall(page: Page, method: string, timeout = 30_000): Promise<Response> {
+  return page.waitForResponse(
+    (r) =>
+      r.request().method() === 'POST' &&
+      /\/livewire[^/]*\/update/.test(r.url()) &&
+      (r.request().postData() ?? '').includes(`"method":"${method}"`),
+    { timeout },
+  );
+}
+
+// confirm clicks an action's trigger, fills the password dialog it opens and
+// submits it. Filament shows the dialog at once but renders its form from
+// the mountAction answer: a password typed before that answer is wiped,
+// which over a real server's latency (vps.yml) left the field empty and the
+// browser's required check stopped the submit. So the fill waits for the
+// answer, the value is checked, and the submit must reach the server.
+async function confirm(page: Page, trigger: Locator, heading: string | RegExp, submit: string): Promise<void> {
+  const mounted = livewireCall(page, 'mountAction');
+  await trigger.click();
+  await mounted;
   const dialog = page.getByRole('dialog', { name: heading });
-  await dialog.getByLabel('Current password').fill(loadAdmin().password);
+  const field = dialog.getByLabel('Current password');
+  await field.fill(loadAdmin().password);
+  await expect(field).toHaveValue(loadAdmin().password);
+  const called = livewireCall(page, 'callMountedAction');
   await dialog.getByRole('button', { name: submit, exact: true }).click();
+  await called;
   await expect(dialog).toBeHidden();
 }
 
@@ -91,14 +115,12 @@ test('v0.2.0: a Laravel site deploys, rolls back, and deploys on a webhook and i
   });
 
   await test.step('Regenerate replaces the shown secret and URL; a reload hides both', async () => {
-    await page.getByRole('button', { name: 'Regenerate secret', exact: true }).click();
-    await confirm(page, 'Regenerate the webhook secret?', 'Regenerate secret');
+    await confirm(page, page.getByRole('button', { name: 'Regenerate secret', exact: true }), 'Regenerate the webhook secret?', 'Regenerate secret');
     await expect(secretCode(page)).toHaveText(/^[0-9a-f]{64}$/);
     await expect(secretCode(page)).not.toHaveText(secret);
     const newSecret = (await secretCode(page).innerText()).trim();
 
-    await page.getByRole('button', { name: 'Regenerate URL', exact: true }).click();
-    await confirm(page, 'Regenerate the deploy URL?', 'Regenerate URL');
+    await confirm(page, page.getByRole('button', { name: 'Regenerate URL', exact: true }), 'Regenerate the deploy URL?', 'Regenerate URL');
     await expect(deployUrlCode(page)).not.toHaveText(deployUrl);
     await expect(deployUrlCode(page)).toHaveText(new RegExp(`/hooks/deploy/${site}/[0-9a-f]{64}$`));
     const newDeployUrl = (await deployUrlCode(page).innerText()).trim();
@@ -145,8 +167,7 @@ test('v0.2.0: a Laravel site deploys, rolls back, and deploys on a webhook and i
     // The tab has rendered, with the editor hidden behind the password.
     await expect(page.getByRole('button', { name: 'Show and edit .env', exact: true })).toBeVisible();
     await expect(page.getByRole('textbox', { name: 'Contents' })).toHaveCount(0);
-    await page.getByRole('button', { name: 'Show and edit .env', exact: true }).click();
-    await confirm(page, 'Show the .env', 'Show and edit .env');
+    await confirm(page, page.getByRole('button', { name: 'Show and edit .env', exact: true }), 'Show the .env', 'Show and edit .env');
     const editor = page.getByRole('textbox', { name: 'Contents' });
     await expect(editor).toHaveValue(/^APP_KEY=base64:[A-Za-z0-9+/]{43}=$/m);
     await expect(editor).toHaveValue(/^APP_ENV=production$/m);
@@ -163,8 +184,7 @@ test('v0.2.0: a Laravel site deploys, rolls back, and deploys on a webhook and i
 
   await test.step('a refused save keeps the typed text; a reload hides the .env', async () => {
     await openTab(page, url, 'Environment');
-    await page.getByRole('button', { name: 'Show and edit .env', exact: true }).click();
-    await confirm(page, 'Show the .env', 'Show and edit .env');
+    await confirm(page, page.getByRole('button', { name: 'Show and edit .env', exact: true }), 'Show the .env', 'Show and edit .env');
     const editor = page.getByRole('textbox', { name: 'Contents' });
     await expect(editor).toHaveValue(new RegExp(`^E2E_GREETING=${greeting}$`, 'm'));
     const tooLong = `E2E_PAD=${'x'.repeat(65536 - 'E2E_PAD='.length)}\n`;
@@ -214,8 +234,7 @@ test('v0.2.0: a Laravel site deploys, rolls back, and deploys on a webhook and i
     const rollback = page.getByRole('button', { name: 'Roll back', exact: true });
     await expect(rollback).toHaveCount(1);
     scenario('v02-deploy.sh', 'mark');
-    await rollback.click();
-    await confirm(page, /^Roll back to \d{14}-[0-9a-f]{7}\?$/, 'Roll back');
+    await confirm(page, rollback, /^Roll back to \d{14}-[0-9a-f]{7}\?$/, 'Roll back');
     await expect(page.getByText(new RegExp(`Rolling ${site} back to`))).toBeVisible();
     scenario('v02-deploy.sh', 'wait', 'site.rollback', 'succeeded');
     // The first release's cached config has no greeting yet.
