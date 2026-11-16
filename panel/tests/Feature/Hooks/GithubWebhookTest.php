@@ -171,6 +171,9 @@ final class GithubWebhookTest extends HooksTestCase
 
     public function testOversizedBodyRejected(): void
     {
+        // The 413's debug error page copies the 1 MiB request several times;
+        // PHP 8.3's CLI default of 128M runs out late in the suite.
+        ini_set('memory_limit', '256M');
         $repository = $this->connected($this->site(), ['auto_deploy' => true]);
         $limit = 1024 * 1024;
         $body = $this->paddedPush($limit + 1);

@@ -18,7 +18,7 @@
                     <textarea x-ref="content" rows="20" spellcheck="false" autocomplete="off" autocapitalize="off" class="block w-full rounded-lg border border-gray-300 bg-white p-3 font-mono text-xs dark:border-white/10 dark:bg-white/5">
 {{ $content ?? '' }}</textarea>
                 </label>
-                <p class="text-gray-500 dark:text-gray-400">{{ __('zimam.environment.limit', ['max' => \App\Agent\Commands\SiteEnvWrite::MAX_BYTES]) }}</p>
+                <p class="text-gray-500 dark:text-gray-400">{{ __('zimam.environment.limit', ['max' => \App\Agent\Commands\SiteEnvWrite::MAX_BYTES]) }} {{ __('zimam.environment.line_endings') }}</p>
                 @error('content')
                     <p class="text-danger-600 dark:text-danger-400">{{ $message }}</p>
                 @enderror

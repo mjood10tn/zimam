@@ -60,6 +60,14 @@ class EnvironmentTab extends Component implements HasActions, HasSchemas
     #[Locked]
     public ?string $readError = null;
 
+    /**
+     * When the password was confirmed (a Unix time). The reveal lasts as long
+     * as a password confirmation does (auth.password_timeout); after that,
+     * save() closes the editor and asks for the password again.
+     */
+    #[Locked]
+    public ?int $revealedAt = null;
+
     /** The .env as read, only in the response of the reveal request. */
     private ?string $content = null;
 
@@ -105,6 +113,7 @@ class EnvironmentTab extends Component implements HasActions, HasSchemas
         }
         $this->content = is_string($content) ? $content : '';
         $this->revealed = true;
+        $this->revealedAt = now()->getTimestamp();
         $this->editorKey = bin2hex(random_bytes(8));
     }
 
@@ -115,6 +124,12 @@ class EnvironmentTab extends Component implements HasActions, HasSchemas
     public function save(#[SensitiveParameter] mixed $content): void
     {
         if (! $this->revealed) {
+            return;
+        }
+        if ($this->revealedAt === null || now()->getTimestamp() - $this->revealedAt > (int) config('auth.password_timeout')) {
+            $this->hide();
+            Notification::make()->title(__('zimam.environment.expired'))->warning()->send();
+
             return;
         }
         $this->resetErrorBag('content');
@@ -137,7 +152,7 @@ class EnvironmentTab extends Component implements HasActions, HasSchemas
             return;
         } catch (AgentValidationFailed $e) {
             foreach ($e->fields() as $field => $message) {
-                $this->addError('content', $field === 'content' ? $message : "{$field}: {$message}");
+                $this->addError('content', $field === 'content' ? $message : __('zimam.environment.field_error', ['field' => $field, 'message' => $message]));
             }
 
             return;
@@ -160,6 +175,7 @@ class EnvironmentTab extends Component implements HasActions, HasSchemas
     {
         $this->content = null;
         $this->revealed = false;
+        $this->revealedAt = null;
         $this->missing = false;
         $this->editorKey = null;
         $this->readError = null;

@@ -315,7 +315,65 @@ final class EnvironmentTabTest extends TestCase
     /** @return array<string, array{string, mixed}> */
     public static function lockedProperties(): array
     {
-        return ['revealed' => ['revealed', true], 'missing' => ['missing', true], 'site' => ['site', null]];
+        return [
+            'revealed' => ['revealed', true],
+            'missing' => ['missing', true],
+            'site' => ['site', null],
+            'editorKey' => ['editorKey', 'forged'],
+            'readError' => ['readError', 'forged'],
+            'revealedAt' => ['revealedAt', 9999999999],
+        ];
+    }
+
+    /** A reveal lasts as long as a password confirmation (auth.password_timeout); after that, save() asks again. */
+    public function testRevealExpires(): void
+    {
+        Queue::fake();
+        config(['auth.password_timeout' => 600]);
+        $this->agent->env('shop', 'APP_KEY=x
+');
+        $tab = $this->revealed($this->site());
+
+        $this->travel(601)->seconds();
+        $tab->call('save', 'APP_KEY=late
+')
+            ->assertSet('revealed', false)
+            ->assertNotified(__('zimam.environment.expired'));
+        $this->assertSame([], $this->calls('site.env.write'));
+
+        // Within the timeout, a save goes through.
+        $tab = $this->revealed($this->site(name: 'blog'));
+        $this->travel(599)->seconds();
+        $tab->call('save', 'APP_KEY=soon
+')->assertSet('revealed', false);
+        $this->assertSame([['name' => 'blog', 'content' => 'APP_KEY=soon
+']], array_column($this->calls('site.env.write'), 'params'));
+    }
+
+    /** Another field the agent names is reported through lang, with the field's name. */
+    public function testAgentFieldErrorsThroughLang(): void
+    {
+        Queue::fake();
+        $this->agent->env('shop', 'APP_KEY=x
+')
+            ->respond('site.env.write', new AgentValidationFailed('Invalid parameters', ['name' => 'is not a site']));
+
+        $this->revealed($this->site())->call('save', 'APP_KEY=y
+')
+            ->assertHasErrors(['content'])
+            ->assertSee(__('zimam.environment.field_error', ['field' => 'name', 'message' => 'is not a site']));
+        $this->assertNotSame('zimam.environment.field_error', __('zimam.environment.field_error'));
+    }
+
+    /** The help says what a browser does to line endings. */
+    public function testHelpSaysLineEndingsAreLf(): void
+    {
+        Queue::fake();
+        $this->agent->env('shop', 'APP_KEY=x
+');
+
+        $this->revealed($this->site())->assertSee(__('zimam.environment.line_endings'));
+        $this->assertStringContainsString('LF', __('zimam.environment.line_endings'));
     }
 
     #[DataProvider('lockedProperties')]
