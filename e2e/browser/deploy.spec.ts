@@ -43,22 +43,39 @@ function livewireCall(page: Page, method: string, timeout = 30_000): Promise<Res
 }
 
 // confirm clicks an action's trigger, fills the password dialog it opens and
-// submits it. Filament shows the dialog at once but renders its form from
-// the mountAction answer: a password typed before that answer is wiped,
-// which over a real server's latency (vps.yml) left the field empty and the
-// browser's required check stopped the submit. So the fill waits for the
-// answer, the value is checked, and the submit must reach the server.
+// submits it. Filament shows the dialog at once and renders its form from
+// the mountAction answer; Livewire morphs that answer in a moment after the
+// response arrives, and the morph resets the field. Over a real server's
+// latency (vps.yml) a password typed before the morph was wiped, even after
+// waiting for the response, and the browser's required check then stopped
+// the submit without a request. There is no event for "morphed", so the
+// submit itself is the proof: it must send callMountedAction. When it
+// doesn't, nothing reached the server, so the field is filled again and the
+// submit retried; the dialog must then close, which a wrong password would
+// prevent.
 async function confirm(page: Page, trigger: Locator, heading: string | RegExp, submit: string): Promise<void> {
+  const password = loadAdmin().password;
   const mounted = livewireCall(page, 'mountAction');
   await trigger.click();
   await mounted;
   const dialog = page.getByRole('dialog', { name: heading });
   const field = dialog.getByLabel('Current password');
-  await field.fill(loadAdmin().password);
-  await expect(field).toHaveValue(loadAdmin().password);
-  const called = livewireCall(page, 'callMountedAction');
-  await dialog.getByRole('button', { name: submit, exact: true }).click();
-  await called;
+  for (let attempt = 1; ; attempt++) {
+    if ((await field.inputValue()) !== password) {
+      await field.fill(password);
+    }
+    const called = livewireCall(page, 'callMountedAction', 10_000);
+    await dialog.getByRole('button', { name: submit, exact: true }).click();
+    try {
+      await called;
+      break;
+    } catch (e) {
+      if (attempt === 3) {
+        throw new Error(`the ${submit} dialog sent nothing after 3 submits; its password field holds ${(await field.inputValue()).length} characters`, { cause: e });
+      }
+      console.warn(`confirm: the ${submit} submit sent no request (attempt ${attempt}); filling again`);
+    }
+  }
   await expect(dialog).toBeHidden();
 }
 
