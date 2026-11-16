@@ -16,7 +16,9 @@ import (
 // validated values; the panel never sends argv.
 type Request struct {
 	Program Program
-	PHP     contract.PHPVersion // php, artisan and composer only
+	// PHP is the version php, artisan and composer run with; for them and
+	// for the deploy script it is also what a bare "php" means.
+	PHP contract.PHPVersion
 	// Args and Env travel in the helper's argv, readable by any local user
 	// in /proc/<pid>/cmdline: never put a secret in them.
 	Args  []string

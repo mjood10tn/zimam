@@ -40,8 +40,9 @@ type fakeHelper struct {
 	badPublic string
 	// yFails is how many ssh-keygen -y runs exit 1, as for a corrupt key.
 	yFails int
-	// failRemove makes RemoveTree of a name fail.
-	failRemove map[string]error
+	// failRemove makes RemoveTree of a name fail, failWrite a Write and
+	// failRename a Rename to a name.
+	failRemove, failWrite, failRename map[string]error
 }
 
 type fakeNode struct {
@@ -79,6 +80,9 @@ func (h *fakeHelper) Write(_ context.Context, a helper.Account, name string, mod
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.record(a, "write", name, fmt.Sprintf("%o", mode))
+	if err := h.failWrite[name]; err != nil {
+		return err
+	}
 	if n := h.nodes[path.Dir(name)]; n == nil || !n.dir {
 		return fmt.Errorf("fake helper: %s has no parent directory: %w", name, fs.ErrNotExist)
 	}
@@ -116,6 +120,22 @@ func (h *fakeHelper) RemoveTree(_ context.Context, a helper.Account, name string
 	return nil
 }
 
+func (h *fakeHelper) Rename(_ context.Context, a helper.Account, from, to string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.record(a, "rename", from, to)
+	if err := h.failRename[to]; err != nil {
+		return err
+	}
+	n := h.nodes[from]
+	if n == nil {
+		return fmt.Errorf("fake helper: %s: %w", from, fs.ErrNotExist)
+	}
+	h.nodes[to] = n
+	delete(h.nodes, from)
+	return nil
+}
+
 func (h *fakeHelper) Exec(_ context.Context, a helper.Account, r helper.ExecRequest) (int, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -123,9 +143,14 @@ func (h *fakeHelper) Exec(_ context.Context, a helper.Account, r helper.ExecRequ
 	if r.Program != "ssh-keygen" {
 		return 1, fmt.Errorf("fake helper: unexpected program %s", r.Program)
 	}
+	// The key file is the argument after -f.
+	file := ""
+	if i := slices.Index(r.Args, "-f"); i >= 0 && i+1 < len(r.Args) {
+		file = r.Args[i+1]
+	}
 	switch {
 	case slices.Contains(r.Args, "-t"):
-		if h.nodes[keyFile] != nil || h.nodes[keyFile+".pub"] != nil {
+		if h.nodes[file] != nil || h.nodes[file+".pub"] != nil {
 			return 1, nil // "Overwrite (y/n)?" with empty stdin
 		}
 		if n := h.nodes[".ssh"]; n == nil || !n.dir {
@@ -133,11 +158,11 @@ func (h *fakeHelper) Exec(_ context.Context, a helper.Account, r helper.ExecRequ
 		}
 		h.keys++
 		pub := testPublicKey(byte(h.keys))
-		h.nodes[keyFile] = &fakeNode{mode: 0o600, content: []byte("PRIVATE " + pub)}
-		h.nodes[keyFile+".pub"] = &fakeNode{mode: 0o644, content: []byte(pub + " zimam-shop@panel.example.com\n")}
+		h.nodes[file] = &fakeNode{mode: 0o600, content: []byte("PRIVATE " + pub)}
+		h.nodes[file+".pub"] = &fakeNode{mode: 0o644, content: []byte(pub + " zimam-shop@panel.example.com\n")}
 		return 0, nil
 	case slices.Contains(r.Args, "-y"):
-		n := h.nodes[keyFile]
+		n := h.nodes[file]
 		if n == nil {
 			return 1, nil
 		}
@@ -194,7 +219,7 @@ func testFingerprint(pub string) string {
 	return "SHA256:" + base64.RawStdEncoding.EncodeToString(s[:])
 }
 
-const keygenArgs = "dir= -t ed25519 -N  -C zimam-shop@panel.example.com -f .ssh/zimam_deploy -q"
+const keygenArgs = "dir= -t ed25519 -N  -C zimam-shop@panel.example.com -f .ssh/zimam_deploy.new -q"
 
 type env struct {
 	t   *testing.T
@@ -290,8 +315,11 @@ func TestRepoGeneratesKeyAsSiteUser(t *testing.T) {
 	if !e.h.has("s_shop exec ssh-keygen " + keygenArgs) {
 		t.Errorf("no ssh-keygen as s_shop; changes %q", e.h.changes())
 	}
-	if !e.h.has("s_shop exec ssh-keygen dir= -y -f .ssh/zimam_deploy") {
+	if !e.h.has("s_shop exec ssh-keygen dir= -y -f .ssh/zimam_deploy.new") {
 		t.Errorf("the public key wasn't read through ssh-keygen -y; changes %q", e.h.changes())
+	}
+	if e.h.nodes[keyFile] == nil || e.h.nodes[keyFile+".pub"] == nil || e.h.nodes[newKeyFile] != nil || e.h.nodes[newKeyFile+".pub"] != nil {
+		t.Errorf("the new key isn't in place under its final name; changes %q", e.h.changes())
 	}
 	want := testPublicKey(1)
 	if res.PublicKey != want {
@@ -317,7 +345,7 @@ func TestRepoKeepsExistingKey(t *testing.T) {
 	first := e.mustRepo(contract.SiteRepoParams{Repository: "octo/app", Branch: "main"})
 	e.h.ops = nil
 	second := e.mustRepo(contract.SiteRepoParams{Repository: "octo/app", Branch: "main"})
-	if e.h.has("s_shop exec ssh-keygen "+keygenArgs) || e.h.has("s_shop remove-tree .ssh/zimam_deploy") {
+	if e.h.has("s_shop exec ssh-keygen "+keygenArgs) || e.h.has("s_shop rename .ssh/zimam_deploy.new .ssh/zimam_deploy") {
 		t.Errorf("the key was replaced; changes %q", e.h.changes())
 	}
 	if second.Fingerprint != first.Fingerprint || second.PublicKey != first.PublicKey {
@@ -331,17 +359,65 @@ func TestRepoRotatesKeyWhenAsked(t *testing.T) {
 	e.h.ops = nil
 	second := e.mustRepo(contract.SiteRepoParams{Repository: "octo/app", Branch: "main", RotateKey: true})
 	got := e.h.changes()
-	rmKey := slices.Index(got, "s_shop remove-tree .ssh/zimam_deploy")
-	rmPub := slices.Index(got, "s_shop remove-tree .ssh/zimam_deploy.pub")
+	rmKey := slices.Index(got, "s_shop remove-tree .ssh/zimam_deploy.new")
+	rmPub := slices.Index(got, "s_shop remove-tree .ssh/zimam_deploy.new.pub")
 	gen := slices.Index(got, "s_shop exec ssh-keygen "+keygenArgs)
 	if rmKey < 0 || rmPub < 0 || gen < 0 || gen < rmKey || gen < rmPub {
-		t.Fatalf("want both key files removed, then ssh-keygen (A7); changes %q", got)
+		t.Fatalf("want both temporary key files removed, then ssh-keygen (A7); changes %q", got)
+	}
+	// The key in use changes last, after everything that can fail.
+	hosts := slices.Index(got, "s_shop write .ssh/known_hosts 600")
+	mv := slices.Index(got, "s_shop rename .ssh/zimam_deploy.new .ssh/zimam_deploy")
+	if hosts < 0 || mv < hosts || mv != len(got)-2 || got[len(got)-1] != "s_shop rename .ssh/zimam_deploy.new.pub .ssh/zimam_deploy.pub" {
+		t.Errorf("want the key renamed into place as the last change; changes %q", got)
 	}
 	if second.Fingerprint == first.Fingerprint {
 		t.Errorf("fingerprint unchanged after rotation: %s", second.Fingerprint)
 	}
 	if st := e.state(); st.DeployKeyFingerprint != second.Fingerprint {
 		t.Errorf("state keeps %s, want %s", st.DeployKeyFingerprint, second.Fingerprint)
+	}
+	if got := string(e.h.nodes[keyFile].content); got != "PRIVATE "+second.PublicKey {
+		t.Errorf("the key in place is %q, want the rotated one", got)
+	}
+}
+
+// A rotation that fails after the new key was made leaves the old
+// key in place, and the state with its fingerprint: the panel still shows
+// a key that works.
+func TestRepoFailedRotationKeepsOldKey(t *testing.T) {
+	for name, fail := range map[string]func(h *fakeHelper){
+		"known_hosts": func(h *fakeHelper) {
+			h.failWrite = map[string]error{knownHosts: errors.New("fake helper: over quota")}
+		},
+		"mirror": func(h *fakeHelper) {
+			h.failRemove = map[string]error{MirrorDir: errors.New("fake helper: remove failed")}
+		},
+		"rename": func(h *fakeHelper) {
+			h.failRename = map[string]error{keyFile: errors.New("fake helper: rename failed")}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			first := e.mustRepo(contract.SiteRepoParams{Repository: "octo/app", Branch: "main"})
+			before := stateBytes(t, e.d.Paths)
+			fail(e.h)
+			if _, err := e.repo(contract.SiteRepoParams{Repository: "octo/app", Branch: "release", RotateKey: true}); err == nil {
+				t.Fatal("Repo succeeded")
+			}
+			if got := string(e.h.nodes[keyFile].content); got != "PRIVATE "+first.PublicKey {
+				t.Errorf("the key in place is %q, want the one from before the rotation", got)
+			}
+			if after := stateBytes(t, e.d.Paths); after != before {
+				t.Errorf("state changed:\n%s\nwant\n%s", after, before)
+			}
+			// Connecting again, without rotate, keeps that key.
+			e.h.failWrite, e.h.failRemove, e.h.failRename = nil, nil, nil
+			again := e.mustRepo(contract.SiteRepoParams{Repository: "octo/app", Branch: "main"})
+			if again.Fingerprint != first.Fingerprint {
+				t.Errorf("fingerprint %s after the failed rotation, want %s", again.Fingerprint, first.Fingerprint)
+			}
+		})
 	}
 }
 
@@ -354,7 +430,7 @@ func TestRepoKeepsKeyWithoutPub(t *testing.T) {
 	e.h.ops = nil
 	second := e.mustRepo(contract.SiteRepoParams{Repository: "octo/app", Branch: "main"})
 	got := e.h.changes()
-	if slices.Contains(got, "s_shop exec ssh-keygen "+keygenArgs) || slices.Contains(got, "s_shop remove-tree .ssh/zimam_deploy") {
+	if slices.Contains(got, "s_shop exec ssh-keygen "+keygenArgs) || slices.Contains(got, "s_shop rename .ssh/zimam_deploy.new .ssh/zimam_deploy") {
 		t.Errorf("the key was replaced for a missing .pub; changes %q", got)
 	}
 	if second.Fingerprint != first.Fingerprint || second.PublicKey != first.PublicKey {
@@ -369,13 +445,16 @@ func TestRepoReplacesMissingPrivateKey(t *testing.T) {
 	e.h.ops = nil
 	second := e.mustRepo(contract.SiteRepoParams{Repository: "octo/app", Branch: "main"})
 	got := e.h.changes()
-	rmPub := slices.Index(got, "s_shop remove-tree .ssh/zimam_deploy.pub")
 	gen := slices.Index(got, "s_shop exec ssh-keygen "+keygenArgs)
-	if rmPub < 0 || gen < rmPub {
-		t.Errorf("want the stray .pub removed, then ssh-keygen; changes %q", got)
+	mvPub := slices.Index(got, "s_shop rename .ssh/zimam_deploy.new.pub .ssh/zimam_deploy.pub")
+	if gen < 0 || mvPub < gen {
+		t.Errorf("want ssh-keygen, then the stray .pub replaced; changes %q", got)
 	}
 	if second.Fingerprint == first.Fingerprint {
 		t.Errorf("fingerprint unchanged: %s", second.Fingerprint)
+	}
+	if got := string(e.h.nodes[keyFile+".pub"].content); !strings.HasPrefix(got, second.PublicKey) {
+		t.Errorf("the .pub in place is %q, want the new key's", got)
 	}
 }
 
@@ -386,10 +465,10 @@ func TestRepoReplacesUnreadableKey(t *testing.T) {
 	e.h.ops = nil
 	second := e.mustRepo(contract.SiteRepoParams{Repository: "octo/app", Branch: "main"})
 	got := e.h.changes()
-	rmKey := slices.Index(got, "s_shop remove-tree .ssh/zimam_deploy")
 	gen := slices.Index(got, "s_shop exec ssh-keygen "+keygenArgs)
-	if rmKey < 0 || gen < rmKey {
-		t.Errorf("want the unreadable key removed, then ssh-keygen; changes %q", got)
+	mv := slices.Index(got, "s_shop rename .ssh/zimam_deploy.new .ssh/zimam_deploy")
+	if gen < 0 || mv < gen {
+		t.Errorf("want ssh-keygen, then the unreadable key replaced; changes %q", got)
 	}
 	if second.Fingerprint == first.Fingerprint || e.state().DeployKeyFingerprint != second.Fingerprint {
 		t.Errorf("fingerprint %s, then %s; state %s", first.Fingerprint, second.Fingerprint, e.state().DeployKeyFingerprint)

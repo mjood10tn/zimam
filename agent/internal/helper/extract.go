@@ -25,6 +25,11 @@ type ExtractLimits struct {
 // linkStaysInside reads a target from where the link's name says it is, so
 // a member under an earlier symlink member is refused: through d -> ".",
 // the link d/d/e lands at e, and ../../x is checked from the wrong place.
+// For the same reason a link's target may not pass through another link
+// member (linkAvoidsLinks): with d -> "../..", the target d/../../../x reads
+// as inside and lands outside. Each link is checked against the links
+// before it when it is made, and all of them against the whole set at the
+// end, since a later member can become a link on an earlier target's way.
 func extractTarGz(root *os.Root, dest string, r io.Reader, lim ExtractLimits) error {
 	gz, err := gzip.NewReader(r)
 	if err != nil {
@@ -32,10 +37,15 @@ func extractTarGz(root *os.Root, dest string, r io.Reader, lim ExtractLimits) er
 	}
 	tr := tar.NewReader(gz)
 	var total int64
-	links := map[string]bool{} // the symlink members so far
+	links := map[string]string{} // the symlink members so far, and their targets
 	for n := 0; ; n++ {
 		h, err := tr.Next()
 		if err == io.EOF {
+			for name, target := range links {
+				if err := linkAvoidsLinks(name, target, links); err != nil {
+					return err
+				}
+			}
 			return nil
 		}
 		if err != nil {
@@ -49,7 +59,7 @@ func extractTarGz(root *os.Root, dest string, r io.Reader, lim ExtractLimits) er
 			return err
 		}
 		for dir := path.Dir(name); dir != "."; dir = path.Dir(dir) {
-			if links[dir] {
+			if _, ok := links[dir]; ok {
 				return fmt.Errorf("archive member %q is inside the symlink %q", h.Name, dir)
 			}
 		}
@@ -79,10 +89,13 @@ func extractTarGz(root *os.Root, dest string, r io.Reader, lim ExtractLimits) er
 			if err := linkStaysInside(name, h.Linkname); err != nil {
 				return err
 			}
+			if err := linkAvoidsLinks(name, h.Linkname, links); err != nil {
+				return err
+			}
 			if err := root.Symlink(h.Linkname, target); err != nil {
 				return err
 			}
-			links[name] = true
+			links[name] = h.Linkname
 		default:
 			return fmt.Errorf("archive member %q has unsupported type %q", h.Name, h.Typeflag)
 		}
@@ -108,6 +121,31 @@ func linkStaysInside(member, target string) error {
 	resolved := path.Join(path.Dir(member), target)
 	if resolved == ".." || strings.HasPrefix(resolved, "../") {
 		return fmt.Errorf("symlink %q points outside the archive", member)
+	}
+	return nil
+}
+
+// linkAvoidsLinks walks target from the link's folder one component at a
+// time, as the kernel will, and refuses one that steps through a symlink
+// member: from there on the text and the disk disagree about where the
+// path is. The last component may itself be a link, which is then checked
+// in its own right. It assumes linkStaysInside passed.
+func linkAvoidsLinks(member, target string, links map[string]string) error {
+	parts := strings.Split(target, "/")
+	at := path.Dir(member)
+	for i, part := range parts {
+		switch part {
+		case "", ".":
+			continue
+		case "..":
+			at = path.Dir(at)
+			continue
+		}
+		at = path.Join(at, part)
+		// Only what the path goes through counts: anything but the end.
+		if _, ok := links[at]; ok && i < len(parts)-1 && at != member {
+			return fmt.Errorf("symlink %q points through the symlink %q", member, at)
+		}
 	}
 	return nil
 }

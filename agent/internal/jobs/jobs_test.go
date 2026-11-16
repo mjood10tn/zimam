@@ -535,3 +535,78 @@ func TestNewJobIDIsULID(t *testing.T) {
 		prev = id
 	}
 }
+
+// A handler that finished its work is recorded as succeeded even
+// when the unit was being stopped by then; "cancelled" would say nothing
+// changed.
+func TestRunRecordsWorkDoneBeforeAStop(t *testing.T) {
+	f := newFixture(t)
+	ctx, stop := context.WithCancel(context.Background())
+	f.m.Handlers["php.default"] = func(context.Context, *Context, contract.Params) (any, error) {
+		stop() // systemd stops the unit as the handler returns
+		return testResult{Greeting: "done"}, nil
+	}
+	id := f.submit(t, "php.default", &testParams{})
+	if err := f.m.RunJob(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	st := f.state(t, id)
+	if st.Status != contract.JobSucceeded || string(st.Result) != `{"greeting":"done"}` || exists(f.m.Paths.JobSpec(id)) {
+		t.Errorf("state = %+v; want succeeded with the result, and spec.json gone", st)
+	}
+	// Cancel, which waited for the stop, finds the job ended.
+	_, err := f.m.Cancel(callerCtx, id)
+	expectCode(t, err, contract.ErrConflict)
+}
+
+// A handler the stop interrupted is left for Cancel or Reconcile to record.
+func TestRunLeavesAStoppedHandlerToCancel(t *testing.T) {
+	f := newFixture(t)
+	ctx, stop := context.WithCancel(context.Background())
+	f.m.Handlers["php.default"] = func(ctx context.Context, _ *Context, _ contract.Params) (any, error) {
+		stop()
+		return nil, ctx.Err()
+	}
+	id := f.submit(t, "php.default", &testParams{})
+	if err := f.m.RunJob(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if st := f.state(t, id); st.Status != contract.JobRunning || string(st.Result) != "null" {
+		t.Errorf("state = %+v; want still running, for Cancel to record", st)
+	}
+}
+
+// A failure after the effect landed fails the job and keeps the result,
+// stopped or not.
+func TestRunKeepsTheResultOfALandedFailure(t *testing.T) {
+	for _, stopped := range []bool{false, true} {
+		f := newFixture(t)
+		ctx, stop := context.WithCancel(context.Background())
+		defer stop()
+		f.m.Handlers["php.default"] = func(context.Context, *Context, contract.Params) (any, error) {
+			if stopped {
+				stop()
+			}
+			return testResult{Greeting: "live"}, &Landed{Err: errors.New("release r1 is live, but pruning old releases failed")}
+		}
+		id := f.submit(t, "php.default", &testParams{})
+		if err := f.m.RunJob(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+		st := f.state(t, id)
+		if st.Status != contract.JobFailed || st.ErrorCode == nil || *st.ErrorCode != contract.ErrInternal ||
+			st.Message != "release r1 is live, but pruning old releases failed" || string(st.Result) != `{"greeting":"live"}` {
+			t.Errorf("stopped %t: state = %+v; want failed, with the message and the result", stopped, st)
+		}
+		if e := f.audit.last(t); e.Outcome != "error:internal" {
+			t.Errorf("stopped %t: entry outcome %s", stopped, e.Outcome)
+		}
+	}
+	// A plain failure still has no result.
+	f := newFixture(t)
+	id := f.submit(t, "site.provision", &testParams{Name: "broken"})
+	f.run(t, id)
+	if st := f.state(t, id); string(st.Result) != "null" {
+		t.Errorf("a plain failure kept a result: %s", st.Result)
+	}
+}

@@ -69,9 +69,22 @@ type execProgram struct {
 	path  string   // absolute; "" for the PHP programs, which use /usr/bin/php<v>
 	lead  []string // fixed arguments before the agent's
 	noArg bool     // the agent may add no arguments
-	stdin bool     // reads stdin from the agent; every other program gets /dev/null
+	stdin bool     // takes its script from the agent, on the helper's stdin; the program's own stdin is always /dev/null
+	php   bool     // may take a PHP version, only to put that php first in PATH
 	env   []string // environment keys the agent may set, besides PATH, HOME and LANG
 }
+
+// scriptFD is where the deploy script reaches bash. It can't be bash's
+// stdin: every command the script starts would share it, and one that reads
+// its stdin (ssh, cat, mysql) would swallow the rest of the script, which
+// bash then takes for the script's end.
+const scriptFD = "/dev/fd/3"
+
+// scriptPrologue goes before the script's first line, on that line, so the
+// script's line numbers stay right. bash has opened the script on a
+// descriptor of its own by then (255, close-on-exec), so closing 3 keeps
+// the script out of every command it starts.
+const scriptPrologue = "exec 3<&-;"
 
 var execPrograms = map[string]execProgram{
 	"git":        {path: "/usr/bin/git", env: []string{"GIT_SSH_COMMAND"}},
@@ -80,13 +93,14 @@ var execPrograms = map[string]execProgram{
 	"artisan":    {lead: []string{"artisan"}},
 	"composer": {lead: []string{composerPhar},
 		env: []string{"COMPOSER_HOME", "COMPOSER_CACHE_DIR", "COMPOSER_NO_INTERACTION"}},
-	// R02-D2: the script comes on stdin, never in argv.
-	"deploy-script": {path: "/bin/bash", lead: []string{"--noprofile", "--norc", "-eo", "pipefail", "-s"}, noArg: true, stdin: true},
+	// R02-D2: the script comes on the helper's stdin, never in argv; bash
+	// reads it from scriptFD.
+	"deploy-script": {path: "/bin/bash", lead: []string{"--noprofile", "--norc", "-eo", "pipefail", scriptFD}, noArg: true, stdin: true, php: true},
 }
 
 // ProgramArgv returns the absolute path of the program name and the fixed
 // arguments that come before the agent's. The PHP programs (php, artisan,
-// composer) need a supported PHP version; the others ignore it.
+// composer) need a supported PHP version; the others ignore it here.
 func ProgramArgv(name string, php contract.PHPVersion) (string, []string, error) {
 	p, ok := execPrograms[name]
 	if !ok {
@@ -122,7 +136,12 @@ func (s execSpec) validate() error {
 			return err
 		}
 	} else if s.PHP != "" {
-		return fmt.Errorf("exec %s: takes no PHP version", s.Program)
+		if !p.php {
+			return fmt.Errorf("exec %s: takes no PHP version", s.Program)
+		}
+		if err := s.PHP.Validate(); err != nil {
+			return fmt.Errorf("exec %s: PHP version %q %w", s.Program, s.PHP, err)
+		}
 	}
 	if p.noArg && len(s.Args) > 0 {
 		return fmt.Errorf("exec %s: takes no arguments", s.Program)
@@ -177,10 +196,54 @@ func decodeExecSpec(arg string) (execSpec, error) {
 }
 
 // execEnv is the program's whole environment: PATH, HOME, LANG and the
-// allowlisted keys, sorted.
+// allowlisted keys, sorted. With a PHP version, PATH starts with the
+// directory whose php is that version (phpBinDir).
 func execEnv(home string, s execSpec) []string {
-	env := []string{"PATH=/usr/bin:/bin", "HOME=" + home, "LANG=C.UTF-8"}
+	path := "/usr/bin:/bin"
+	if s.PHP != "" {
+		path = home + "/" + phpBinDir(s.PHP) + ":" + path
+	}
+	env := []string{"PATH=" + path, "HOME=" + home, "LANG=C.UTF-8"}
 	return append(env, slices.Sorted(slices.Values(s.Env))...)
+}
+
+// phpBinDir is the directory in the home, relative to it, that holds one
+// link: php, to /usr/bin/php<v>. /usr/bin/php is the server's default
+// version, so a bare "php" in a deploy script or a Composer script would
+// run the wrong one for a site on another version.
+func phpBinDir(v contract.PHPVersion) string {
+	return ".zimam/php" + string(v)
+}
+
+// ensurePHPBinDir makes phpBinDir(v), 0700, with its php link. Whatever
+// else is at the link's name is replaced. os.Root keeps all of it inside
+// the home; the link's target is a constant and the validated version.
+func ensurePHPBinDir(root *os.Root, v contract.PHPVersion) error {
+	dir := phpBinDir(v)
+	if err := root.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	link, want := dir+"/php", "/usr/bin/php"+string(v)
+	if got, err := root.Readlink(link); err == nil && got == want {
+		return nil
+	}
+	if err := root.RemoveAll(link); err != nil {
+		return err
+	}
+	return root.Symlink(want, link)
+}
+
+// readScript reads the whole deploy script before bash starts, so a script
+// cut short on its way here fails the run instead of running in part.
+func readScript(stdin io.Reader) ([]byte, error) {
+	text, err := io.ReadAll(io.LimitReader(stdin, contract.MaxTextFileBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("reading the script: %w", err)
+	}
+	if len(text) > contract.MaxTextFileBytes {
+		return nil, usageError{fmt.Errorf("the script is over %d bytes", contract.MaxTextFileBytes)}
+	}
+	return text, nil
 }
 
 // envList turns the client's map into execSpec's sorted KEY=value list.
@@ -330,8 +393,33 @@ func runExec(root *os.Root, arg string, stdin io.Reader, stdout io.Writer) (any,
 		Env:         execEnv(root.Name(), s),
 		SysProcAttr: &syscall.SysProcAttr{Setsid: true},
 	}
+	if s.PHP != "" {
+		if err := ensurePHPBinDir(root, s.PHP); err != nil {
+			return nil, fmt.Errorf("exec %s: making PHP %s the script's php: %w", s.Program, s.PHP, err)
+		}
+	}
+	// The program's stdin is /dev/null (cmd.Stdin stays nil). A script goes
+	// to bash through a pipe on descriptor 3 (scriptFD).
+	var scriptR, scriptW *os.File
 	if execPrograms[s.Program].stdin {
-		cmd.Stdin = stdin
+		text, err := readScript(stdin)
+		if err != nil {
+			return nil, fmt.Errorf("exec %s: %w", s.Program, err)
+		}
+		if scriptR, scriptW, err = os.Pipe(); err != nil {
+			return nil, err
+		}
+		cmd.ExtraFiles = []*os.File{scriptR}
+		// A pipe holds less than the largest script, so it is written
+		// while bash reads. A bash that ended early breaks the pipe, and
+		// the write then stops with an error nobody needs.
+		go func() {
+			defer scriptW.Close()
+			if _, err := io.WriteString(scriptW, scriptPrologue); err == nil {
+				scriptW.Write(text)
+			}
+		}()
+		defer scriptR.Close()
 	}
 	// Go closes only the descriptors it opened itself at exec; one this
 	// process inherited without close-on-exec would reach the program.
@@ -357,6 +445,9 @@ func runExec(root *os.Root, arg string, stdin io.Reader, stdout io.Writer) (any,
 	}
 	err = cmd.Start()
 	logW.Close()
+	if scriptR != nil {
+		scriptR.Close() // bash has its own; a second Close by the defer is harmless
+	}
 	if capW != nil {
 		capW.Close()
 	}
@@ -516,8 +607,11 @@ func pumpCapture(r io.Reader, out *frameWriter, max int64) error {
 
 // ExecRequest is one program for Client.Exec to run as the account.
 type ExecRequest struct {
-	Program string              // one of the fixed set: see ProgramArgv
-	PHP     contract.PHPVersion // php, artisan and composer only
+	Program string // one of the fixed set: see ProgramArgv
+	// PHP is the version php, artisan and composer run with. For them and
+	// for deploy-script, which may take one too, a bare "php" is then that
+	// version: its directory comes first in PATH.
+	PHP contract.PHPVersion
 	// Args, built by the agent from validated values, and Env, the
 	// program's allowlisted keys only, travel in the helper's argv, which
 	// any local user can read in /proc/<pid>/cmdline: never put a secret in
@@ -525,7 +619,7 @@ type ExecRequest struct {
 	Args  []string
 	Dir   string // relative to the home; "" is the home
 	Env   map[string]string
-	Stdin io.Reader // deploy-script only; nil is empty
+	Stdin io.Reader // deploy-script only: the script, which bash doesn't read as its stdin; nil is empty
 	// Capture, with CaptureMax > 0, receives the program's raw stdout instead
 	// of the job log (spike amendment A8). More than CaptureMax bytes fails
 	// the run.

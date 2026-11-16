@@ -158,7 +158,7 @@ func TestProgramArgv(t *testing.T) {
 		{"php", "8.3", "/usr/bin/php8.3", nil},
 		{"artisan", "8.4", "/usr/bin/php8.4", []string{"artisan"}},
 		{"composer", "8.5", "/usr/bin/php8.5", []string{"/usr/local/lib/zimam/composer/composer-2.11.2.phar"}},
-		{"deploy-script", "", "/bin/bash", []string{"--noprofile", "--norc", "-eo", "pipefail", "-s"}},
+		{"deploy-script", "", "/bin/bash", []string{"--noprofile", "--norc", "-eo", "pipefail", "/dev/fd/3"}},
 	} {
 		path, lead, err := ProgramArgv(c.program, contract.PHPVersion(c.php))
 		if err != nil || path != c.path || !slices.Equal(lead, c.lead) {
@@ -693,5 +693,105 @@ func TestPumpLinesKeepsPartialLineOnDeadline(t *testing.T) {
 	err := pumpLines(&deadlineReader{data: []byte("one\npart")}, func(l []byte, _ bool) { got = append(got, string(l)) })
 	if err != nil || !slices.Equal(got, []string{"one", "part"}) {
 		t.Errorf("pumpLines = %q, %v; want one and part", got, err)
+	}
+}
+
+// The script is not the stdin of the commands it runs. With the
+// script on bash's stdin, cat would read "echo SECOND" and "false" as its
+// input, and the run would end at cat's exit 0.
+func TestExecScriptCommandsCantSwallowTheScript(t *testing.T) {
+	c, a := testClient(t)
+	lines, code, err := script(t, context.Background(), c, a, "echo FIRST; cat >/dev/null; echo SECOND; false\n")
+	if err != nil || code != 1 || !slices.Equal(lines, []string{"FIRST", "SECOND"}) {
+		t.Errorf("script = %q, %d, %v; want FIRST and SECOND, then exit 1", lines, code, err)
+	}
+	// The same on separate lines, which is how bash reads a script.
+	lines, code, err = script(t, context.Background(), c, a, "echo FIRST\ncat >/dev/null\necho SECOND\nfalse\n")
+	if err != nil || code != 1 || !slices.Equal(lines, []string{"FIRST", "SECOND"}) {
+		t.Errorf("script = %q, %d, %v; want FIRST and SECOND, then exit 1", lines, code, err)
+	}
+	// A command reads nothing: its stdin is /dev/null, and the script's
+	// descriptor is closed for it.
+	lines, code, err = script(t, context.Background(), c, a, "readlink /proc/self/fd/0\nwc -c\nif cat <&3; then echo open; fi 2>/dev/null\necho $LINENO\n")
+	want := []string{"/dev/null", "0", "4"}
+	if err != nil || code != 0 || !slices.Equal(lines, want) {
+		t.Errorf("script = %q, %d, %v; want %q", lines, code, err, want)
+	}
+}
+
+func TestExecScriptOverLimitRefused(t *testing.T) {
+	root, _, _ := testHome(t)
+	arg, _ := json.Marshal(execSpec{Program: "deploy-script"})
+	var stdout, stderr bytes.Buffer
+	big := strings.NewReader("true\n" + strings.Repeat("#", contract.MaxTextFileBytes))
+	if code := Serve(root, "exec", []string{string(arg)}, big, &stdout, &stderr); code != exitUsage || stdout.Len() != 0 {
+		t.Errorf("an oversized script = %d, %q, %q; want a refusal before anything runs", code, stdout.String(), stderr.String())
+	}
+}
+
+// With a PHP version, a bare "php" is that version's, through a
+// private directory first in PATH; without one PATH is the plain one.
+func TestExecPHPVersionFirstInPath(t *testing.T) {
+	c, a := testClient(t)
+	const text = "echo \"$PATH\"\nreadlink \"${PATH%%:*}/php\"\n"
+	run := func() []string {
+		t.Helper()
+		var lines []string
+		code, err := c.Exec(context.Background(), a, ExecRequest{
+			Program: "deploy-script", PHP: "8.4", Stdin: strings.NewReader(text),
+			Log: func(l string) { lines = append(lines, l) },
+		})
+		if err != nil || code != 0 {
+			t.Fatalf("script = %q, %d, %v", lines, code, err)
+		}
+		return lines
+	}
+	want := []string{a.Home + "/.zimam/php8.4:/usr/bin:/bin", "/usr/bin/php8.4"}
+	if lines := run(); !slices.Equal(lines, want) {
+		t.Errorf("script = %q, want %q", lines, want)
+	}
+	if fi, err := os.Lstat(filepath.Join(a.Home, ".zimam/php8.4")); err != nil || fi.Mode() != os.ModeDir|0o700 {
+		t.Errorf("the PHP directory: %v, %v; want a directory 0700", fi, err)
+	}
+	// A link that was changed is put right, and a second run keeps it.
+	link := filepath.Join(a.Home, ".zimam/php8.4/php")
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/usr/bin/php8.2", link); err != nil {
+		t.Fatal(err)
+	}
+	if lines := run(); !slices.Equal(lines, want) {
+		t.Errorf("after the link changed: script = %q, want %q", lines, want)
+	}
+
+	env := execEnv("/home/s_x", execSpec{Program: "composer", PHP: "8.3"})
+	if env[0] != "PATH=/home/s_x/.zimam/php8.3:/usr/bin:/bin" {
+		t.Errorf("composer's %s; want PHP 8.3's directory first", env[0])
+	}
+	for _, s := range []execSpec{
+		{Program: "deploy-script", PHP: "7.4"},
+		{Program: "deploy-script", PHP: "8.4/../x"},
+		{Program: "git", PHP: "8.4"},
+	} {
+		if err := s.validate(); err == nil {
+			t.Errorf("validate accepted %s with PHP %q", s.Program, s.PHP)
+		}
+	}
+}
+
+// The PHP directory can't be steered out of the home.
+func TestExecPHPDirStaysInHome(t *testing.T) {
+	c, a := testClient(t)
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(a.Home, ".zimam")); err != nil {
+		t.Fatal(err)
+	}
+	_, err := c.Exec(context.Background(), a, ExecRequest{Program: "deploy-script", PHP: "8.4", Stdin: strings.NewReader("true\n")})
+	if err == nil {
+		t.Error("exec through a .zimam link that leaves the home succeeded")
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Errorf("the helper wrote outside the home: %v", entries)
 	}
 }

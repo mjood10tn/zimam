@@ -270,6 +270,15 @@ func symlinkSwap(root *os.Root, link, target string) error {
 	return syncDir(root, path.Dir(link))
 }
 
+// rename moves from over to, both inside the home, replacing a file that
+// is at to; it is one step, so to is always the old file or the new one.
+func rename(root *os.Root, from, to string) error {
+	if err := root.Rename(from, to); err != nil {
+		return err
+	}
+	return syncDir(root, path.Dir(to))
+}
+
 // removeTree deletes name and everything under it. The home itself stays:
 // for "." only its contents go (§9.8).
 func removeTree(root *os.Root, name string) error {

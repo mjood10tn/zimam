@@ -27,8 +27,11 @@ import (
 // Paths inside a site's home, relative to it, as the helper takes them
 // (Site layout).
 const (
-	sshDir     = ".ssh"
-	keyFile    = ".ssh/zimam_deploy"
+	sshDir  = ".ssh"
+	keyFile = ".ssh/zimam_deploy"
+	// newKeyFile is where a new deploy key waits until the state file
+	// names it; only then does it replace keyFile.
+	newKeyFile = ".ssh/zimam_deploy.new"
 	knownHosts = ".ssh/known_hosts"
 	// MirrorDir is the site's bare repository, fetched as the site user.
 	MirrorDir = "site/repo.git"
@@ -68,6 +71,7 @@ type Helper interface {
 	Write(ctx context.Context, a helper.Account, name string, mode fs.FileMode, content io.Reader) error
 	Stat(ctx context.Context, a helper.Account, name string) (helper.FileInfo, error)
 	RemoveTree(ctx context.Context, a helper.Account, name string) error
+	Rename(ctx context.Context, a helper.Account, from, to string) error
 }
 
 // CheckRepo is site.repo's precheck: the site must exist.
@@ -89,17 +93,21 @@ func loadSite(d sysexec.Deps, name contract.SiteName) (sites.State, error) {
 //  1. git and unzip are installed if missing (R02-D7);
 //  2. ~/.ssh is 0700, made through the helper;
 //  3. the deploy key is kept while its private half exists and ssh-keygen
-//     -y reads it, unless rotate_key is set (R02-D4); otherwise both
-//     halves are deleted, since ssh-keygen won't overwrite (A7), and
-//     ssh-keygen makes a new key as the site user. The public key always
-//     comes from ssh-keygen -y, so it is the private key's own, and its
-//     fingerprint is computed here; a missing .pub alone changes nothing;
+//     -y reads it, unless rotate_key is set (R02-D4); otherwise
+//     ssh-keygen makes a new key as the site user, under a temporary name
+//     (newKeyFile). The public key always comes from ssh-keygen -y, so it
+//     is the private key's own, and its fingerprint is computed here; a
+//     missing .pub alone changes nothing;
 //  4. ~/.ssh/known_hosts is GitHub's pinned keys, rewritten every time
 //     (R02-D3);
 //  6. a changed repository or branch drops the bare mirror, so the next
 //     deploy starts fresh;
 //  7. the state file records the repository, the branch and the
-//     fingerprint.
+//     fingerprint;
+//  8. a new key replaces the old one, last: every step that can fail has
+//     passed by then, so a failed connect leaves the key the panel shows
+//     and GitHub has. If the replacing itself fails, the state goes back
+//     to the old fingerprint.
 //
 // The result holds only the public key, without a comment, and its
 // fingerprint.
@@ -121,7 +129,8 @@ func Repo(ctx context.Context, d sysexec.Deps, h Helper, lookup sites.Lookup, p 
 	if err := h.Mkdir(ctx, a, sshDir, 0o700); err != nil {
 		return contract.SiteRepoResult{}, err
 	}
-	pub, fp, err := ensureKey(ctx, d, h, a, p)
+	old := st
+	pub, fp, fresh, err := ensureKey(ctx, d, h, a, p)
 	if err != nil {
 		return contract.SiteRepoResult{}, err
 	}
@@ -140,6 +149,14 @@ func Repo(ctx context.Context, d sysexec.Deps, h Helper, lookup sites.Lookup, p 
 	st.Repository, st.Branch, st.DeployKeyFingerprint = p.Repository, p.Branch, fp
 	if err := sites.Save(d.Paths, st); err != nil {
 		return contract.SiteRepoResult{}, err
+	}
+	if fresh {
+		if err := installKey(ctx, d, h, a); err != nil {
+			if serr := sites.Save(d.Paths, old); serr != nil {
+				d.Logf("Putting the state back failed too: %v", serr)
+			}
+			return contract.SiteRepoResult{}, fmt.Errorf("putting the new deploy key in place: %w", err)
+		}
 	}
 	d.Logf("Site %s deploys %s from %s; its deploy key is %s", p.Name, p.Branch, p.Repository, fp)
 	return contract.SiteRepoResult{Name: p.Name, Repository: p.Repository, Branch: p.Branch, PublicKey: pub, Fingerprint: fp}, nil
@@ -165,52 +182,77 @@ func ensurePackages(ctx context.Context, d sysexec.Deps) error {
 
 // ensureKey keeps the deploy key when its private half exists and
 // ssh-keygen -y reads it, unless rotate_key is set; otherwise it makes a
-// new one. It returns the public key and its fingerprint.
-func ensureKey(ctx context.Context, d sysexec.Deps, h Helper, a helper.Account, p contract.SiteRepoParams) (key, fpr string, err error) {
+// new one at newKeyFile, which installKey later puts in place (fresh). The
+// key in use is untouched here, so a connect that fails after this still
+// has it. It returns the public key and its fingerprint.
+func ensureKey(ctx context.Context, d sysexec.Deps, h Helper, a helper.Account, p contract.SiteRepoParams) (key, fpr string, fresh bool, err error) {
 	if !p.RotateKey {
 		priv, err := present(ctx, h, a, keyFile)
 		if err != nil {
-			return "", "", err
+			return "", "", false, err
 		}
 		if priv {
-			key, fpr, err := publicKey(ctx, d, h, a)
+			key, fpr, err := publicKey(ctx, d, h, a, keyFile)
 			var exit *sysexec.ExitError
 			switch {
 			case err == nil:
 				d.Logf("Keeping the site's deploy key")
-				return key, fpr, nil
+				return key, fpr, false, nil
 			case !errors.As(err, &exit):
-				return "", "", err
+				return "", "", false, err
 			}
 			d.Logf("ssh-keygen can't read the deploy key; replacing it")
 		}
 	}
-	// ssh-keygen won't overwrite either half (A7). RemoveTree of a missing
-	// name succeeds.
-	for _, name := range []string{keyFile, keyFile + ".pub"} {
+	// ssh-keygen won't overwrite either half (A7); an earlier run that was
+	// stopped may have left them. RemoveTree of a missing name succeeds.
+	for _, name := range []string{newKeyFile, newKeyFile + ".pub"} {
 		if err := h.RemoveTree(ctx, a, name); err != nil {
-			return "", "", err
+			return "", "", false, err
 		}
 	}
 	d.Logf("Making a new deploy key as %s", a.Name)
 	comment := "zimam-" + string(p.Name) + "@" + string(d.Config.PanelDomain)
 	if _, err := siteexec.Run(ctx, d, h, a, siteexec.Request{
 		Program:   siteexec.SSHKeygen,
-		Args:      []string{"-t", "ed25519", "-N", "", "-C", comment, "-f", keyFile, "-q"},
+		Args:      []string{"-t", "ed25519", "-N", "", "-C", comment, "-f", newKeyFile, "-q"},
 		LogPrefix: "ssh-keygen: ",
 	}); err != nil {
-		return "", "", err
+		return "", "", false, err
 	}
-	return publicKey(ctx, d, h, a)
+	key, fpr, err = publicKey(ctx, d, h, a, newKeyFile)
+	return key, fpr, err == nil, err
 }
 
-// publicKey reads the deploy key's public half as ssh-keygen -y derives it
-// from the private key, and its SHA-256 fingerprint.
-func publicKey(ctx context.Context, d sysexec.Deps, h Helper, a helper.Account) (key, fpr string, err error) {
+// installKey moves the new key over the one in use. The private half is
+// what matters: once it is renamed the key has changed, so the public
+// half, which nothing reads, only logs a failure. It runs even when the
+// job was cancelled meanwhile: the state file already names the new key.
+func installKey(ctx context.Context, d sysexec.Deps, h Helper, a helper.Account) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+	defer cancel()
+	d.Logf("Putting the new deploy key in place")
+	if err := h.Rename(ctx, a, newKeyFile, keyFile); err != nil {
+		for _, name := range []string{newKeyFile, newKeyFile + ".pub"} {
+			if rerr := h.RemoveTree(ctx, a, name); rerr != nil {
+				d.Logf("Removing ~/%s failed too: %v", name, rerr)
+			}
+		}
+		return err
+	}
+	if err := h.Rename(ctx, a, newKeyFile+".pub", keyFile+".pub"); err != nil {
+		d.Logf("Moving the public half to ~/%s.pub failed (%v); the key itself is in place", keyFile, err)
+	}
+	return nil
+}
+
+// publicKey reads the public half of the deploy key at file as ssh-keygen
+// -y derives it from the private key, and its SHA-256 fingerprint.
+func publicKey(ctx context.Context, d sysexec.Deps, h Helper, a helper.Account, file string) (key, fpr string, err error) {
 	var out bytes.Buffer
 	if _, err := siteexec.Run(ctx, d, h, a, siteexec.Request{
 		Program:    siteexec.SSHKeygen,
-		Args:       []string{"-y", "-f", keyFile},
+		Args:       []string{"-y", "-f", file},
 		LogPrefix:  "ssh-keygen: ",
 		Capture:    &out,
 		CaptureMax: maxPublicKeyBytes,

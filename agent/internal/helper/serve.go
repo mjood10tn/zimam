@@ -124,6 +124,9 @@ var operations = map[string]operation{
 		}
 		return nil, chmod(root, a[0], mode)
 	}},
+	"rename": {2, func(root *os.Root, a []string, _ io.Reader) (any, error) {
+		return nil, rename(root, a[0], a[1])
+	}},
 	"remove-tree": {1, func(root *os.Root, a []string, _ io.Reader) (any, error) {
 		return nil, removeTree(root, a[0])
 	}},

@@ -667,3 +667,33 @@ func TestChmodOperation(t *testing.T) {
 		t.Errorf("chmod of a missing file = %d, want 3", code)
 	}
 }
+
+// rename replaces a file in one step, inside the home only.
+func TestRenameReplacesInsideHome(t *testing.T) {
+	root, home, outside := testHome(t)
+	for name, body := range map[string]string{"key.new": "new", "key": "old"} {
+		if err := os.WriteFile(filepath.Join(home, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := rename(root, "key.new", "key"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(home, "key")); string(got) != "new" {
+		t.Errorf("key = %q, want the new file's content", got)
+	}
+	if _, err := os.Lstat(filepath.Join(home, "key.new")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("key.new is still there: %v", err)
+	}
+	if err := rename(root, "missing", "key"); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("rename of a missing file = %v, want not-exist", err)
+	}
+	for _, to := range []string{"../escaped", filepath.Join(outside, "escaped")} {
+		if err := rename(root, "key", to); err == nil {
+			t.Errorf("rename to %q succeeded", to)
+		}
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Errorf("outside holds %v", entries)
+	}
+}

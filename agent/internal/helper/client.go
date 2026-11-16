@@ -187,6 +187,11 @@ func (c *Client) Chmod(ctx context.Context, a Account, name string, mode fs.File
 	return c.run(ctx, a, "chmod", nil, &struct{}{}, name, octal(mode))
 }
 
+// Rename moves from over to inside a's home, replacing a file at to.
+func (c *Client) Rename(ctx context.Context, a Account, from, to string) error {
+	return c.run(ctx, a, "rename", nil, &struct{}{}, from, to)
+}
+
 // RemoveTree deletes name and everything under it; for "." it empties the
 // home and keeps it.
 func (c *Client) RemoveTree(ctx context.Context, a Account, name string) error {

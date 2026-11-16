@@ -69,7 +69,7 @@ type JobStatusResult struct {
 	Status     JobState        `json:"status"`
 	ErrorCode  *ErrorCode      `json:"error_code"` // set when the job failed
 	Message    string          `json:"message"`
-	Result     json.RawMessage `json:"result"` // the command's result; null until it succeeds
+	Result     json.RawMessage `json:"result"` // the command's result; null until it succeeds, or fails after its effect landed (the result says what is in place)
 	StartedAt  *time.Time      `json:"started_at"`
 	FinishedAt *time.Time      `json:"finished_at"`
 	LogSize    int64           `json:"log_size"` // bytes; from_offset counts into the log

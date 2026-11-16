@@ -25,6 +25,9 @@ const (
 	releasesDir = "site/releases"
 	currentLink = "site/current"
 	sharedDir   = "site/shared"
+	// webDir is the folder of a release that Nginx serves: every site's
+	// root is site/current/public (the vhost template).
+	webDir = "public"
 )
 
 // DeployHelper is what a deploy needs of the site-user helper;
@@ -81,14 +84,17 @@ func deployable(d sysexec.Deps, name contract.SiteName) (sites.State, error) {
 //  2. fetch the branch into site/repo.git, made on the first deploy as an
 //     empty bare repository with GitHub as origin (A2);
 //  3. resolve the commit: the branch's head, or the given one, which the
-//     branch must reach;
+//     branch must reach and which may not be behind the live release's
+//     commit (a push that waited while a newer one deployed, or a replayed
+//     webhook);
 //  4. stream git archive of the commit's tree (A1) into extract-tar, into
 //     site/releases/<id>;
 //  5. link shared/.env and shared/storage into the release, where the site
 //     has them;
 //  6. Composer, when it is on and the release has a composer.json;
 //  7. the deploy script, from stdin, with the release as its directory;
-//  8. bootstrap/cache 0700 and its files 0600;
+//  8. bootstrap/cache 0700 and its files 0600; the release must have a
+//     public/ folder, or the swap would leave the site answering 404;
 //  9. swap current to the release, and record it in the state file;
 //  10. mark the site's PHP version for maintenance's graceful reload (A3);
 //  11. prune releases beyond keep_releases, never the live one or the one
@@ -123,6 +129,11 @@ func Run(ctx context.Context, d sysexec.Deps, h DeployHelper, lookup sites.Looku
 	previous, err := liveRelease(ctx, h, a)
 	if err != nil {
 		return contract.SiteDeployResult{}, err
+	}
+	if p.Commit != nil {
+		if err := b.notSuperseded(sha, previous); err != nil {
+			return contract.SiteDeployResult{}, err
+		}
 	}
 	// The release must be new: only then may a failure remove it.
 	switch taken, err := present(ctx, h, a, rel); {
@@ -273,6 +284,38 @@ func (b *build) fetch() (contract.CommitSHA, error) {
 	return sha, nil
 }
 
+// notSuperseded refuses a given commit that the live release's commit
+// already contains. Deploys that wait for a busy site start in no fixed
+// order, and a signed webhook request can be sent again, so the commit of
+// an older push can arrive after a newer one went live; deploying it
+// would take the site back without anyone asking. Going back is
+// site.rollback's job. The same commit again is a plain redeploy and
+// passes. So does a live commit the repository no longer holds (a force
+// push, or another repository): nothing says the given one is older.
+func (b *build) notSuperseded(sha contract.CommitSHA, live string) error {
+	var liveSHA contract.CommitSHA
+	for _, r := range b.st.Releases {
+		if string(r.ID) == live {
+			liveSHA = r.Commit
+		}
+	}
+	if liveSHA == sha || liveSHA.Validate() != nil {
+		return nil
+	}
+	// Exit 0: sha is an ancestor of the live commit. 1 is "not an
+	// ancestor" and 128 a live commit git doesn't know.
+	err := b.git(b.d, MirrorDir, nil, 0, "merge-base", "--is-ancestor", string(sha), string(liveSHA))
+	var exit *sysexec.ExitError
+	switch {
+	case err == nil:
+		return &contract.AgentError{Code: contract.ErrConflict, Message: fmt.Sprintf(
+			"Commit %s is older than the live release's commit %s: a newer deploy has superseded it, so it isn't deployed. To go back to an older release, roll back.", sha, liveSHA)}
+	case errors.As(err, &exit):
+		return nil
+	}
+	return err
+}
+
 // ensureRepo makes site/repo.git on the first deploy: an empty bare
 // repository with GitHub as origin, never a mirror clone (A2). A failure
 // half way drops it, so the next deploy starts again. An existing one is
@@ -418,7 +461,26 @@ func (b *build) build(rel string, sha contract.CommitSHA) error {
 	if err := b.script(rel); err != nil {
 		return err
 	}
-	return b.tighten(rel)
+	if err := b.tighten(rel); err != nil {
+		return err
+	}
+	return b.webRoot(rel)
+}
+
+// webRoot is the last check before the swap: the release must hold a real
+// public/ directory, which is what Nginx serves for every site type.
+// Without it the swap would succeed and every URL would answer 404, where
+// the release before it still answers. A symlink doesn't count: where it
+// points is the repository's choice, and Nginx refuses one owned by
+// another user.
+func (b *build) webRoot(rel string) error {
+	fi, err := b.h.Stat(b.ctx, b.a, rel+"/"+webDir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist), err == nil && !fi.Mode.IsDir():
+		return &contract.AgentError{Code: contract.ErrConflict, Message: fmt.Sprintf(
+			"The release has no %s/ folder. Zimam serves a site from the %s/ folder of its repository, so put the files to serve there (index.html or index.php included) or have the deploy script build it. Nothing was changed: the site still serves the release from before.", webDir, webDir)}
+	}
+	return err
 }
 
 // export is step 4: git archive of the commit's tree, which has no
@@ -539,8 +601,10 @@ func (b *build) privateDir(name string) error {
 	return b.h.Chmod(b.ctx, b.a, name, 0o700)
 }
 
-// script is step 7: the owner's script on bash's stdin, never in argv
-// (R02-D2), with the release as its directory.
+// script is step 7: the owner's script, sent on the helper's stdin, never
+// in argv (R02-D2), with the release as its directory. On a PHP site a
+// bare "php" in it is the site's version, as for Composer, not the
+// server's default.
 func (b *build) script(rel string) error {
 	if b.p.Script == "" {
 		return nil
@@ -548,11 +612,21 @@ func (b *build) script(rel string) error {
 	b.d.Logf("Running the deploy script")
 	_, err := siteexec.Run(b.ctx, b.d, b.h, b.a, siteexec.Request{
 		Program:   siteexec.DeployScript,
+		PHP:       b.scriptPHP(),
 		Dir:       rel,
 		Stdin:     strings.NewReader(string(b.p.Script)),
 		LogPrefix: "deploy script: ",
 	})
 	return err
+}
+
+// scriptPHP is the PHP version the deploy script's "php" means: the
+// site's, or none for a static site, whose script gets the plain PATH.
+func (b *build) scriptPHP() contract.PHPVersion {
+	if !b.st.Type.RunsPHP() {
+		return ""
+	}
+	return b.st.PHPVersion
 }
 
 // tighten is step 8: bootstrap/cache 0700 and the files in it 0600, so a

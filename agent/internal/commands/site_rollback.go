@@ -23,5 +23,10 @@ func init() {
 // again first: a deploy may have pruned the release since the job was
 // accepted.
 func siteRollback(ctx context.Context, j *jobs.Context, p contract.Params) (any, error) {
-	return deploy.Rollback(ctx, j.Deps(), j.Helper, helper.LookupAccount, *p.(*contract.SiteRollbackParams))
+	res, err := deploy.Rollback(ctx, j.Deps(), j.Helper, helper.LookupAccount, *p.(*contract.SiteRollbackParams))
+	if err != nil && res.Release != "" {
+		// As for a deploy: the release is live, and the result says so.
+		return res, &jobs.Landed{Err: err}
+	}
+	return res, err
 }

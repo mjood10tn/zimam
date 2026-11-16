@@ -133,6 +133,10 @@ func (h *localHelper) RemoveTree(ctx context.Context, a helper.Account, name str
 	return h.serve(ctx, a, "remove-tree", nil, nil, name)
 }
 
+func (h *localHelper) Rename(ctx context.Context, a helper.Account, from, to string) error {
+	return h.serve(ctx, a, "rename", nil, nil, from, to)
+}
+
 func (h *localHelper) Chmod(ctx context.Context, a helper.Account, name string, mode fs.FileMode) error {
 	return h.serve(ctx, a, "chmod", nil, nil, name, octal(mode))
 }
@@ -194,7 +198,22 @@ func (h *localHelper) Exec(ctx context.Context, a helper.Account, r helper.ExecR
 	for k, v := range r.Env {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
-	cmd.Stdin = r.Stdin
+	// As the real helper: the script reaches bash on descriptor 3, and the
+	// program's stdin is /dev/null.
+	if r.Stdin != nil {
+		f, err := os.CreateTemp(h.t.TempDir(), "script")
+		if err != nil {
+			return 0, err
+		}
+		defer f.Close()
+		if _, err := f.Write(stdin); err != nil {
+			return 0, err
+		}
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return 0, err
+		}
+		cmd.ExtraFiles = []*os.File{f}
+	}
 	var logged bytes.Buffer
 	cmd.Stderr = &logged
 	if r.Capture != nil {
@@ -253,6 +272,13 @@ func newUpstream(t *testing.T) *upstreamRepo {
 	}
 	u := &upstreamRepo{t: t, dir: t.TempDir()}
 	u.git("init", "-q", "-b", "main")
+	// Every commit has the public/ folder a release needs.
+	if err := os.MkdirAll(filepath.Join(u.dir, "public"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(u.dir, "public/.keep"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	return u
 }
 
@@ -944,7 +970,7 @@ func TestForcePushedBranchDeploys(t *testing.T) {
 	first := e.mustDeploy(contract.SiteDeployParams{})
 	e.up.git("checkout", "-q", "--orphan", "rewritten")
 	e.up.git("rm", "-rqf", ".")
-	rewritten := e.up.commit(map[string]string{"index.html": "rewritten"})
+	rewritten := e.up.commit(map[string]string{"index.html": "rewritten", "public/.keep": ""})
 	e.up.git("branch", "-M", "rewritten", "main")
 	second := e.mustDeploy(contract.SiteDeployParams{})
 	if second.Commit != rewritten || second.PreviousRelease == nil || *second.PreviousRelease != first.Release {
@@ -1140,4 +1166,114 @@ func (e eofOnError) Read(p []byte) (int, error) {
 		err = io.EOF
 	}
 	return n, err
+}
+
+// A repository without public/ is refused before the swap, so the
+// site keeps serving what it served.
+func TestDeployWithoutPublicFolderKeepsLiveRelease(t *testing.T) {
+	e := newDeployEnv(t, contract.SiteStatic)
+	e.up.git("rm", "-rqf", "--ignore-unmatch", "public")
+	os.RemoveAll(filepath.Join(e.up.dir, "public"))
+	e.up.commit(map[string]string{"index.html": "at the top"})
+	before := stateBytes(t, e.p)
+	_, err := e.deploy(contract.SiteDeployParams{})
+	var ae *contract.AgentError
+	if !errors.As(err, &ae) || ae.Code != contract.ErrConflict || !strings.Contains(ae.Message, "public/") {
+		t.Fatalf("deploy = %v; want a conflict naming public/", err)
+	}
+	if e.current() != initialRel || !slices.Equal(e.releases(), []string{"initial"}) || stateBytes(t, e.p) != before {
+		t.Errorf("current -> %s, releases %q; want the placeholder alone and the state unchanged", e.current(), e.releases())
+	}
+	// A file or a link named public is no folder either.
+	e.up.commit(map[string]string{"public": "a file"})
+	if _, err := e.deploy(contract.SiteDeployParams{}); !errors.As(err, &ae) || ae.Code != contract.ErrConflict {
+		t.Errorf("deploy with a file named public = %v; want a conflict", err)
+	}
+	e.up.commit(map[string]string{"web/index.html": "x", "public": "-> web"})
+	if _, err := e.deploy(contract.SiteDeployParams{}); !errors.As(err, &ae) || ae.Code != contract.ErrConflict {
+		t.Errorf("deploy with a link named public = %v; want a conflict", err)
+	}
+	// The deploy script may build it.
+	e.up.git("rm", "-qf", "public")
+	e.up.commit(map[string]string{"index.html": "built"})
+	e.mustDeploy(contract.SiteDeployParams{Script: "mkdir public && cp index.html public/\n"})
+	if got := readFile(t, e.home("site/current/public/index.html")); got != "built" {
+		t.Errorf("public/index.html = %q", got)
+	}
+}
+
+// A given commit that the live release already contains is
+// refused, so a push that waited, or a replayed webhook, can't take the
+// site back. The live commit again, and a newer one, deploy.
+func TestGivenCommitBehindLiveReleaseRefused(t *testing.T) {
+	e := newDeployEnv(t, contract.SiteStatic)
+	v5 := e.up.commit(map[string]string{"public/index.html": "v5"})
+	v6 := e.up.commit(map[string]string{"public/index.html": "v6"})
+	e.mustDeploy(contract.SiteDeployParams{Commit: &v6, Trigger: contract.DeployWebhook})
+	live, before := e.current(), stateBytes(t, e.p)
+
+	_, err := e.deploy(contract.SiteDeployParams{Commit: &v5, Trigger: contract.DeployWebhook})
+	var ae *contract.AgentError
+	if !errors.As(err, &ae) || ae.Code != contract.ErrConflict || !strings.Contains(ae.Message, string(v5)) || !strings.Contains(ae.Message, "superseded") {
+		t.Fatalf("deploy of the older commit = %v; want a conflict saying it was superseded", err)
+	}
+	if e.current() != live || stateBytes(t, e.p) != before || len(e.releases()) != 2 {
+		t.Errorf("current -> %s, releases %q; want nothing changed", e.current(), e.releases())
+	}
+	if got := readFile(t, e.home("site/current/public/index.html")); got != "v6" {
+		t.Errorf("the site serves %q, want v6", got)
+	}
+	// The live commit itself is a redeploy.
+	if res := e.mustDeploy(contract.SiteDeployParams{Commit: &v6, Trigger: contract.DeployWebhook}); res.Commit != v6 {
+		t.Errorf("redeploy of the live commit: %+v", res)
+	}
+	v7 := e.up.commit(map[string]string{"public/index.html": "v7"})
+	if res := e.mustDeploy(contract.SiteDeployParams{Commit: &v7, Trigger: contract.DeployWebhook}); res.Commit != v7 {
+		t.Errorf("deploy of a newer commit: %+v", res)
+	}
+	// After a force push the live commit is no longer in the branch's
+	// history: the given commit is not known to be older, and deploys.
+	e.up.git("checkout", "-q", "--orphan", "rewritten")
+	other := e.up.commit(map[string]string{"public/index.html": "rewritten"})
+	e.up.git("branch", "-M", "rewritten", "main")
+	if res := e.mustDeploy(contract.SiteDeployParams{Commit: &other, Trigger: contract.DeployWebhook}); res.Commit != other {
+		t.Errorf("deploy after a force push: %+v", res)
+	}
+}
+
+// The deploy script's php is the site's version; a static site's
+// script gets no PHP at all.
+func TestScriptRunsWithTheSitesPHP(t *testing.T) {
+	for typ, want := range map[contract.SiteType]contract.PHPVersion{contract.SiteLaravel: "8.4", contract.SitePHP: "8.4", contract.SiteStatic: ""} {
+		e := newDeployEnv(t, typ)
+		e.up.commit(map[string]string{"index.html": "one"})
+		e.mustDeploy(contract.SiteDeployParams{Script: "true\n"})
+		var found bool
+		for _, r := range e.h.reqs {
+			if r.Program == "deploy-script" {
+				found = true
+				if r.PHP != want {
+					t.Errorf("%s site: the script ran with PHP %q, want %q", typ, r.PHP, want)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s site: the script didn't run", typ)
+		}
+	}
+}
+
+// A script whose command reads stdin still
+// runs to its end, and its failure fails the deploy.
+func TestScriptCommandReadingStdinDoesntEndTheScript(t *testing.T) {
+	e := newDeployEnv(t, contract.SiteStatic)
+	e.up.commit(map[string]string{"index.html": "one"})
+	_, err := e.deploy(contract.SiteDeployParams{Script: "echo FIRST\ncat >/dev/null\necho SECOND\nfalse\n"})
+	var exit *sysexec.ExitError
+	if !errors.As(err, &exit) || exit.Code != 1 {
+		t.Fatalf("deploy = %v; want the script's exit 1", err)
+	}
+	if !slices.Contains(e.logs, "deploy script: SECOND") || e.current() != initialRel {
+		t.Errorf("the script stopped early or the release went live: current -> %s\n%s", e.current(), strings.Join(e.logs, "\n"))
+	}
 }

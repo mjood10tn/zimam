@@ -26,6 +26,20 @@ import (
 // any other error fails the job as internal, with the error's text.
 type Handler func(ctx context.Context, j *Context, p contract.Params) (result any, err error)
 
+// Landed is a handler's error for a failure that came after the command's
+// effect was in place: a deploy whose release went live before its prune
+// failed. The job still fails, with Err's code and message, but the result
+// the handler returned with it is stored, so the panel can show what is
+// true now instead of what was before.
+type Landed struct{ Err error }
+
+func (l *Landed) Error() string { return l.Err.Error() }
+func (l *Landed) Unwrap() error { return l.Err }
+
+// recordTimeout bounds recording an outcome after the job's context was
+// cancelled; systemd kills the unit not long after it stops it.
+const recordTimeout = 10 * time.Second
+
 // Context is what a job handler gets.
 type Context struct {
 	ID     contract.JobID
@@ -43,9 +57,13 @@ func (j *Context) Deps() sysexec.Deps {
 
 // RunJob is the body of `zimam-agent job run <id>`, inside the job's unit
 // (§5.7). It returns nil once the outcome is recorded, and also when systemd
-// stops the unit (ctx cancelled): Cancel then records cancelled, and
-// Reconcile records a timeout or a vanished unit. An error means the outcome
-// couldn't be recorded; the unit then fails, and Reconcile records that.
+// stops the unit (ctx cancelled) before the handler's work landed: Cancel
+// then records cancelled, and Reconcile records a timeout or a vanished
+// unit. A handler that had finished its work when the stop came, or whose
+// effect had landed (Landed), is recorded as what it is: the stop waits for
+// this process, so the record is there before Cancel looks, and Cancel then
+// answers that the job already ended. An error means the outcome couldn't
+// be recorded; the unit then fails, and Reconcile records that.
 func (m *Manager) RunJob(ctx context.Context, id contract.JobID) error {
 	sp, err := m.readSpec(id)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -84,8 +102,17 @@ func (m *Manager) RunJob(ctx context.Context, id contract.JobID) error {
 	}
 	result, runErr := m.call(ctx, id, sp, logf)
 	if ctx.Err() != nil {
-		logf("Stopped")
-		return nil
+		var landed *Landed
+		if runErr != nil && !errors.As(runErr, &landed) {
+			logf("Stopped")
+			return nil
+		}
+		// What the handler did is done, stop or not: saying "cancelled"
+		// would tell the panel nothing changed.
+		logf("Stopped, after the work was done")
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
+		defer cancel()
 	}
 	if runErr != nil {
 		_, message := codeOf(runErr)
@@ -119,9 +146,10 @@ func (m *Manager) call(ctx context.Context, id contract.JobID, sp spec, logf fun
 // record writes a run's final state and audits it.
 func (m *Manager) record(ctx context.Context, id contract.JobID, result any, runErr error) error {
 	var data json.RawMessage
-	if runErr == nil {
+	var landed *Landed
+	if runErr == nil || errors.As(runErr, &landed) {
 		var err error
-		if data, err = json.Marshal(result); err != nil {
+		if data, err = json.Marshal(result); err != nil && runErr == nil {
 			runErr = fmt.Errorf("encoding the result: %w", err)
 		}
 	}
@@ -129,6 +157,9 @@ func (m *Manager) record(ctx context.Context, id contract.JobID, result any, run
 		if runErr != nil {
 			code, message := codeOf(runErr)
 			fail(st, code, message)
+			if landed != nil {
+				st.Result = data // what is in place despite the failure
+			}
 			return
 		}
 		st.Status = contract.JobSucceeded

@@ -409,3 +409,53 @@ func TestExtractRealGitArchive(t *testing.T) {
 		t.Errorf("extracting a commit's archive: %v; want the pax_global_header refused", err)
 	}
 }
+
+// A target that passes through another link member reads as inside
+// and lands outside. With a/b/c/d -> ../.. (which is a), the target
+// d/../../../secret.txt is a/secret.txt as text, and three levels above a
+// on disk. It is refused whichever of the two links comes first.
+func TestExtractRejectsTargetThroughLink(t *testing.T) {
+	d := tarLink("a/b/c/d", "../..")
+	e := tarLink("a/b/c/e", "d/../../../secret.txt")
+	for name, ms := range map[string][]member{
+		"the link first":   {tarDir("a/b/c/"), d, e},
+		"the target first": {tarDir("a/b/c/"), e, d},
+	} {
+		home, _, err := extractInto(t, testLimits, ms...)
+		if err == nil || !strings.Contains(err.Error(), "through the symlink") {
+			t.Errorf("%s: err = %v, want a refusal naming the link it goes through", name, err)
+		}
+		// Whatever was made before the refusal, nothing reads past the release.
+		if err := os.WriteFile(filepath.Join(home, "secret.txt"), []byte("secret"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := os.ReadFile(filepath.Join(home, "rel/a/b/c/e")); err == nil && name == "the link first" {
+			t.Errorf("%s: e was made and reads %q", name, got)
+		}
+	}
+	// A link to a link, and a link beside one, are fine.
+	if _, _, err := extractInto(t, testLimits, tarDir("a/"), tarFile("a/f", "x"), tarLink("a/d", "f"), tarLink("a/e", "d"), tarLink("g", "a/f")); err != nil {
+		t.Errorf("a link to a link: %v", err)
+	}
+}
+
+func TestLinkAvoidsLinks(t *testing.T) {
+	links := map[string]string{"a/d": "..", "l": "a"}
+	for _, c := range []struct {
+		member, target string
+		ok             bool
+	}{
+		{"a/e", "d", true},         // ends at a link
+		{"a/e", "d/x", false},      // goes through one
+		{"a/e", "./d/../x", false}, // even to come back
+		{"a/e", "../l/f", false},   // by way of ..
+		{"a/e", "../l", true},      // ends at one
+		{"a/e", "dd/x", true},      // a name that only starts like one
+		{"a/b/e", "../d/", false},  // a trailing slash follows the link
+		{"x", "a/f", true},
+	} {
+		if err := linkAvoidsLinks(c.member, c.target, links); (err == nil) != c.ok {
+			t.Errorf("linkAvoidsLinks(%q, %q) = %v, want ok %t", c.member, c.target, err, c.ok)
+		}
+	}
+}
