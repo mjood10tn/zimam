@@ -15,7 +15,7 @@
 #      site up-new provisions and answers 200, the panel's /admin/login
 #      answers 200, maintenance exits 0, and the audit log has
 #      the installer's cli:root entries from both runs. The two sites keep
-#      template_version 1 and no deploy fields in their state files, and
+#      their template_version and no deploy fields in their state files, and
 #      their vhosts, up-php's pool and their logrotate rules are byte for
 #      byte as before (R02-D9);
 #   5. serve the previous release again and run its installer: D25 refuses
@@ -146,6 +146,13 @@ rendered_before=$(in_c sha256sum "${rendered[@]}") || die "FAIL sites: the sites
 hash_of() {
 	awk -v f="$2" '$2 == f { print $1 }' <<<"$1"
 }
+# Each site's template_version on $old (1 from v0.1.x, 2 from v0.2.0 on):
+# the upgrade must leave it as it was.
+declare -A tv_before
+for site in up-static up-php; do
+	tv_before[$site]=$(in_c python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["template_version"])' "/var/lib/zimam/sites/$site.json") || die "FAIL sites: $site's state file can't be read on $old"
+	[[ ${tv_before[$site]} =~ ^[0-9]+$ ]] || die "FAIL sites: $site's template_version on $old is '${tv_before[$site]}'"
+done
 
 # 4. The upgrade: this tree's release, through the installer again.
 mark=$(audit_lines)
@@ -196,19 +203,19 @@ if in_c "$agent" maintenance >"$E2E_WORK/maintenance.txt" 2>&1; then
 else
 	fail "upgrade: zimam-agent maintenance failed: $(tail -n 20 "$E2E_WORK/maintenance.txt")"
 fi
-# R02-D9: the sites from $old keep template_version 1 and gain no deploy
-# fields; nothing of theirs is rendered again.
+# R02-D9: the sites from $old keep their template_version and gain no
+# deploy fields; nothing of theirs is rendered again.
 for site in up-static up-php; do
 	problems=$(in_c python3 -I -c '
 import json, sys
 st = json.load(open(sys.argv[1]))
 bad = []
-if st.get("template_version") != 1:
-    bad.append("template_version is %r" % st.get("template_version"))
+if st.get("template_version") != int(sys.argv[2]):
+    bad.append("template_version is %r, was %s" % (st.get("template_version"), sys.argv[2]))
 bad += ["%s is %r" % (k, st[k]) for k in ("repository", "releases", "keep_releases") if k in st]
-print("; ".join(bad))' "/var/lib/zimam/sites/$site.json" 2>&1) || problems="unreadable: $problems"
+print("; ".join(bad))' "/var/lib/zimam/sites/$site.json" "${tv_before[$site]}" 2>&1) || problems="unreadable: $problems"
 	if [[ -z $problems ]]; then
-		pass "upgrade: $site's state keeps template_version 1, without repository, releases or keep_releases"
+		pass "upgrade: $site's state keeps template_version ${tv_before[$site]}, without repository, releases or keep_releases"
 	else
 		fail "upgrade: $site's state on $new: $problems"
 	fi
