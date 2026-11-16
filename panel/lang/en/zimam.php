@@ -484,6 +484,7 @@ return [
             'heading' => 'Roll back to :release?',
             'description' => 'This release goes live again at once. Its code runs as it was; database migrations made since aren’t undone. Confirm with your password.',
             'submitted' => 'Rolling :name back to :release',
+            'gone' => 'Release :release isn’t kept on the server any more, or is already live.',
             'cancelled' => 'The rollback was cancelled before it finished.',
         ],
     ],

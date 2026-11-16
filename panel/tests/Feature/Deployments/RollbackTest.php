@@ -7,6 +7,7 @@ use App\Filament\Resources\SiteResource\Pages\DeploymentsTab;
 use App\Models\AgentJob;
 use App\Models\Deployment;
 use App\Models\Site;
+use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
 use Livewire\Livewire;
 
 /** The kept releases (site.releases) and Roll back (site.rollback), behind password confirmation. */
@@ -66,6 +67,58 @@ final class RollbackTest extends DeploymentsTestCase
         $this->assertSame(2, $reads());
         $tab->call('$refresh')->call('$refresh');
         $this->assertSame(2, $reads());
+    }
+
+    /** The kept answer and the reveal keys are the server's: a client can't set them, so it can't widen Roll back's targets. */
+    public function testClientCantSetReleaseState(): void
+    {
+        $site = $this->deployedTwice();
+        $forged = ['name' => 'shop', 'releases' => [['id' => '20261101090000-3333333', 'commit' => str_repeat('3', 40), 'created' => '2026-11-01T09:00:00Z', 'active' => false]], 'missing' => [], 'unlisted' => []];
+        foreach (['releasesData' => $forged, 'releasesError' => 'x', 'releasesMark' => 'x', 'webhookRevealKey' => 'x', 'deployUrlRevealKey' => 'x'] as $property => $value) {
+            try {
+                Livewire::test(DeploymentsTab::class, ['site' => $site])->set($property, $value);
+                $this->fail("the client set {$property}");
+            } catch (CannotUpdateLockedPropertyException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+
+        Livewire::test(DeploymentsTab::class, ['site' => $site])
+            ->assertActionHidden('rollback', ['release' => '20261101090000-3333333']);
+        $this->assertSame([], $this->submitted('site.rollback'));
+    }
+
+    /** Roll back asks the agent for the releases again first: one pruned since the tab read them is refused. */
+    public function testRollbackRereadsReleases(): void
+    {
+        $site = $this->deployedTwice();
+        $tab = Livewire::test(DeploymentsTab::class, ['site' => $site])->assertActionVisible('rollback', ['release' => self::OLD]);
+        $reads = fn (): int => count(array_filter($this->agent->calls(), fn (array $c): bool => $c['command'] === 'site.releases'));
+        $before = $reads();
+        // Pruned on the server behind the tab's back.
+        $this->agent->respond('site.releases', ['name' => 'shop', 'releases' => [['id' => self::LIVE, 'commit' => str_repeat('2', 40), 'created' => '2026-11-12T09:00:00Z', 'active' => true]], 'missing' => [], 'unlisted' => []]);
+
+        $tab->callAction('rollback', ['current_password' => self::PASSWORD], ['release' => self::OLD])
+            ->assertNotified(__('zimam.deployments.rollback.gone', ['release' => self::OLD]));
+
+        $this->assertGreaterThan($before, $reads());
+        $this->assertSame([], $this->submitted('site.rollback'));
+    }
+
+    /** A deploy the tab never saw (a webhook, another tab) shows its release on the next render. */
+    public function testDeployElsewhereRefreshesReleases(): void
+    {
+        $site = $this->deployedTwice();
+        $tab = Livewire::test(DeploymentsTab::class, ['site' => $site]);
+        app(StartDeployment::class)->run($site, Deployment::WEBHOOK);
+        $this->trackToTheEnd(AgentJob::sole());
+        $release = Deployment::sole()->release;
+        $this->assertNotNull($release);
+
+        // The release that was live is now a Roll back target; the new one is live.
+        $tab->call('$refresh')
+            ->assertActionVisible('rollback', ['release' => self::LIVE])
+            ->assertActionHidden('rollback', ['release' => $release]);
     }
 
     public function testRollbackNeedsPasswordConfirmation(): void

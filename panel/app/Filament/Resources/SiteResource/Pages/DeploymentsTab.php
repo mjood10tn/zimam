@@ -29,6 +29,7 @@ use Filament\Schemas\Schema;
 use Filament\Support\Exceptions\Halt;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
+use Livewire\Attributes\Locked;
 use Livewire\Component;
 
 /**
@@ -65,9 +66,11 @@ class DeploymentsTab extends Component implements HasActions, HasSchemas
 
     private ?string $revealedDeployToken = null;
 
-    /** Changes with each reveal, so the browser swaps in the new value's block. */
+    /** Changes with each reveal, so the browser swaps in the new value's block. Only the server sets it. */
+    #[Locked]
     public ?string $webhookRevealKey = null;
 
+    #[Locked]
     public ?string $deployUrlRevealKey = null;
 
     /** The deployment whose log is shown; the newest when null. */
@@ -76,15 +79,26 @@ class DeploymentsTab extends Component implements HasActions, HasSchemas
     /**
      * site.releases's last answer, kept between requests so the 5-second
      * poll during a job doesn't ask again; null when it couldn't be read.
+     * Locked: only the server sets it, and Roll back reads the agent again
+     * before it trusts any release.
      *
      * @var array<string, mixed>|null
      */
+    #[Locked]
     public ?array $releasesData = null;
 
+    #[Locked]
     public ?string $releasesError = null;
 
-    /** Whether the releases must be read again: at first, and after a job on the site has run. */
-    public bool $releasesStale = true;
+    /**
+     * The site's job history when the releases were read: its newest job and
+     * when that one finished. Any job started or ended since, from this tab
+     * or not (a webhook, the deploy URL, another tab), changes it, and the
+     * next render reads again. A running job doesn't change it, so the poll
+     * doesn't.
+     */
+    #[Locked]
+    public ?string $releasesMark = null;
 
     private function reveal(?string $webhookSecret = null, ?string $deployToken = null): void
     {
@@ -374,7 +388,14 @@ class DeploymentsTab extends Component implements HasActions, HasSchemas
 
     private function rollback(string $release): void
     {
-        if (! in_array($release, $this->rollbackTargets(), true) || ! $this->canSubmit()) {
+        // Never the kept answer: the agent is asked again, so only a release
+        // it keeps now, and that isn't live, can be rolled back to.
+        if (! in_array($release, $this->rollbackTargets(fresh: true), true)) {
+            Notification::make()->title(__('zimam.deployments.rollback.gone', ['release' => $release]))->warning()->send();
+
+            return;
+        }
+        if (! $this->canSubmit()) {
             return;
         }
         try {
@@ -392,20 +413,20 @@ class DeploymentsTab extends Component implements HasActions, HasSchemas
 
     /**
      * site.releases's answer, only for a site whose repository is connected.
-     * It is read when the tab opens, then kept: while a job on the site runs,
-     * the 5-second poll shows the kept answer, and the next request after
-     * the job has ended reads it once more. Null when it couldn't be read.
+     * It is read when the tab opens and kept; the next render reads it again
+     * once the site's job history has moved (releasesMark), however that
+     * happened. $fresh reads it whatever the mark says, for Roll back.
      *
      * @return array<string, mixed>|null
      */
-    private function releases(): ?array
+    private function releases(bool $fresh = false): ?array
     {
         if (! ($this->repository()?->isConnected() ?? false)) {
             return null;
         }
-        $busy = $this->site->hasUnfinishedJob();
-        if ($this->releasesStale && (($this->releasesData === null && $this->releasesError === null) || ! $busy)) {
-            $this->releasesStale = false;
+        $mark = $this->jobsMark();
+        if ($fresh || $mark !== $this->releasesMark) {
+            $this->releasesMark = $mark;
             $this->releasesError = null;
             try {
                 $this->releasesData = app(AgentClient::class)->call(new SiteReleases($this->site->name))->data;
@@ -414,18 +435,23 @@ class DeploymentsTab extends Component implements HasActions, HasSchemas
                 $this->releasesError = $e->getMessage();
             }
         }
-        if ($busy) {
-            $this->releasesStale = true;
-        }
 
         return $this->releasesData;
     }
 
+    /** The site's newest job and when it finished: what changes when a job starts or ends, and not while it runs. */
+    private function jobsMark(): string
+    {
+        $job = $this->site->jobs()->latest('id')->first(['id', 'finished_at']);
+
+        return $job === null ? 'none' : $job->id.'@'.($job->finished_at?->format('Y-m-d\TH:i:s.u') ?? 'unfinished');
+    }
+
     /** @return list<string> the kept releases that aren't live: the only ones Roll back takes */
-    private function rollbackTargets(): array
+    private function rollbackTargets(bool $fresh = false): array
     {
         $ids = [];
-        foreach ($this->releases()['releases'] ?? [] as $release) {
+        foreach ($this->releases($fresh)['releases'] ?? [] as $release) {
             if (! ($release['active'] ?? false)) {
                 $ids[] = (string) $release['id'];
             }
