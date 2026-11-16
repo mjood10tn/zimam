@@ -120,7 +120,10 @@ def create(tag, arch, key_file):
                 "public_net": {"enable_ipv4": True, "enable_ipv6": True},
             })
         except APIError as e:
-            if e.code in ("resource_unavailable", "placement_error", "server_location_disabled"):
+            # resource_limit_exceeded: a bigger type than the account's core limit allows (tried
+            # after a full location); a smaller type in the next location may still fit.
+            if e.code in ("resource_unavailable", "placement_error", "server_location_disabled",
+                          "resource_limit_exceeded"):
                 log(f"{server_type} in {location}: {e}; trying the next")
                 last = e
                 continue
