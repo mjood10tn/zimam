@@ -6,6 +6,7 @@ use App\Agent\AuditingAgentClient;
 use App\Agent\Commands\AgentVersion;
 use App\Agent\Commands\E2eSleep;
 use App\Agent\Commands\JobCancel;
+use App\Agent\Commands\SiteEnvRead;
 use App\Agent\Commands\SystemStatus;
 use App\Agent\Exceptions\AgentBusy;
 use App\Agent\Exceptions\AgentException;
@@ -121,6 +122,29 @@ final class AuditingAgentClientTest extends TestCase
         $this->assertSame('job.cancel', $row->command);
         $this->assertSame(['job' => $job->id], $row->params);
         $this->assertSame('ok', $row->outcome);
+    }
+
+    /**
+     * A read that returns a secret is audited, as the agent audits it
+     * (R02-D10): its params, never its result, and its failures.
+     */
+    public function testAuditedReadLogged(): void
+    {
+        $fake = (new FakeAgentClient)->env('shop', "APP_KEY=dummy\n");
+        $client = new AuditingAgentClient($fake);
+
+        $this->assertSame(['content' => "APP_KEY=dummy\n"], $client->call(new SiteEnvRead('shop'))->data);
+        try {
+            $client->call(new SiteEnvRead('docs'));
+            $this->fail('docs has no .env');
+        } catch (AgentNotFound) {
+        }
+
+        $rows = AgentAction::orderBy('id')->get();
+        $this->assertSame(['site.env.read', 'site.env.read'], $rows->pluck('command')->all());
+        $this->assertSame([['name' => 'shop'], ['name' => 'docs']], $rows->pluck('params')->all());
+        $this->assertSame(['ok', 'error:not_found'], $rows->pluck('outcome')->all());
+        $this->assertStringNotContainsString('dummy', json_encode($rows->toArray()));
     }
 
     public function testSecretsRedacted(): void

@@ -19,6 +19,8 @@ use App\Agent\Commands\PhpUninstall;
 use App\Agent\Commands\SecurityCheck;
 use App\Agent\Commands\SiteDeploy;
 use App\Agent\Commands\SiteDestroy;
+use App\Agent\Commands\SiteEnvRead;
+use App\Agent\Commands\SiteEnvWrite;
 use App\Agent\Commands\SitePhp;
 use App\Agent\Commands\SiteProvision;
 use App\Agent\Commands\SiteReleases;
@@ -60,6 +62,7 @@ final class SchemaTest extends TestCase
         'site.repo' => 600,
         'site.deploy' => 1800,
         'site.rollback' => 300,
+        'site.env.write' => 120,
         'e2e.sleep' => 180,
     ];
 
@@ -86,6 +89,8 @@ final class SchemaTest extends TestCase
             new SiteDeploy('shop', 'manual', composer: true, keepReleases: 5, script: "php artisan migrate --force\n", commit: str_repeat('a1', 20)),
             new SiteRollback('shop', '20261116120000-abcdef1'),
             new SiteReleases('shop'),
+            new SiteEnvRead('shop'),
+            new SiteEnvWrite('shop', "APP_KEY=base64:dummy\nDB_PASSWORD=\"not a real one\"\n"),
             new SecurityCheck('shop'),
             new LogsList('site.nginx-access', 'shop'),
             new LogsPolicy(14, 365, 5 * 1024 ** 3),
@@ -178,6 +183,23 @@ final class SchemaTest extends TestCase
         $rollback = $fake->follow($fake->submit(new SiteRollback('shop', $results[1]['release']))->id, 0, function (): void {})->result;
         $this->assertResult('site.rollback', $rollback, 'fake site.rollback result');
         $this->assertSame([false, true], array_column($fake->call(new SiteReleases('shop'))->data['releases'], 'active'));
+    }
+
+    /** The fake's .env commands answer as the agent's do: not_found until a write makes the file. */
+    public function testFakeEnvResultsMatchSchemas(): void
+    {
+        $fake = new FakeAgentClient;
+        try {
+            $fake->call(new SiteEnvRead('shop'));
+            $this->fail('site.env.read found a .env the site has no');
+        } catch (AgentNotFound) {
+        }
+        $final = $fake->follow($fake->submit(new SiteEnvWrite('shop', "APP_KEY=x\n"))->id, 0, function (): void {});
+        $this->assertSame('succeeded', $final->status);
+        $this->assertResult('site.env.write', $final->result, 'fake site.env.write result');
+        $read = $fake->call(new SiteEnvRead('shop'))->data;
+        $this->assertResult('site.env.read', $read, 'fake site.env.read');
+        $this->assertSame(['content' => "APP_KEY=x\n"], $read);
     }
 
     /** What the fake's jobs answer when they succeed matches each command's result schema. */

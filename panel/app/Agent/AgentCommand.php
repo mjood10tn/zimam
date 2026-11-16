@@ -30,6 +30,15 @@ abstract class AgentCommand
         return [];
     }
 
+    /**
+     * A read the agent audits because its result is a secret (R02-D10), so
+     * agent_actions logs it too. Jobs and job.cancel are logged anyway.
+     */
+    public function audited(): bool
+    {
+        return false;
+    }
+
     /** A job command's RuntimeMaxSec (§5.7); null for the other kinds. */
     public function runtimeMaxSeconds(): ?int
     {

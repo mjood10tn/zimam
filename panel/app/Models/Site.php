@@ -57,6 +57,12 @@ class Site extends Model
         return in_array($this->type, [self::PHP, self::LARAVEL], true);
     }
 
+    /** Whether the site is a Laravel app, with Laravel's log in its shared storage (R02-D8). */
+    public function isLaravel(): bool
+    {
+        return $this->type === self::LARAVEL;
+    }
+
     /** The GitHub repository the site deploys from (R02-D4). */
     public function repository(): HasOne
     {

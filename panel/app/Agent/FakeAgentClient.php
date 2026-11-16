@@ -76,6 +76,9 @@ final class FakeAgentClient implements AgentClient
     /** @var array<string, list<array{id: string, commit: string, created: string, active: bool}>> each site's kept releases, newest first */
     private array $releases = [];
 
+    /** @var array<string, string> each site's ~/site/shared/.env, as env() or succeeded site.env.write jobs left it */
+    private array $envs = [];
+
     /** How many deploys took the branch's head: each gets its own commit. */
     private int $heads = 0;
 
@@ -149,6 +152,20 @@ final class FakeAgentClient implements AgentClient
         return $this;
     }
 
+    /** Gives a site a .env on the fake's server, as a succeeded site.env.write would. */
+    public function env(string $site, string $content): static
+    {
+        $this->envs[$site] = $content;
+
+        return $this;
+    }
+
+    /** A site's .env on the fake's server; null when it has none. */
+    public function envOf(string $site): ?string
+    {
+        return $this->envs[$site] ?? null;
+    }
+
     /** Gives a site a kept release, newest first; an active one becomes the live one. */
     public function release(string $site, string $id, string $commit, bool $active = false, ?CarbonImmutable $created = null): static
     {
@@ -208,6 +225,7 @@ final class FakeAgentClient implements AgentClient
             $command->name() === 'logs.list' => $this->logsList($command->params()),
             $command->name() === 'logs.read' => $this->logsRead($command->params()),
             $command->name() === 'site.releases' => $this->siteReleases($command->params()['name']),
+            $command->name() === 'site.env.read' => $this->siteEnvRead($command->params()['name']),
             $command instanceof JobStatus => $this->advance($command->job),
             $command instanceof JobCancel => $this->cancel($command->job),
             $command instanceof JobFollow => throw new LogicException('job.follow streams: use follow()'),
@@ -313,7 +331,7 @@ final class FakeAgentClient implements AgentClient
             'php.install', 'php.uninstall', 'php.default' => ['version' => $params['version']],
             'site.provision' => ['name' => $params['name'], 'template_version' => 1],
             'site.php' => ['name' => $params['name'], 'php_version' => $params['php_version']],
-            'site.destroy', 'site.security' => ['name' => $params['name']],
+            'site.destroy', 'site.security', 'site.env.write' => ['name' => $params['name']],
             'security.check' => self::securityFindings($params),
             'logs.policy' => $params,
             // Let's Encrypt's certificates last 90 days.
@@ -368,6 +386,24 @@ final class FakeAgentClient implements AgentClient
         }
 
         return ['name' => $name, 'releases' => $this->releases[$name] ?? [], 'missing' => [], 'unlisted' => []];
+    }
+
+    /** @return array{content: string} site.env.read's data: not_found for a site without a .env (R02-D10) */
+    private function siteEnvRead(string $name): array
+    {
+        $this->validateSiteName($name);
+        if (! isset($this->envs[$name])) {
+            throw new AgentNotFound("Site {$name} has no .env (~/site/shared/.env).");
+        }
+
+        return ['content' => $this->envs[$name]];
+    }
+
+    private function validateSiteName(string $name): void
+    {
+        if (! preg_match(self::SITE_NAME, $name) || in_array($name, self::RESERVED_NAMES, true)) {
+            throw new AgentValidationFailed('Invalid parameters', ['name' => 'must be 2–24 lowercase letters, digits or hyphens, start with a letter and not end with a hyphen']);
+        }
     }
 
     /**
@@ -426,6 +462,7 @@ final class FakeAgentClient implements AgentClient
                 fn (array $r): array => array_merge($r, ['active' => $r['id'] === $params['release']]),
                 $this->releases[$name] ?? [],
             ),
+            'site.env.write' => $this->envs[$name] = $params['content'],
             'site.destroy' => $this->forget($name),
             default => null,
         };
@@ -453,7 +490,7 @@ final class FakeAgentClient implements AgentClient
 
     private function forget(string $name): void
     {
-        unset($this->repositories[$name], $this->releases[$name]);
+        unset($this->repositories[$name], $this->releases[$name], $this->envs[$name]);
     }
 
     public function status(string $jobId): AgentJobStatus
@@ -540,6 +577,21 @@ final class FakeAgentClient implements AgentClient
         }
         if (in_array($command->name(), ['site.repo', 'site.deploy', 'site.rollback'], true)) {
             $this->validateDeploy($command->name(), $params);
+
+            return;
+        }
+        if ($command->name() === 'site.env.write') {
+            $this->validateSiteName($params['name']);
+            // checkTextFile's order and messages; the cap is in bytes.
+            $error = match (true) {
+                strlen($params['content']) > 65536 => 'must be at most 65536 bytes',
+                ! mb_check_encoding($params['content'], 'UTF-8') => 'must be valid UTF-8',
+                str_contains($params['content'], "\0") => 'must not contain a NUL character',
+                default => null,
+            };
+            if ($error !== null) {
+                throw new AgentValidationFailed('Invalid parameters', ['content' => $error]);
+            }
 
             return;
         }

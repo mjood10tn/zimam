@@ -14,7 +14,8 @@ use Throwable;
  * Keeps the panel's own copy of what the agent audits (D9, §7.6): one
  * agent_actions row for every submit(), every job.cancel and every request
  * the agent rejects, with params redacted by the command's secret fields.
- * Routine reads are never logged.
+ * Routine reads are never logged; a read that returns a secret
+ * (site.env.read) is, by its params only, as the agent audits it.
  */
 final class AuditingAgentClient implements AgentClient
 {
@@ -25,7 +26,7 @@ final class AuditingAgentClient implements AgentClient
 
     public function call(AgentCommand $command): AgentResult
     {
-        return $this->logged($command, $command->name() === 'job.cancel' ? 'ok' : null, fn () => $this->inner->call($command));
+        return $this->logged($command, $command->name() === 'job.cancel' || $command->audited() ? 'ok' : null, fn () => $this->inner->call($command));
     }
 
     public function submit(AgentCommand $command): AgentJob

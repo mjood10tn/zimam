@@ -8,6 +8,7 @@ use App\Agent\Commands\AgentVersion;
 use App\Agent\Commands\E2eSleep;
 use App\Agent\Commands\JobCancel;
 use App\Agent\Commands\SiteDeploy;
+use App\Agent\Commands\SiteEnvWrite;
 use App\Agent\Commands\SiteProvision;
 use App\Agent\Commands\SiteRepo;
 use App\Agent\Commands\SiteRollback;
@@ -68,6 +69,8 @@ abstract class AgentClientContract extends TestCase
             'commit' => new SiteDeploy('contract-repo', 'manual', false, 5, commit: 'ABC'),
             'keep_releases' => new SiteDeploy('contract-repo', 'manual', false, 21),
             'release' => new SiteRollback('contract-repo', '../initial'),
+            // 30000 characters, 90000 bytes: the agent counts bytes.
+            'content' => new SiteEnvWrite('contract-repo', str_repeat('€', 30000)),
         ];
         foreach ($cases as $field => $command) {
             try {

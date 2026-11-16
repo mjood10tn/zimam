@@ -8,7 +8,8 @@ use App\Models\AgentJob;
 use App\Models\Site;
 
 /**
- * What site.repo's and site.rollback's outcomes change (R02-D4, R02-D5).
+ * What site.repo's, site.rollback's and site.env.write's outcomes change
+ * (R02-D4, R02-D5, R02-D10).
  * site.deploy's are on its deployments row, which follows its job through
  * every change (Deployment::follow), so a failed build leaves the site as
  * it is: its live release still serves.
@@ -37,6 +38,19 @@ final class DeploymentOutcomes
                 'deploy_key_fingerprint' => $result['fingerprint'],
             ]);
             $site->update(['last_error' => null]);
+        });
+        // A failed .env save is the site's last error; its message names the
+        // file and the reason, never the content (R02-D10).
+        $outcomes->register('site.env.write', function (AgentJob $job, AgentJobStatus $status): void {
+            $site = $job->related;
+            if (! $site instanceof Site) {
+                return;
+            }
+            $site->update(['last_error' => match ($status->status) {
+                AgentJob::SUCCEEDED => null,
+                AgentJob::CANCELLED => __('zimam.environment.cancelled'),
+                default => $status->message,
+            }]);
         });
         $outcomes->register('site.rollback', function (AgentJob $job, AgentJobStatus $status): void {
             $site = $job->related;
