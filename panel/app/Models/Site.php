@@ -30,7 +30,10 @@ class Site extends Model
     public const TYPES = [self::PHP, self::LARAVEL, self::STATIC];
 
     /** §5.4's site name, anchored with \z (global rule 14). */
-    public const NAME_PATTERN = '/^[a-z][a-z0-9-]{0,22}[a-z0-9]\z/';
+    /** A site name's shape without anchors, for a route constraint. */
+    public const NAME_SHAPE = '[a-z][a-z0-9-]{0,22}[a-z0-9]';
+
+    public const NAME_PATTERN = '/^'.self::NAME_SHAPE.'\z/';
 
     public const RESERVED_NAMES = ['zimam', 'panel', 'default', 'acme'];
 

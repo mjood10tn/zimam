@@ -37,7 +37,8 @@ use Livewire\Component;
  * (site.repo), the deploy key, the webhook and deploy URL, the deploy
  * settings, Deploy now, the deployments with their live log, and the kept
  * releases with Roll back. The webhook secret and deploy token are shown
- * once, when made; regenerating them and rolling back ask for the password.
+ * once, when made; regenerating them, rolling back and changing the deploy
+ * script ask for the password.
  */
 class DeploymentsTab extends Component implements HasActions, HasSchemas
 {
@@ -274,7 +275,14 @@ class DeploymentsTab extends Component implements HasActions, HasSchemas
         Notification::make()->title(__('zimam.deployments.repository.submitted', ['name' => $this->site->name]))->body(__('zimam.php.submitted_body'))->success()->send();
     }
 
-    /** Stores the deploy settings; they need nothing from the agent until the next deploy. */
+    /**
+     * Stores the deploy settings; they need nothing from the agent until the
+     * next deploy. A changed deploy script is stored only through
+     * confirmDeployScript, with the password: the script runs as the site's
+     * user beside the .env, and its output is in the deployment's log, so
+     * whoever may change it can read the secrets the Environment tab asks
+     * the password for (R02-D10).
+     */
     public function saveSettings(): void
     {
         $repository = $this->repository();
@@ -282,9 +290,42 @@ class DeploymentsTab extends Component implements HasActions, HasSchemas
             return;
         }
         $state = $this->settingsForm->getState();
+        if (self::scriptOf($state) !== (string) $repository->deploy_script) {
+            $this->mountAction('confirmDeployScript');
+
+            return;
+        }
+        $this->storeSettings($repository, $state);
+    }
+
+    public function confirmDeployScriptAction(): Action
+    {
+        return ConfirmsPassword::apply(
+            Action::make('confirmDeployScript')
+                ->label(__('zimam.deployments.settings.save'))
+                ->modalHeading(__('zimam.deployments.settings.confirm_script_heading'))
+                ->modalDescription(__('zimam.deployments.settings.confirm_script_description'))
+                ->modalSubmitActionLabel(__('zimam.deployments.settings.save'))
+                ->visible(fn (): bool => $this->repository() !== null)
+                ->action(function (): void {
+                    // The form is validated again: the state is the browser's.
+                    $this->storeSettings($this->repository(), $this->settingsForm->getState());
+                }),
+        );
+    }
+
+    /** @param array<string, mixed> $state */
+    private static function scriptOf(array $state): string
+    {
+        return (string) ($state['deploy_script'] ?? '');
+    }
+
+    /** @param array<string, mixed> $state */
+    private function storeSettings(SiteRepository $repository, array $state): void
+    {
         $repository->update([
             'auto_deploy' => (bool) ($state['auto_deploy'] ?? false),
-            'deploy_script' => (string) ($state['deploy_script'] ?? ''),
+            'deploy_script' => self::scriptOf($state),
             'run_composer' => $this->site->runsPhp() && (bool) ($state['run_composer'] ?? false),
             'keep_releases' => (int) $state['keep_releases'],
         ]);

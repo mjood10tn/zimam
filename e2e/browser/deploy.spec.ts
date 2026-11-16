@@ -52,10 +52,12 @@ function livewireCall(page: Page, method: string, timeout = 30_000): Promise<Res
 // submit itself is the proof: it must send callMountedAction. When it
 // doesn't, nothing reached the server, so the field is filled again and the
 // submit retried; the dialog must then close, which a wrong password would
-// prevent.
-async function confirm(page: Page, trigger: Locator, heading: string | RegExp, submit: string): Promise<void> {
+// prevent. method is the Livewire call the trigger sends: mountAction for an
+// action's own button, or the component method that mounts the action
+// itself, as Save settings does for a changed deploy script.
+async function confirm(page: Page, trigger: Locator, heading: string | RegExp, submit: string, method = 'mountAction'): Promise<void> {
   const password = loadAdmin().password;
-  const mounted = livewireCall(page, 'mountAction');
+  const mounted = livewireCall(page, method);
   await trigger.click();
   await mounted;
   const dialog = page.getByRole('dialog', { name: heading });
@@ -89,7 +91,8 @@ async function deployNow(page: Page, url: string): Promise<void> {
 async function saveScript(page: Page, url: string, script: string): Promise<void> {
   await openTab(page, url, 'Deployments');
   await page.getByRole('textbox', { name: /^Deploy script/ }).fill(script);
-  await page.getByRole('button', { name: 'Save settings', exact: true }).click();
+  // A changed script is saved only with the password: it can read the .env.
+  await confirm(page, page.getByRole('button', { name: 'Save settings', exact: true }), 'Change the deploy script?', 'Save settings', 'saveSettings');
   await expect(page.getByText('Deploy settings saved')).toBeVisible();
 }
 

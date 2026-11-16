@@ -6,13 +6,18 @@ use App\Agent\AgentClient;
 use App\Agent\AgentHealth;
 use App\Agent\Commands\JobCancel;
 use App\Agent\Exceptions\AgentException;
+use App\Agent\JobOutcomes;
 use App\Filament\Resources\AgentJobResource;
 use App\Models\AgentJob;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 
-/** A job's page: status, times, error and the live log; Cancel while it's queued or running (§7.3). */
+/**
+ * A job's page: status, times, error and the live log; Cancel while it's
+ * queued or running (§7.3), and while it waits after `busy`. A waiting job
+ * is only the panel's so far, so cancelling it needs nothing of the agent.
+ */
 class ViewAgentJob extends ViewRecord
 {
     protected static string $resource = AgentJobResource::class;
@@ -41,6 +46,22 @@ class ViewAgentJob extends ViewRecord
                         Notification::make()->title(__('zimam.jobs.cancel.done'))->success()->send();
                     }),
             ),
+            Action::make('cancelWaiting')
+                ->label(__('zimam.jobs.cancel.label'))
+                ->color('danger')
+                ->requiresConfirmation()
+                ->modalHeading(__('zimam.jobs.cancel.heading'))
+                ->modalDescription(__('zimam.jobs.cancel.waiting_description'))
+                ->visible(fn (AgentJob $record): bool => $record->status === AgentJob::WAITING)
+                ->action(function (AgentJob $record): void {
+                    if (! app(JobOutcomes::class)->cancelWaiting($record, 'cancelled', __('zimam.jobs.cancel.waiting_reason'))) {
+                        // The agent took it meanwhile; Cancel now goes to the agent.
+                        Notification::make()->title(__('zimam.jobs.cancel.started'))->warning()->send();
+
+                        return;
+                    }
+                    Notification::make()->title(__('zimam.jobs.cancel.done'))->success()->send();
+                }),
         ];
     }
 }

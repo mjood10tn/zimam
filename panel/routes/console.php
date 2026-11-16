@@ -6,4 +6,5 @@ use Illuminate\Support\Facades\Schedule;
 Schedule::command('zimam:sample-metrics')->everyMinute();
 Schedule::command('zimam:prune-metrics')->daily();
 Schedule::command('zimam:prune-history')->daily();
+Schedule::command('zimam:prune-cache')->daily();
 Schedule::command('zimam:run-security-checks')->dailyAt('03:30');

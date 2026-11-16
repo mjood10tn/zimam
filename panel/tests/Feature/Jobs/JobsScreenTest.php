@@ -4,12 +4,14 @@ namespace Tests\Feature\Jobs;
 
 use App\Agent\AgentClient;
 use App\Agent\Commands\E2eSleep;
+use App\Agent\Commands\PhpInstall;
 use App\Agent\Exceptions\AgentConflict;
 use App\Agent\Exceptions\AgentUnavailable;
 use App\Agent\FakeAgentClient;
 use App\Filament\Resources\AgentJobResource\Pages\ListAgentJobs;
 use App\Filament\Resources\AgentJobResource\Pages\ViewAgentJob;
 use App\Filament\Resources\SiteResource\Pages\ViewSite;
+use App\Jobs\SubmitAgentJob;
 use App\Livewire\SiteJobs;
 use App\Models\AgentJob;
 use App\Models\Site;
@@ -126,6 +128,38 @@ final class JobsScreenTest extends TestCase
         }
         $queued = $this->job('php.install', AgentJob::QUEUED, self::ulid());
         Livewire::test(ViewAgentJob::class, ['record' => $queued->getRouteKey()])->assertActionVisible('cancel');
+    }
+
+    /**
+     * A job that waits after `busy` can be cancelled. It is only the
+     * panel's so far, so nothing is asked of the agent, and its queued retry
+     * finds it finished and submits nothing.
+     */
+    public function testWaitingJobCanBeCancelled(): void
+    {
+        $job = $this->job('php.install', AgentJob::WAITING, null);
+
+        Livewire::test(ViewAgentJob::class, ['record' => $job->getRouteKey()])
+            ->assertActionVisible('cancelWaiting')
+            ->callAction('cancelWaiting')
+            ->assertNotified(__('zimam.jobs.cancel.done'));
+
+        $job->refresh();
+        $this->assertSame(AgentJob::CANCELLED, $job->status);
+        $this->assertSame(__('zimam.jobs.cancel.waiting_reason'), $job->error_message);
+        $this->assertNotNull($job->finished_at);
+
+        $calls = count($this->agent->calls());
+        $retry = (new SubmitAgentJob($job, new PhpInstall('8.4')))->withFakeQueueInteractions();
+        app()->call([$retry, 'handle']);
+        $this->assertCount($calls, $this->agent->calls());
+        $this->assertSame(AgentJob::CANCELLED, $job->refresh()->status);
+
+        // Once the agent has the job, only the agent's Cancel applies.
+        foreach ([AgentJob::QUEUED, AgentJob::RUNNING, AgentJob::SUCCEEDED, AgentJob::CANCELLED] as $status) {
+            $other = $this->job('php.install', $status, self::ulid());
+            Livewire::test(ViewAgentJob::class, ['record' => $other->getRouteKey()])->assertActionHidden('cancelWaiting');
+        }
     }
 
     public function testCancelPausedWhileAgentUnreachable(): void

@@ -97,6 +97,21 @@ class AgentJob extends Model
         ]);
     }
 
+    /**
+     * The job ended in the panel before the agent ever had it: the owner
+     * cancelled it while it waited, or a newer deploy took its place. The
+     * reason shows where an error would.
+     */
+    public function markCancelled(string $reason, string $message): void
+    {
+        $this->update([
+            'status' => self::CANCELLED,
+            'error_code' => $reason,
+            'error_message' => $message,
+            'finished_at' => now(),
+        ]);
+    }
+
     /** The panel gave up on the job, or the agent refused it. */
     public function markFailed(string $errorCode, string $message): void
     {

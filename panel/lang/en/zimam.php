@@ -48,7 +48,7 @@ return [
     ],
 
     'jobs' => [
-        'busy' => 'Gave up after 15 minutes: another job kept the server or this site busy.',
+        'busy' => 'Gave up after :minutes minutes: another job kept the server or this site busy.',
         'untracked' => 'The panel stopped checking this job, so its result is unknown. Check the server over SSH.',
         'title' => 'Jobs',
         'label' => 'job',
@@ -82,6 +82,9 @@ return [
             'heading' => 'Cancel this job?',
             'description' => 'The agent stops it where it is. What it already changed stays; running the same action again continues from there.',
             'done' => 'The job was cancelled',
+            'waiting_description' => 'The job is waiting for the server or the site to be free and hasn’t started. Cancelling it changes nothing on the server.',
+            'waiting_reason' => 'Cancelled while it waited; it never started.',
+            'started' => 'The job has started meanwhile. Cancel it again to stop it.',
         ],
     ],
 
@@ -399,7 +402,7 @@ return [
         'cancel' => 'Cancel',
         'submitted' => 'Saving :name’s .env',
         'refused' => 'The .env wasn’t saved',
-        'cancelled' => 'Saving the .env was cancelled before it finished. The previous .env still applies.',
+        'cancelled' => 'Saving the .env was cancelled. If the file was already written, the new .env applies: show it to check.',
         'validation' => [
             'size' => 'The .env can be at most :max bytes.',
             'utf8' => 'The .env must be UTF-8 text.',
@@ -417,7 +420,7 @@ return [
             'rotate_key' => 'Make a new deploy key',
         ],
         'help' => [
-            'repository' => 'As owner/name, such as octo/shop. Deploys fetch it over SSH with this site’s own deploy key.',
+            'repository' => 'As owner/name, such as octo/shop. Deploys fetch it over SSH with this site’s own deploy key. The site is served from the repository’s public/ folder: put index.html or index.php there, or have the deploy script build it. A deploy without a public/ folder is refused and the live release stays.',
             'rotate_key' => 'The old key stops working. Add the new one to the repository before the next deploy. GitHub lets a key serve only one repository.',
         ],
         'validation' => [
@@ -432,7 +435,7 @@ return [
             'connect' => 'Connect repository',
             'update' => 'Save repository',
             'submitted' => 'Connecting :name to its repository',
-            'cancelled' => 'Connecting the repository was cancelled before it finished. The previous repository still applies.',
+            'cancelled' => 'Connecting the repository was cancelled. Save the repository again, without a new key, so this page shows what the server has.',
         ],
         'key' => [
             'heading' => 'Deploy key',
@@ -466,7 +469,9 @@ return [
             'auto_deploy' => 'Auto-deploy',
             'auto_deploy_help' => 'Deploy when GitHub reports a push to the branch.',
             'script' => 'Deploy script',
-            'script_help' => 'Runs with bash -eo pipefail as the site’s own user, in the new release’s folder, before it goes live; any failing command stops the deploy and the live release stays. Background processes the script starts are stopped when the script ends. At most 64 KiB.',
+            'script_help' => 'Runs with bash -eo pipefail as the site’s own user, in the new release’s folder, before it goes live; any failing command stops the deploy and the live release stays. On a PHP or Laravel site, php is the site’s PHP version. Commands get no input (their stdin is empty). Background processes the script starts are stopped when the script ends. At most 64 KiB. Changing the script asks for your password.',
+            'confirm_script_heading' => 'Change the deploy script?',
+            'confirm_script_description' => 'The script runs as the site’s user and can read the site’s .env. Confirm with your password.',
             'script_node' => 'npm and other Node tools aren’t on the server yet: they arrive with Node in v0.4.',
             'composer' => 'Run Composer',
             'composer_help' => 'composer install --no-dev with the site’s PHP version, before the script, when the release has a composer.json.',
@@ -481,6 +486,7 @@ return [
             'help' => 'Deploys the head of :branch with the saved settings.',
             'refused' => 'The server refused the deploy settings. Fix them and save before deploying.',
             'submitted' => 'Deploying :name',
+            'superseded' => 'Superseded by a newer deploy before it started.',
         ],
         'list' => [
             'heading' => 'Deployments',
@@ -511,7 +517,7 @@ return [
             'description' => 'This release goes live again at once. Its code runs as it was; database migrations made since aren’t undone. Confirm with your password.',
             'submitted' => 'Rolling :name back to :release',
             'gone' => 'Release :release isn’t kept on the server any more, or is already live.',
-            'cancelled' => 'The rollback was cancelled before it finished.',
+            'cancelled' => 'The rollback was cancelled. The releases list shows which release is live.',
         ],
     ],
 
@@ -659,7 +665,7 @@ return [
             'log_retention_days' => 'Sites’ logs, the journal, the panel’s log and job logs: 1 to 365 days.',
             'audit_retention_days' => 'The audit log and the panel’s action history: 1 to 3650 days.',
             'site_log_cap' => 'A site’s own log archives are deleted oldest first when the site’s logs pass this. Nginx’s archives for the site are deleted by retention, or when they alone pass this: 1 to 100 GiB.',
-            'ip_allowlist' => 'One address or CIDR range per line. Empty allows every address; two-factor sign-in still applies. GitHub webhooks and deploy URLs (/hooks/…) are open to every address: they need the webhook’s signature or the URL’s token, and each site takes at most six a minute.',
+            'ip_allowlist' => 'One address or CIDR range per line. Empty allows every address; two-factor sign-in still applies. GitHub webhooks and deploy URLs (/hooks/…) are open to every address: they need the webhook’s signature or the URL’s token, and each site starts at most six deploys a minute.',
         ],
         'confirm_lockout' => 'I understand this list leaves out the address I am using now. To get back in, I will run :command over SSH.',
         'lockout' => 'Your address, :ip, isn’t in this list, so saving it locks you out. If that is what you want, confirm below; to undo it, run :command over SSH.',

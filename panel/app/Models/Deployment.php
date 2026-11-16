@@ -66,19 +66,30 @@ class Deployment extends Model
         return in_array($this->status, AgentJob::FINISHED, true);
     }
 
-    /** Brings the deployments of $job up to its state; a succeeded one gets its release and commit. */
+    /**
+     * Brings the deployments of $job up to its state. A succeeded one gets
+     * its release and commit. So does a failed one whose job has a result:
+     * the agent keeps the result of a deploy that failed after its release
+     * went live, so the row names the release that is serving. A job that
+     * ended in the panel while it waited (cancelled, superseded) shows why.
+     * A webhook deploy that failed before the agent ever had it gives its
+     * delivery back, so GitHub's redelivery can deploy it.
+     */
     public static function follow(AgentJob $job): void
     {
         foreach (self::query()->where('agent_job_id', $job->id)->get() as $deployment) {
-            $result = $job->status === AgentJob::SUCCEEDED && is_array($job->result) ? $job->result : [];
+            $result = in_array($job->status, [AgentJob::SUCCEEDED, AgentJob::FAILED], true) && is_array($job->result) ? $job->result : [];
             $deployment->update([
                 'status' => $job->status,
                 'started_at' => $job->started_at,
                 'finished_at' => $job->finished_at,
-                'error_message' => $job->status === AgentJob::FAILED ? $job->error_message : null,
+                'error_message' => in_array($job->status, [AgentJob::FAILED, AgentJob::CANCELLED], true) ? $job->error_message : null,
                 'release' => is_string($result['release'] ?? null) ? $result['release'] : $deployment->release,
                 'commit' => is_string($result['commit'] ?? null) ? $result['commit'] : $deployment->commit,
             ]);
+            if ($deployment->trigger === self::WEBHOOK && $job->status === AgentJob::FAILED && $job->agent_job_id === null) {
+                WebhookDelivery::forgetFor($deployment);
+            }
         }
     }
 }

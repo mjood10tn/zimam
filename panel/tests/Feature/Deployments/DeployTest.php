@@ -76,7 +76,10 @@ final class DeployTest extends DeploymentsTestCase
             ->call('applyLaravelPreset')
             ->assertFormSet(['deploy_script' => SiteRepository::LARAVEL_PRESET, 'run_composer' => true], 'settingsForm')
             ->call('saveSettings')
-            ->assertHasNoFormErrors([], 'settingsForm');
+            ->assertHasNoFormErrors([], 'settingsForm')
+            ->assertActionMounted('confirmDeployScript')
+            ->setActionData(['current_password' => self::PASSWORD])
+            ->callMountedAction();
 
         $this->assertSame(SiteRepository::LARAVEL_PRESET, $repository->fresh()->deploy_script);
         $this->assertTrue($repository->fresh()->run_composer);
@@ -108,6 +111,9 @@ final class DeployTest extends DeploymentsTestCase
             ->fillForm(['auto_deploy' => true, 'deploy_script' => "echo one\necho two", 'run_composer' => false, 'keep_releases' => 20], 'settingsForm')
             ->call('saveSettings')
             ->assertHasNoFormErrors([], 'settingsForm')
+            ->assertActionMounted('confirmDeployScript')
+            ->setActionData(['current_password' => self::PASSWORD])
+            ->callMountedAction()
             ->assertNotified(__('zimam.deployments.settings.saved'));
 
         $repository->refresh();
@@ -120,6 +126,63 @@ final class DeployTest extends DeploymentsTestCase
     }
 
     /** The script limit is 64 KiB in bytes, as the agent counts it, not in characters. */
+    /**
+     * The deploy script can read the site's .env, so changing it asks
+     * for the password, as showing the .env does. Other settings don't.
+     */
+    public function testChangingTheScriptAsksForThePassword(): void
+    {
+        $site = $this->site();
+        $repository = $this->connected($site, ['deploy_script' => 'echo before', 'keep_releases' => 5]);
+
+        // Saving alone stores nothing, the other settings included.
+        Livewire::test(DeploymentsTab::class, ['site' => $site])
+            ->fillForm(['deploy_script' => 'cat .env', 'keep_releases' => 7], 'settingsForm')
+            ->call('saveSettings')
+            ->assertActionMounted('confirmDeployScript')
+            ->assertNotNotified(__('zimam.deployments.settings.saved'));
+        $this->assertSame('echo before', $repository->fresh()->deploy_script);
+        $this->assertSame(5, $repository->fresh()->keep_releases);
+
+        // Nor does the wrong password.
+        Livewire::test(DeploymentsTab::class, ['site' => $site])
+            ->fillForm(['deploy_script' => 'cat .env'], 'settingsForm')
+            ->callAction('confirmDeployScript', ['current_password' => 'not the password'])
+            ->assertHasActionErrors(['current_password']);
+        $this->assertSame('echo before', $repository->fresh()->deploy_script);
+
+        Livewire::test(DeploymentsTab::class, ['site' => $site])
+            ->fillForm(['deploy_script' => 'echo after', 'keep_releases' => 7], 'settingsForm')
+            ->call('saveSettings')
+            ->assertActionMounted('confirmDeployScript')
+            ->setActionData(['current_password' => self::PASSWORD])
+            ->callMountedAction()
+            ->assertHasNoActionErrors();
+        $this->assertSame('echo after', $repository->fresh()->deploy_script);
+        $this->assertSame(7, $repository->fresh()->keep_releases);
+
+        // With the script as it is, the rest saves at once.
+        Livewire::test(DeploymentsTab::class, ['site' => $site->fresh()])
+            ->fillForm(['auto_deploy' => true, 'keep_releases' => 9], 'settingsForm')
+            ->call('saveSettings')
+            ->assertHasNoFormErrors([], 'settingsForm');
+        $this->assertSame(9, $repository->fresh()->keep_releases);
+        $this->assertSame('echo after', $repository->fresh()->deploy_script);
+        $this->assertStringContainsString('password', __('zimam.deployments.settings.script_help'));
+    }
+
+    /** The tab says what a deploy needs and how the script runs. */
+    public function testHelpNamesThePublicFolderAndTheScriptsPhp(): void
+    {
+        $site = $this->site();
+        $this->connected($site);
+
+        Livewire::test(DeploymentsTab::class, ['site' => $site])->assertSee(__('zimam.deployments.help.repository'));
+        $this->assertStringContainsString('public/', __('zimam.deployments.help.repository'));
+        $this->assertStringContainsString('site’s PHP version', __('zimam.deployments.settings.script_help'));
+        $this->assertStringContainsString('stdin', __('zimam.deployments.settings.script_help'));
+    }
+
     public function testScriptLimitCountsBytes(): void
     {
         $site = $this->site();
@@ -128,7 +191,10 @@ final class DeployTest extends DeploymentsTestCase
             ->fillForm(['deploy_script' => $script], 'settingsForm')
             ->call('saveSettings');
 
-        $save(str_repeat('a', 65536))->assertHasNoFormErrors([], 'settingsForm');
+        $save(str_repeat('a', 65536))->assertHasNoFormErrors([], 'settingsForm')
+            ->assertActionMounted('confirmDeployScript')
+            ->setActionData(['current_password' => self::PASSWORD])
+            ->callMountedAction();
         $this->assertSame(65536, strlen($repository->fresh()->deploy_script));
         // 30000 characters, 90000 bytes.
         $save(str_repeat('€', 30000))->assertHasFormErrors(['deploy_script'], 'settingsForm');
@@ -201,9 +267,9 @@ final class DeployTest extends DeploymentsTestCase
         $this->assertSame(AgentJob::WAITING, $job->status);
         $job->markQueued(strtoupper((string) str()->ulid()));
         $this->assertSame(Deployment::QUEUED, $deployment->fresh()->status);
-        app(JobOutcomes::class)->fail($job, 'busy', __('zimam.jobs.busy'));
+        app(JobOutcomes::class)->fail($job, 'busy', __('zimam.jobs.busy', ['minutes' => 35]));
         $this->assertSame(Deployment::FAILED, $deployment->fresh()->status);
-        $this->assertSame(__('zimam.jobs.busy'), $deployment->fresh()->error_message);
+        $this->assertSame(__('zimam.jobs.busy', ['minutes' => 35]), $deployment->fresh()->error_message);
     }
 
     public function testDeployListedWithLog(): void

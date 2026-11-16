@@ -2,13 +2,18 @@
 
 namespace Tests\Feature\Hooks;
 
+use App\Http\Controllers\Hooks\HookGate;
 use App\Http\Middleware\LimitHookBody;
 use App\Models\Deployment;
+use App\Models\Site;
+use App\Models\WebhookDelivery;
 use App\Settings\PanelSettings;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Session\Middleware\StartSession;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 
 /**
@@ -24,12 +29,13 @@ final class HookAccessTest extends HooksTestCase
 
         for ($i = 0; $i < 3; $i++) {
             $this->postRaw("/hooks/deploy/shop/{$token}", '')->assertStatus(202);
-            $this->deliver('shop', $repository->webhook_secret, 'ping', ['zen' => 'z'])->assertOk();
+            $this->deliver('shop', $repository->webhook_secret, 'push', $this->push(commit: str_repeat((string) $i, 40)))->assertStatus(202);
         }
-        // The seventh in the minute, whichever hook it comes to.
+        // The seventh deploy in the minute, whichever hook it comes to.
         $this->postRaw("/hooks/deploy/shop/{$token}", '')->assertStatus(429);
-        $this->deliver('shop', $repository->webhook_secret, 'push', $this->push())->assertStatus(429);
-        $this->assertSame(3, Deployment::count());
+        $this->deliver('shop', $repository->webhook_secret, 'push', $this->push(), ['X-GitHub-Delivery' => 'd-7'])->assertStatus(429);
+        // The refused push's delivery isn't kept: its redelivery may deploy.
+        $this->assertFalse(WebhookDelivery::where('delivery_id', 'd-7')->exists());
 
         // Another site has its own count.
         $other = $this->connected($this->site(name: 'blog'));
@@ -38,6 +44,114 @@ final class HookAccessTest extends HooksTestCase
         // A minute later it is open again.
         $this->travel(61)->seconds();
         $this->postRaw("/hooks/deploy/shop/{$token}", '')->assertStatus(202);
+    }
+
+    /**
+     * Only a request that starts a deploy counts toward the six a
+     * minute. Pings, other events and pushes to other branches don't, so a
+     * busy repository can't use up the budget of the push that deploys.
+     */
+    public function testIgnoredEventsDontSpendTheDeployThrottle(): void
+    {
+        $repository = $this->connected($this->site(), ['auto_deploy' => true]);
+
+        for ($i = 0; $i < 4; $i++) {
+            $this->deliver('shop', $repository->webhook_secret, 'ping', ['zen' => 'z'])->assertOk();
+            $this->deliver('shop', $repository->webhook_secret, 'push', $this->push('feature-'.$i))->assertStatus(202);
+            $this->deliver('shop', $repository->webhook_secret, 'issues', ['action' => 'opened'])->assertStatus(202);
+        }
+        $this->assertSame(0, Deployment::count());
+
+        $this->deliver('shop', $repository->webhook_secret, 'push', $this->push())->assertStatus(202);
+        $this->assertSame(1, Deployment::count());
+    }
+
+    /** Authenticated requests of any kind still have a limit of their own, a higher one. */
+    public function testAuthenticatedRequestsHaveAHigherLimit(): void
+    {
+        $repository = $this->connected($this->site(), ['auto_deploy' => true]);
+
+        for ($i = 0; $i < HookGate::AUTHENTICATED_PER_MINUTE; $i++) {
+            $this->deliver('shop', $repository->webhook_secret, 'ping', ['zen' => 'z'])->assertOk();
+        }
+        $this->deliver('shop', $repository->webhook_secret, 'ping', ['zen' => 'z'])->assertStatus(429);
+        $this->deliver('shop', $repository->webhook_secret, 'push', $this->push())->assertStatus(429);
+        $this->assertSame(0, Deployment::count());
+
+        $this->travel(61)->seconds();
+        $this->deliver('shop', $repository->webhook_secret, 'push', $this->push())->assertStatus(202);
+    }
+
+    /**
+     * A path whose site part can't be a site name matches no route.
+     * It is answered before any limiter or database work.
+     */
+    public function testImpossibleSiteNamesMatchNoRoute(): void
+    {
+        $this->connected($this->site(), ['auto_deploy' => true]);
+        DB::enableQueryLog();
+
+        foreach (['Shop', 'a', 'shop.', 'shop_x', '-shop', 'shop-', str_repeat('a', 25), 'sh%20op'] as $name) {
+            $this->postRaw("/hooks/github/{$name}", '{}')->assertNotFound();
+            $this->postRaw("/hooks/deploy/{$name}/".str_repeat('0', 64), '')->assertNotFound();
+        }
+
+        $this->assertSame([], DB::getQueryLog());
+        DB::disableQueryLog();
+        foreach (Route::getRoutes() as $route) {
+            if (str_starts_with($route->uri(), 'hooks/')) {
+                $this->assertSame(Site::NAME_SHAPE, $route->wheres['site'] ?? null, $route->uri());
+            }
+        }
+    }
+
+    /**
+     * The site name is the caller's choice, so failures also count
+     * against the address alone. A new made-up name each time is stopped
+     * like one name used again and again.
+     */
+    public function testFailuresThrottledPerAddressWhateverTheName(): void
+    {
+        $repository = $this->connected($this->site(), ['auto_deploy' => true]);
+        $token = $repository->regenerateDeployToken();
+
+        for ($i = 0; $i < HookGate::ADDRESS_FAILURES_PER_MINUTE; $i++) {
+            $this->deliver('nosuch'.$i, 'x', 'push', $this->push(), ip: '198.51.100.7')->assertNotFound();
+        }
+        $this->deliver('another', 'x', 'push', $this->push(), ip: '198.51.100.7')->assertStatus(429);
+        $this->postRaw("/hooks/deploy/shop/{$token}", '', ip: '198.51.100.7')->assertStatus(429);
+        // Other addresses are unaffected.
+        $this->postRaw("/hooks/deploy/shop/{$token}", '', ip: '203.0.113.9')->assertStatus(202);
+
+        // An IPv6 caller's /64 counts as one address.
+        for ($i = 0; $i < HookGate::ADDRESS_FAILURES_PER_MINUTE; $i++) {
+            $this->deliver('nosuch'.$i, 'x', 'push', $this->push(), ip: '2001:db8:1:2::'.dechex($i + 1))->assertNotFound();
+        }
+        $this->deliver('another', 'x', 'push', $this->push(), ip: '2001:db8:1:2:ffff::1')->assertStatus(429);
+        $this->deliver('another', 'x', 'push', $this->push(), ip: '2001:db8:1:3::1')->assertNotFound();
+    }
+
+    /** Expired cache rows, which the database store never removes by itself, go daily. */
+    public function testExpiredCacheRowsArePruned(): void
+    {
+        config(['cache.default' => 'database']);
+        $now = now()->getTimestamp();
+        DB::table('cache')->insert([
+            ['key' => 'hooks:failures:old', 'value' => 'i:1;', 'expiration' => $now - 10],
+            ['key' => 'hooks:failures:old:timer', 'value' => 'i:1;', 'expiration' => $now - 10],
+            ['key' => 'hooks:failures:live', 'value' => 'i:1;', 'expiration' => $now + 50],
+        ]);
+        DB::table('cache_locks')->insert([
+            ['key' => 'old', 'owner' => 'x', 'expiration' => $now - 10],
+            ['key' => 'live', 'owner' => 'x', 'expiration' => $now + 50],
+        ]);
+
+        $this->artisan('zimam:prune-cache')->assertSuccessful();
+
+        $this->assertSame(['hooks:failures:live'], DB::table('cache')->pluck('key')->all());
+        $this->assertSame(['live'], DB::table('cache_locks')->pluck('key')->all());
+        $scheduled = array_map(fn ($event): string => (string) $event->command, app(Schedule::class)->events());
+        $this->assertNotEmpty(array_filter($scheduled, fn (string $command): bool => str_contains($command, 'zimam:prune-cache')));
     }
 
     /** Requests that fail to authenticate don't use up a site's throttle, so a stranger can't hold its deploys back. */

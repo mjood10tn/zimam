@@ -3,8 +3,10 @@
 namespace Tests\Feature\Hooks;
 
 use App\Agent\AgentClient;
+use App\Agent\Exceptions\AgentBusy;
 use App\Agent\Exceptions\AgentUnavailable;
 use App\Agent\FakeAgentClient;
+use App\Agent\JobOutcomes;
 use App\Models\Deployment;
 use App\Models\SiteRepository;
 use App\Models\WebhookDelivery;
@@ -153,6 +155,69 @@ final class GithubWebhookTest extends HooksTestCase
 
         $this->assertCount(1, $this->deploys());
         $this->assertSame(1, Deployment::count());
+    }
+
+    /**
+     * The delivery id is a header the signature doesn't cover. The
+     * same signed body under another id is a replay, and deploys nothing.
+     */
+    public function testSameSignedBodyUnderAnotherDeliveryIdIsADuplicate(): void
+    {
+        $repository = $this->connected($this->site(), ['auto_deploy' => true]);
+
+        $this->deliver('shop', $repository->webhook_secret, 'push', $this->push(), ['X-GitHub-Delivery' => 'd-1'])->assertStatus(202);
+        $this->deliver('shop', $repository->webhook_secret, 'push', $this->push(), ['X-GitHub-Delivery' => 'd-2'])
+            ->assertStatus(202)
+            ->assertJson(['message' => __('zimam.hooks.duplicate')]);
+
+        $this->assertCount(1, $this->deploys());
+        $this->assertSame(1, Deployment::count());
+        // The replay's id isn't kept either.
+        $this->assertFalse(WebhookDelivery::where('delivery_id', 'd-2')->exists());
+        // Another push is another body.
+        $this->deliver('shop', $repository->webhook_secret, 'push', $this->push(commit: 'c0ffee0000000000000000000000000000000002'), ['X-GitHub-Delivery' => 'd-3'])
+            ->assertStatus(202)
+            ->assertJson(['message' => __('zimam.hooks.waiting')]);
+    }
+
+    /**
+     * A push that waited out the busy limit never ran. Its delivery
+     * is forgotten, so GitHub's redelivery deploys it instead of being
+     * answered as a duplicate.
+     */
+    public function testDeliveryOfADeployThatNeverRanCanBeRedelivered(): void
+    {
+        $repository = $this->connected($this->site(), ['auto_deploy' => true]);
+        $this->agent->respond('site.deploy', new AgentBusy('the server already runs two jobs'));
+
+        $this->deliver('shop', $repository->webhook_secret, 'push', $this->push(), ['X-GitHub-Delivery' => 'd-1'])
+            ->assertStatus(202)
+            ->assertJson(['message' => __('zimam.hooks.waiting')]);
+        $this->assertSame(2, WebhookDelivery::count());
+        $this->deliver('shop', $repository->webhook_secret, 'push', $this->push(), ['X-GitHub-Delivery' => 'd-1'])
+            ->assertJson(['message' => __('zimam.hooks.duplicate')]);
+
+        $deployment = Deployment::sole();
+        app(JobOutcomes::class)->fail($deployment->agentJob, 'busy', __('zimam.jobs.busy', ['minutes' => 35]));
+        $this->assertSame(Deployment::FAILED, $deployment->fresh()->status);
+        $this->assertSame(0, WebhookDelivery::count());
+
+        $this->agent->respond('site.deploy', fn () => null);
+        $this->deliver('shop', $repository->webhook_secret, 'push', $this->push(), ['X-GitHub-Delivery' => 'd-1'])
+            ->assertStatus(202)
+            ->assertJson(['message' => __('zimam.hooks.deploying')]);
+        $this->assertCount(2, Deployment::all());
+    }
+
+    /** A deploy that ran and failed keeps its delivery: redelivering it would only fail again. */
+    public function testDeliveryOfADeployThatRanAndFailedIsKept(): void
+    {
+        $repository = $this->connected($this->site(), ['auto_deploy' => true]);
+        $this->deliver('shop', $repository->webhook_secret, 'push', $this->push(), ['X-GitHub-Delivery' => 'd-1'])->assertStatus(202);
+
+        app(JobOutcomes::class)->fail(Deployment::sole()->agentJob, 'internal', 'The deploy script failed with exit code 1.');
+
+        $this->assertTrue(WebhookDelivery::where('delivery_id', 'd-1')->exists());
     }
 
     /** R02-D12: two different pushes both deploy; the later one waits for the first and goes last. */

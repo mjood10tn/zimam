@@ -103,7 +103,7 @@ final class SiteLifecycleTest extends TestCase
         $this->assertSame(AgentJob::FAILED, $job->refresh()->status);
         $site->refresh();
         $this->assertSame(Site::FAILED, $site->status);
-        $this->assertSame(__('zimam.jobs.busy'), $site->last_error);
+        $this->assertSame(__('zimam.jobs.busy', ['minutes' => 15]), $site->last_error);
     }
 
     /** As does a job the panel stopped tracking. */

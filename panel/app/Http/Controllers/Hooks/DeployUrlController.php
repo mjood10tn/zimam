@@ -20,6 +20,7 @@ final class DeployUrlController
         if ($repository === null || ! $repository->matchesDeployToken($token)) {
             $gate->refuse($request, $site);
         }
+        $gate->authenticated($repository);
         $gate->throttle($repository);
 
         return $gate->deploy($repository, Deployment::URL);

@@ -19,27 +19,41 @@ use Illuminate\Support\Facades\RateLimiter;
  * 404 whatever went wrong: no site, no repository, a bad token or signature.
  * Only after that may an answer say anything about the site. Failures count
  * against the caller's address and the site name it used, the same for real
- * and made-up names, so one address can't keep the panel hashing. They don't
- * count against the address alone, since GitHub or a shared CI runner sends
- * for many sites from one address, nor against the site, so a stranger can't
- * hold back its deliveries. Authenticated requests count against the site:
- * six a minute, both hooks together.
+ * and made-up names. The name is the caller's choice, so that count alone
+ * limits nothing: failures also count against the address by itself, which
+ * is checked first, so one address can't keep the panel hashing by making
+ * names up. That limit is generous, since GitHub or a shared CI runner
+ * sends for many sites from one address and its own failures are rare.
+ * Failures never count against the site, so a stranger can't hold back its
+ * deliveries.
+ *
+ * Authenticated requests count against the site twice. Every one counts
+ * toward a high limit, pings and ignored events included. Only a request
+ * that is about to start a deploy counts toward the low one, six a minute
+ * for both hooks together, so pushes to other branches can't use up the
+ * budget of the push that deploys.
  */
 final class HookGate
 {
+    /** Deploys the two hooks may start for one site. */
     public const PER_SITE_PER_MINUTE = 6;
 
+    /** Authenticated requests of any kind for one site. */
+    public const AUTHENTICATED_PER_MINUTE = 60;
+
+    /** Failures of one address for one site name. */
     public const FAILURES_PER_MINUTE = 30;
+
+    /** Failures of one address, whatever names it used. */
+    public const ADDRESS_FAILURES_PER_MINUTE = 120;
 
     public function __construct(private readonly StartDeployment $start) {}
 
-    /** Stops an address that failed too often lately for this name, before any lookup. */
+    /** Stops an address that failed too often lately, at all or for this name, before any lookup. */
     public function admit(Request $request, string $site): void
     {
-        $key = $this->failureKey($request, $site);
-        if (RateLimiter::tooManyAttempts($key, self::FAILURES_PER_MINUTE)) {
-            abort(429, '', ['Retry-After' => RateLimiter::availableIn($key)]);
-        }
+        self::limit($this->addressKey($request), self::ADDRESS_FAILURES_PER_MINUTE);
+        self::limit($this->failureKey($request, $site), self::FAILURES_PER_MINUTE);
     }
 
     /** The site's repository by the site's name, or null; nothing about which. */
@@ -50,18 +64,32 @@ final class HookGate
 
     public function refuse(Request $request, string $site): never
     {
+        RateLimiter::hit($this->addressKey($request), 60);
         RateLimiter::hit($this->failureKey($request, $site), 60);
         abort(404);
     }
 
-    /** Counts an authenticated request against its site. */
+    /** Counts an authenticated request of any kind against its site. */
+    public function authenticated(SiteRepository $repository): void
+    {
+        $key = 'hooks:authenticated:'.$repository->site_id;
+        self::limit($key, self::AUTHENTICATED_PER_MINUTE);
+        RateLimiter::hit($key, 60);
+    }
+
+    /** Counts a request that is about to start a deploy against its site; call it right before deploy(). */
     public function throttle(SiteRepository $repository): void
     {
         $key = 'hooks:site:'.$repository->site_id;
-        if (RateLimiter::tooManyAttempts($key, self::PER_SITE_PER_MINUTE)) {
+        self::limit($key, self::PER_SITE_PER_MINUTE);
+        RateLimiter::hit($key, 60);
+    }
+
+    private static function limit(string $key, int $perMinute): void
+    {
+        if (RateLimiter::tooManyAttempts($key, $perMinute)) {
             abort(429, '', ['Retry-After' => RateLimiter::availableIn($key)]);
         }
-        RateLimiter::hit($key, 60);
     }
 
     /**
@@ -95,5 +123,20 @@ final class HookGate
     private function failureKey(Request $request, string $site): string
     {
         return 'hooks:failures:'.sha1($request->ip().'|'.$site);
+    }
+
+    /**
+     * An IPv6 caller usually holds a whole /64 and can send from any
+     * address in it, so its network is what counts.
+     */
+    private function addressKey(Request $request): string
+    {
+        $ip = (string) $request->ip();
+        $packed = @inet_pton($ip);
+        if ($packed !== false && strlen($packed) === 16) {
+            $ip = bin2hex(substr($packed, 0, 8));
+        }
+
+        return 'hooks:address:'.sha1($ip);
     }
 }

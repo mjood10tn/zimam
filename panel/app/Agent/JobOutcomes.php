@@ -52,6 +52,33 @@ final class JobOutcomes
         });
     }
 
+    /**
+     * Ends a job that still waits after `busy`, before the agent has it:
+     * the owner's Cancel, or a newer deploy of the same site taking its
+     * place. Its queued retry sees the row finished and stops. The related
+     * records hear so as from a cancelled outcome. False when the job
+     * isn't waiting any more: the agent has it, and only the agent can
+     * stop it.
+     */
+    public function cancelWaiting(AgentJob $job, string $reason, string $message): bool
+    {
+        return DB::transaction(function () use ($job, $reason, $message): bool {
+            if ($job->refresh()->status !== AgentJob::WAITING) {
+                return false;
+            }
+            $job->markCancelled($reason, $message);
+            $this->handle($job, AgentJobStatus::fromArray([
+                'job' => '',
+                'command' => $job->command,
+                'subject' => (string) $job->subject,
+                'status' => AgentJob::CANCELLED,
+                'message' => $message,
+            ]));
+
+            return true;
+        });
+    }
+
     private function handle(AgentJob $job, AgentJobStatus $status): void
     {
         if (isset($this->handlers[$job->command])) {
