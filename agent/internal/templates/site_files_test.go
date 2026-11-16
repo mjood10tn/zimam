@@ -88,3 +88,53 @@ func TestPlaceholderPrintsPHPVersion(t *testing.T) {
 	contains(t, "index.html", html, "Zimam site shop is ready")
 	lacks(t, "index.html", html, "<?php")
 }
+
+// A laravel site's first shared/.env (R02-D8): production settings, the
+// site's HTTPS URL and the key the agent generated.
+func TestLaravelEnv(t *testing.T) {
+	key := "base64:" + strings.Repeat("A", 42) + "E="
+	out := mustRender(t, "site/laravel.env", LaravelEnv{Domain: "shop.example.com", AppKey: key})
+	contains(t, "the .env", out, "APP_ENV=production\n", "APP_KEY="+key+"\n", "APP_DEBUG=false\n",
+		"APP_URL=https://shop.example.com\n", "LOG_CHANNEL=single\n")
+	for _, bad := range []string{"", "base64:", "base64:" + strings.Repeat("A", 44), "base64:" + strings.Repeat("A", 42) + "E=\nAPP_DEBUG=true", strings.Repeat("A", 43) + "=", "base64:" + strings.Repeat("A", 42) + "E= "} {
+		_, err := Render("site/laravel.env", LaravelEnv{Domain: "shop.example.com", AppKey: bad})
+		if err == nil {
+			t.Errorf("rendered with the key %q", bad)
+		} else if bad != "" && strings.Contains(err.Error(), bad) {
+			t.Errorf("the error shows the key: %v", err)
+		}
+	}
+	if _, err := Render("site/laravel.env", LaravelEnv{Domain: "shop.example.com\nAPP_DEBUG=true", AppKey: key}); err == nil {
+		t.Error("rendered a domain with a line break")
+	}
+}
+
+// Version 2's only change: a laravel site's rules also rotate its Laravel
+// logs in the shared storage, as the site user (R02-D8, R02-D9).
+func TestSiteLogrotateLaravel(t *testing.T) {
+	plain := mustRender(t, "logrotate/site.conf", SiteLogs{Name: "shop", RetentionDays: 30})
+	out := mustRender(t, "logrotate/site.conf", SiteLogs{Name: "shop", RetentionDays: 30, Laravel: true})
+	extra, ok := strings.CutPrefix(out, plain[:len(plain)-1])
+	if !ok {
+		t.Fatalf("the laravel rules don't start with the plain ones:\n%s", out)
+	}
+	want := `
+
+/home/s_shop/site/shared/storage/logs/*.log {
+    su s_shop s_shop
+    daily
+    maxsize 200M
+    rotate 1000
+    maxage 30
+    missingok
+    notifempty
+    compress
+    dateext
+    dateformat -%Y%m%d-%s
+}
+`
+	if extra != want {
+		t.Errorf("the laravel rules add:\n%s\nwant:\n%s", extra, want)
+	}
+	lacks(t, "a plain site's rules", plain, "shared/storage")
+}

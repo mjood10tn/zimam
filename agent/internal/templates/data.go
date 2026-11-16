@@ -26,6 +26,7 @@ type LogPolicy struct {
 type SiteLogs struct {
 	Name          contract.SiteName
 	RetentionDays contract.RetentionDays
+	Laravel       bool // also rotates site/shared/storage/logs (R02-D8)
 }
 
 // SuryRepo fills apt/zimam-sury.sources and apt/zimam-sury.pref (§8.2).
@@ -67,6 +68,14 @@ type SitePool struct {
 	PHPVersion           contract.PHPVersion
 	BlockRiskyFunctions  bool
 	RestrictToSiteFolder bool
+}
+
+// LaravelEnv fills site/laravel.env, a laravel site's first shared/.env
+// (R02-D8). The helper writes it as the site user; root never reads it.
+// AppKey is a secret: it must never reach argv, a log or an error.
+type LaravelEnv struct {
+	Domain contract.Domain
+	AppKey string // "base64:" and 32 random bytes in standard base64
 }
 
 // SitePlaceholder fills site/index.html and site/index.php, the page a new

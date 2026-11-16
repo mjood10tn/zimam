@@ -108,7 +108,7 @@ func siteFiles(d sysexec.Deps, st State) (secConf, vhost, pool []byte, err error
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if st.Type == contract.SitePHP {
+	if st.Type.RunsPHP() {
 		pool, err = templates.Render("php/site-pool.conf", templates.SitePool{
 			Name: st.Name, PHPVersion: st.PHPVersion, BlockRiskyFunctions: st.Security.BlockRiskyFunctions, RestrictToSiteFolder: st.Security.RestrictToSiteFolder,
 		})
@@ -179,7 +179,7 @@ func applySecurityFiles(ctx context.Context, d sysexec.Deps, st State, changes [
 	if err := os.MkdirAll(d.Paths.SiteNginxDir(st.Name), 0o755); err != nil {
 		return err
 	}
-	isPHP := st.Type == contract.SitePHP
+	isPHP := st.Type.RunsPHP()
 	if isPHP {
 		unlock, err := sysexec.Lock(ctx, d.Paths.SubjectLock("php_"+string(st.PHPVersion)))
 		if err != nil {

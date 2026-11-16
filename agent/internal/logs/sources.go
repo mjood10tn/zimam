@@ -21,8 +21,8 @@ import (
 	"zimam/agent/internal/sysexec"
 )
 
-// Helper is what reading a site's PHP error log needs of the site-user
-// helper (§5.6): root never opens a file inside a home.
+// Helper is what reading a site's PHP error and Laravel logs needs of the
+// site-user helper (§5.6): root never opens a file inside a home.
 type Helper interface {
 	Stat(ctx context.Context, a helper.Account, name string) (helper.FileInfo, error)
 	List(ctx context.Context, a helper.Account, dir string) (helper.Listing, error)
@@ -77,6 +77,14 @@ func resolve(e Env, id contract.LogSource, name contract.SiteName) (source, erro
 			return source{}, fmt.Errorf("looking up s_%s: %w", name, err)
 		}
 		return source{kind: helperFile, path: "logs/php-error.log", acct: a}, nil
+	case "site.laravel":
+		// Laravel's single channel, in the shared storage every release
+		// links to (R02-D8); read like site.php-error, never by root.
+		a, err := e.Lookup("s_" + string(name))
+		if err != nil {
+			return source{}, fmt.Errorf("looking up s_%s: %w", name, err)
+		}
+		return source{kind: helperFile, path: "site/shared/storage/logs/laravel.log", acct: a}, nil
 	case "file.nginx-error":
 		return source{kind: rootFile, path: at(p, "var/log/nginx/error.log")}, nil
 	case "file.certbot":

@@ -423,6 +423,66 @@ func TestPhpErrorThroughHelper(t *testing.T) {
 	}
 }
 
+const laravelLog = "site/shared/storage/logs/laravel.log"
+
+// laravelEnv is newEnv with shop a laravel site.
+func laravelEnv(t *testing.T) *env {
+	e := newEnv(t)
+	if err := sites.Save(e.e.D.Paths, sites.State{Name: "shop", Domain: "shop.example.com", Type: contract.SiteLaravel, PHPVersion: "8.4", TemplateVersion: 2, Security: sites.DefaultSecurity()}); err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+
+// site.laravel is the site's Laravel log in its shared storage (R02-D8),
+// read like site.php-error: as the site user through the helper, with its
+// archives listed from the same directory.
+func TestLaravelLogSourceReadsThroughHelper(t *testing.T) {
+	e := laravelEnv(t)
+	e.h.files[laravelLog] = []byte("PHP Warning: one\n")
+	e.h.files["site/shared/storage/logs/laravel.log-20261101-1761955200.gz"] = gz(t, []byte("[2026-11-01] production.ERROR: boom\n"))
+	e.h.files["site/shared/storage/logs/other.log-20261101-1761955200.gz"] = gz(t, []byte("other\n"))
+	res := read(t, e.e, contract.LogsReadParams{Source: "site.laravel", Name: "shop", Direction: contract.LogBack})
+	if got := texts(res.Lines); !slices.Equal(got, []string{"PHP Warning: one"}) || !slices.Contains(e.h.ops, "tail "+laravelLog) {
+		t.Errorf("lines %v, ops %v", got, e.h.ops)
+	}
+	l, err := List(context.Background(), e.e, contract.LogsListParams{Source: "site.laravel", Name: "shop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l.Current == nil || l.Current.Name != "laravel.log" || len(l.Archives) != 1 || l.Archives[0].Name != "laravel.log-20261101-1761955200.gz" {
+		t.Errorf("listing = %+v", l)
+	}
+	res = read(t, e.e, contract.LogsReadParams{Source: "site.laravel", Name: "shop", Archive: "laravel.log-20261101-1761955200.gz", Direction: contract.LogBack})
+	if got := texts(res.Lines); !slices.Equal(got, []string{"[2026-11-01] production.ERROR: boom"}) {
+		t.Errorf("the archive's lines: %v", got)
+	}
+	_, err = List(context.Background(), e.e, contract.LogsListParams{Source: "site.laravel", Name: "blog"})
+	wantCode(t, err, contract.ErrNotFound)
+}
+
+// A site user's symlink at laravel.log gets an error and no content, as
+// for site.php-error: the helper stats it first and nothing reads it.
+func TestLaravelLogSymlinkRefused(t *testing.T) {
+	e := laravelEnv(t)
+	e.h.links[laravelLog] = true
+	for _, dir := range []contract.LogDirection{contract.LogBack, contract.LogForward} {
+		p := contract.LogsReadParams{Source: "site.laravel", Name: "shop", Direction: dir, Offset: off(0)}
+		res, err := Read(context.Background(), e.e, p)
+		if err == nil || len(res.Lines) != 0 {
+			t.Errorf("%s through a symlink: %+v, %v", dir, res, err)
+		}
+	}
+	if !slices.Contains(e.h.ops, "stat "+laravelLog) {
+		t.Errorf("the helper never looked at %s: %v", laravelLog, e.h.ops)
+	}
+	for _, op := range e.h.ops {
+		if !strings.HasPrefix(op, "stat ") {
+			t.Errorf("read through a symlink: %v", e.h.ops)
+		}
+	}
+}
+
 // repeatReader serves n copies of b with no newline; delay sleeps per read.
 type repeatReader struct {
 	n     int64

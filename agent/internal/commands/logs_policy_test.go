@@ -28,6 +28,9 @@ func TestPolicyStoresAndRerenders(t *testing.T) {
 	if err := sites.Save(e.p, sites.State{Name: "shop", Domain: "shop.example.com", Type: contract.SiteStatic, TemplateVersion: 1, Security: sites.DefaultSecurity()}); err != nil {
 		t.Fatal(err)
 	}
+	if err := sites.Save(e.p, sites.State{Name: "app", Domain: "app.example.com", Type: contract.SiteLaravel, PHPVersion: "8.4", TemplateVersion: 2, Security: sites.DefaultSecurity()}); err != nil {
+		t.Fatal(err)
+	}
 	e.run.Add(sysexec.Script{Path: "/usr/sbin/logrotate", Args: []string{"-d", "--state", e.p.LogrotateState(), e.p.LogrotateConf()}})
 	e.run.Add(sysexec.Script{Path: "/usr/bin/systemctl", Args: []string{"restart", "systemd-journald"}})
 	cfg, err := config.Load(e.p)
@@ -63,6 +66,13 @@ func TestPolicyStoresAndRerenders(t *testing.T) {
 		if err != nil || !strings.Contains(string(b), want) {
 			t.Errorf("%s = %q, %v; want %q", path, b, err, want)
 		}
+	}
+	// A laravel site's rules keep rotating its storage's logs (R02-D8).
+	if b, _ := os.ReadFile(e.p.SiteLogrotateConf("app")); !strings.Contains(string(b), "/home/s_app/site/shared/storage/logs/*.log {") || !strings.Contains(string(b), "maxage 30") {
+		t.Errorf("the laravel site's rules:\n%s", b)
+	}
+	if b, _ := os.ReadFile(e.p.SiteLogrotateConf("shop")); strings.Contains(string(b), "shared/storage") {
+		t.Errorf("the static site's rules rotate a Laravel log:\n%s", b)
 	}
 	if calls := e.calls(); len(calls) == 0 || calls[len(calls)-1] != "/usr/bin/systemctl restart systemd-journald" {
 		t.Errorf("ran %v", calls)

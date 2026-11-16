@@ -33,3 +33,19 @@ agent is still testing. */ -}}
     dateext
     dateformat -%Y%m%d-%s
 }
+{{- /* A laravel site's own logs, in its shared storage (R02-D8). */}}
+{{- if .Laravel}}
+
+/home/s_{{safe .Name}}/site/shared/storage/logs/*.log {
+    su s_{{safe .Name}} s_{{safe .Name}}
+    daily
+    maxsize 200M
+    rotate 1000
+    maxage {{.RetentionDays}}
+    missingok
+    notifempty
+    compress
+    dateext
+    dateformat -%Y%m%d-%s
+}
+{{- end}}

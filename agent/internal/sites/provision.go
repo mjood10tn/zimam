@@ -3,6 +3,8 @@ package sites
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -54,10 +56,7 @@ type Lookup func(username string) (helper.Account, error)
 // or PHP version: provisioning again is a retry, never a change. agent.json
 // and the state files are read on every call.
 func Check(d sysexec.Deps, p contract.SiteProvisionParams) error {
-	if err := refuseLaravel(p); err != nil {
-		return err
-	}
-	if p.Type == contract.SitePHP {
+	if p.Type.RunsPHP() {
 		if err := checkPHP(d, p.PHPVersion); err != nil {
 			return err
 		}
@@ -103,27 +102,14 @@ func conflict(format string, args ...any) error {
 	return &contract.AgentError{Code: contract.ErrConflict, Message: fmt.Sprintf(format, args...)}
 }
 
-// refuseLaravel keeps a laravel site from being provisioned down the static
-// path while the contract already accepts the type: its shared .env,
-// storage/ and log rules (R02-D8) don't exist yet. Task 7 of the v0.2.0
-// plan removes this guard.
-func refuseLaravel(p contract.SiteProvisionParams) error {
-	if p.Type != contract.SiteLaravel {
-		return nil
-	}
-	return contract.FieldErrors{"type": "laravel sites aren't supported by this agent yet"}.Err()
-}
-
 // Provision creates a site (§9.2): its user and home, its files through the
-// helper, its log directory, its pool for a PHP site, its security.conf and
+// helper (for a laravel site also its shared .env and storage, R02-D8), its
+// log directory, its pool for a PHP site, its security.conf and
 // HTTP vhost, its log rules, and last its state file. Each step checks
 // before it acts, so a retry continues where the last attempt stopped and
 // redoes nothing that is already in place.
 func Provision(ctx context.Context, d sysexec.Deps, h Helper, lookup Lookup, p contract.SiteProvisionParams) (contract.SiteProvisionResult, error) {
 	if err := p.Validate(); err != nil {
-		return contract.SiteProvisionResult{}, err
-	}
-	if err := refuseLaravel(p); err != nil {
 		return contract.SiteProvisionResult{}, err
 	}
 	st := State{Name: p.Name, Domain: p.Domain, Type: p.Type, PHPVersion: p.PHPVersion, TemplateVersion: templates.Version, Security: DefaultSecurity()}
@@ -146,10 +132,15 @@ func Provision(ctx context.Context, d sysexec.Deps, h Helper, lookup Lookup, p c
 	if err := ensureSiteFiles(ctx, h, a, p); err != nil {
 		return contract.SiteProvisionResult{}, err
 	}
+	if p.Type == contract.SiteLaravel {
+		if err := ensureLaravelShared(ctx, h, a, p.Domain); err != nil {
+			return contract.SiteProvisionResult{}, err
+		}
+	}
 	if err := ensureLogDir(d, p.Name); err != nil {
 		return contract.SiteProvisionResult{}, err
 	}
-	if p.Type == contract.SitePHP {
+	if p.Type.RunsPHP() {
 		if err := ensurePool(ctx, d, p.Name, p.PHPVersion, sec); err != nil {
 			return contract.SiteProvisionResult{}, err
 		}
@@ -166,7 +157,7 @@ func Provision(ctx context.Context, d sysexec.Deps, h Helper, lookup Lookup, p c
 		if err != nil {
 			return err
 		}
-		if err := logpolicy.ApplySite(ctx, d, p.Name, cfg.LogRetentionDays); err != nil {
+		if err := logpolicy.ApplySite(ctx, d, p.Name, p.Type, cfg.LogRetentionDays); err != nil {
 			return err
 		}
 		if err := Save(d.Paths, st); err != nil {
@@ -277,7 +268,7 @@ func groupHasMember(path, group, member string) (bool, error) {
 // there is left alone, since a deploy may have moved it.
 func ensureSiteFiles(ctx context.Context, h Helper, a helper.Account, p contract.SiteProvisionParams) error {
 	index := "index.html"
-	if p.Type == contract.SitePHP {
+	if p.Type.RunsPHP() {
 		index = "index.php"
 	}
 	const public = "site/releases/initial/public"
@@ -322,6 +313,67 @@ func ensureSiteFiles(ctx context.Context, h Helper, a helper.Account, p contract
 		}
 	}
 	return nil
+}
+
+// laravelShared are a laravel site's shared directories (R02-D8), parents
+// first. Each gets 0750 explicitly, not whatever mkdir -p leaves: www-data,
+// in the site's group, reaches storage/app/public through public/storage.
+var laravelShared = []string{
+	"site/shared",
+	"site/shared/storage",
+	"site/shared/storage/app",
+	"site/shared/storage/app/public",
+	"site/shared/storage/framework",
+	"site/shared/storage/framework/cache",
+	"site/shared/storage/framework/sessions",
+	"site/shared/storage/framework/views",
+	"site/shared/storage/logs",
+}
+
+// ensureLaravelShared is step 2 for a laravel site, as the site user
+// through the helper: site/shared/ and its storage tree, then shared/.env,
+// 0600, with production settings and an APP_KEY the agent generates. Every
+// release links both (R02-D5). An .env already there is never written
+// again: a new key would break everything the app encrypted, and the owner
+// may have changed it.
+func ensureLaravelShared(ctx context.Context, h Helper, a helper.Account, domain contract.Domain) error {
+	for _, dir := range laravelShared {
+		if _, err := h.Stat(ctx, a, dir); err == nil {
+			continue
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		if err := h.Mkdir(ctx, a, dir, 0o750); err != nil {
+			return err
+		}
+	}
+	const env = "site/shared/.env"
+	if _, err := h.Stat(ctx, a, env); err == nil {
+		return nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	key, err := laravelAppKey()
+	if err != nil {
+		return err
+	}
+	body, err := templates.Render("site/laravel.env", templates.LaravelEnv{Domain: domain, AppKey: key})
+	if err != nil {
+		return err
+	}
+	// The helper reads the content on its stdin, so the key never reaches
+	// argv; nothing here logs it.
+	return h.Write(ctx, a, env, 0o600, bytes.NewReader(body))
+}
+
+// laravelAppKey is a new APP_KEY as Laravel's key:generate makes one for
+// AES-256-CBC: 32 bytes from crypto/rand, in standard base64.
+func laravelAppKey() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return "base64:" + base64.StdEncoding.EncodeToString(b), nil
 }
 
 // ensureLogDir is step 3: /var/log/zimam/sites/<name>/, root's, 0750.

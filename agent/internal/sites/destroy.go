@@ -92,7 +92,7 @@ func Destroy(ctx context.Context, d sysexec.Deps, h Helper, lookup Lookup, name 
 	// Step 2: every pool the site has, and the version the state file names
 	// even without one, so a rerun still stops an FPM left with no pool.
 	versions := map[contract.PHPVersion]bool{}
-	if st, err := Load(p, name); err == nil && st.Type == contract.SitePHP {
+	if st, err := Load(p, name); err == nil && st.Type.RunsPHP() {
 		versions[st.PHPVersion] = true
 	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return contract.SiteNameResult{}, err

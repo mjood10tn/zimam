@@ -69,7 +69,7 @@ func (s State) validate() error {
 	f.Check("name", s.Name)
 	f.Check("domain", s.Domain)
 	f.Check("type", s.Type)
-	if s.Type == contract.SitePHP {
+	if s.Type.RunsPHP() {
 		f.Check("php_version", s.PHPVersion)
 	}
 	if s.Repository != "" || s.Branch != "" || s.DeployKeyFingerprint != "" {

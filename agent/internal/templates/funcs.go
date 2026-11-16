@@ -14,6 +14,7 @@ var funcs = template.FuncMap{
 	"safe":         safe,
 	"prefix":       prefix,
 	"htpasswdLine": htpasswdLine,
+	"laravelKey":   laravelKey,
 }
 
 // safeRe is all a string may contain on its way into a config file. Without
@@ -52,4 +53,16 @@ func htpasswdLine(u contract.BasicAuthUser) (string, error) {
 		return "", fmt.Errorf("htpasswdLine: %v", err)
 	}
 	return u.Username + ":" + u.PasswordHash, nil
+}
+
+// laravelKeyRe is a Laravel APP_KEY for AES-256: "base64:" and 32 bytes.
+var laravelKeyRe = regexp.MustCompile(`^base64:[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$`)
+
+// laravelKey renders an APP_KEY only in its exact shape. The key is a
+// secret, so the error never quotes it.
+func laravelKey(k string) (string, error) {
+	if !laravelKeyRe.MatchString(k) {
+		return "", fmt.Errorf("laravelKey: the key isn't 32 bytes in Laravel's APP_KEY form")
+	}
+	return k, nil
 }

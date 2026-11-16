@@ -342,3 +342,16 @@ func TestSiteRunsEveryCheck(t *testing.T) {
 		t.Errorf("unknown site: %v", err)
 	}
 }
+
+// A laravel site runs PHP, so both PHP checks look at its version and pool.
+func TestLaravelSitePHPChecks(t *testing.T) {
+	st := sites.State{Name: "shop", Type: contract.SiteLaravel, PHPVersion: "8.2"} // support ends 2026-12-31
+	if f := phpSupported(st, time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)); f.Status != contract.FindingFail {
+		t.Errorf("PHP 8.2 after its end: %+v", f)
+	}
+	se := newSiteEnv(t, nil)
+	se.st.Type = contract.SiteLaravel
+	wantStatus(t, poolUser(se.e, se.st), "pool_runs_as_site_user", contract.FindingPass)
+	os.Remove(se.e.D.Paths.PHPPool("8.4", "shop"))
+	wantStatus(t, poolUser(se.e, se.st), "pool_runs_as_site_user", contract.FindingFail)
+}

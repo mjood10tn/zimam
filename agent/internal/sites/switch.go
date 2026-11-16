@@ -33,7 +33,7 @@ func CheckSwitch(d sysexec.Deps, p contract.SitePHPParams) error {
 		return err
 	}
 	switch {
-	case st.Type != contract.SitePHP:
+	case !st.Type.RunsPHP():
 		return conflict("Site %s is static, so it has no PHP version.", p.Name)
 	case st.PHPVersion == p.PHPVersion:
 		return conflict("Site %s already runs PHP %s.", p.Name, p.PHPVersion)
@@ -55,7 +55,7 @@ func Switch(ctx context.Context, d sysexec.Deps, p contract.SitePHPParams) (cont
 	if err != nil {
 		return contract.SitePHPResult{}, err
 	}
-	if st.Type != contract.SitePHP {
+	if !st.Type.RunsPHP() {
 		return contract.SitePHPResult{}, conflict("Site %s is static, so it has no PHP version.", p.Name)
 	}
 	next := st

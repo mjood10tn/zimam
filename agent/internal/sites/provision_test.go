@@ -295,28 +295,6 @@ func TestPHPVersionChecks(t *testing.T) {
 	}
 }
 
-// Until Laravel provisioning lands (R02-D8), a laravel site is refused, not
-// provisioned as a static one. Task 7 removes this guard.
-func TestLaravelRefusedUntilSupported(t *testing.T) {
-	e := newEnv(t)
-	writeFile(t, e.p.PHPFPMBinary("8.4"), "")
-	p := php84
-	p.Type = contract.SiteLaravel
-	if ae := wantCode(t, Check(e.d, p), contract.ErrValidationFailed); ae.Fields["type"] == "" {
-		t.Errorf("Check: fields = %v, want type", ae.Fields)
-	}
-	_, err := e.provision(p)
-	if ae := wantCode(t, err, contract.ErrValidationFailed); ae.Fields["type"] == "" {
-		t.Errorf("Provision: fields = %v, want type", ae.Fields)
-	}
-	if c := e.calls(); len(c) != 0 {
-		t.Errorf("ran %v, want nothing", c)
-	}
-	if _, err := os.Lstat(e.p.SiteState(p.Name)); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("state file: %v, want none", err)
-	}
-}
-
 func wantCode(t *testing.T, err error, code contract.ErrorCode) *contract.AgentError {
 	t.Helper()
 	var ae *contract.AgentError

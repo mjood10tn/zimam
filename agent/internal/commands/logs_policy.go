@@ -33,16 +33,16 @@ func logsPolicy(ctx context.Context, j *jobs.Context, p contract.Params) (any, e
 		if err != nil {
 			return err
 		}
-		names := make([]contract.SiteName, 0, len(all))
+		list := make([]logpolicy.Site, 0, len(all))
 		for _, st := range all {
-			names = append(names, st.Name)
+			list = append(list, logpolicy.Site{Name: st.Name, Type: st.Type})
 		}
 		d.Logf("Keeping logs %d days, the audit log %d days, and at most %d bytes of logs per site", params.RetentionDays, params.AuditRetentionDays, params.SiteCapBytes)
 		if err := config.Save(d.Paths, cfg); err != nil {
 			return err
 		}
 		d.Config = cfg
-		return logpolicy.Apply(ctx, d, logpolicy.Policy{RetentionDays: params.RetentionDays, AuditRetentionDays: params.AuditRetentionDays, SiteCapBytes: params.SiteCapBytes}, names)
+		return logpolicy.Apply(ctx, d, logpolicy.Policy{RetentionDays: params.RetentionDays, AuditRetentionDays: params.AuditRetentionDays, SiteCapBytes: params.SiteCapBytes}, list)
 	})
 	if err != nil {
 		return nil, err

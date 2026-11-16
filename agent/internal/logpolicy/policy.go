@@ -30,10 +30,31 @@ type Policy struct {
 	SiteCapBytes       contract.SiteCapBytes
 }
 
+// Site is what a site's rotation rules are rendered from: a laravel site's
+// also rotate the logs in its shared storage (R02-D8).
+type Site struct {
+	Name contract.SiteName
+	Type contract.SiteType
+}
+
+func (s Site) validate() error {
+	if err := s.Name.Validate(); err != nil {
+		return fmt.Errorf("site %q %v", s.Name, err)
+	}
+	if err := s.Type.Validate(); err != nil {
+		return fmt.Errorf("site %s's type %v", s.Name, err)
+	}
+	return nil
+}
+
+func (s Site) logs(days contract.RetentionDays) templates.SiteLogs {
+	return templates.SiteLogs{Name: s.Name, RetentionDays: days, Laravel: s.Type == contract.SiteLaravel}
+}
+
 // Apply renders /etc/zimam/logrotate.conf, Zimam's own rules, one rules file
 // per site and the journald drop-in, tests them with logrotate -d, then
 // restarts journald.
-func Apply(ctx context.Context, d sysexec.Deps, p Policy, sites []contract.SiteName) error {
+func Apply(ctx context.Context, d sysexec.Deps, p Policy, sites []Site) error {
 	if err := p.RetentionDays.Validate(); err != nil {
 		return fmt.Errorf("log retention %v", err)
 	}
@@ -44,8 +65,8 @@ func Apply(ctx context.Context, d sysexec.Deps, p Policy, sites []contract.SiteN
 		return fmt.Errorf("site log cap %v", err)
 	}
 	for _, s := range sites {
-		if err := s.Validate(); err != nil {
-			return fmt.Errorf("site %q %v", s, err)
+		if err := s.validate(); err != nil {
+			return err
 		}
 	}
 	type file struct {
@@ -59,7 +80,7 @@ func Apply(ctx context.Context, d sysexec.Deps, p Policy, sites []contract.SiteN
 		{d.Paths.JournaldDropIn(), "journald/50-zimam.conf", policy},
 	}
 	for _, s := range sites {
-		files = append(files, file{d.Paths.SiteLogrotateConf(s), "logrotate/site.conf", templates.SiteLogs{Name: s, RetentionDays: p.RetentionDays}})
+		files = append(files, file{d.Paths.SiteLogrotateConf(s.Name), "logrotate/site.conf", s.logs(p.RetentionDays)})
 	}
 	var changes []configtx.Change
 	for _, f := range files {
@@ -88,14 +109,15 @@ func Apply(ctx context.Context, d sysexec.Deps, p Policy, sites []contract.SiteN
 // -d, for a new site (§9.2 step 6); Apply re-renders every site's when the
 // policy changes. Rules already as rendered are left alone, so a retry
 // changes nothing.
-func ApplySite(ctx context.Context, d sysexec.Deps, name contract.SiteName, days contract.RetentionDays) error {
-	if err := name.Validate(); err != nil {
-		return fmt.Errorf("site %q %v", name, err)
+func ApplySite(ctx context.Context, d sysexec.Deps, name contract.SiteName, typ contract.SiteType, days contract.RetentionDays) error {
+	site := Site{Name: name, Type: typ}
+	if err := site.validate(); err != nil {
+		return err
 	}
 	if err := days.Validate(); err != nil {
 		return fmt.Errorf("log retention %v", err)
 	}
-	content, err := templates.Render("logrotate/site.conf", templates.SiteLogs{Name: name, RetentionDays: days})
+	content, err := templates.Render("logrotate/site.conf", site.logs(days))
 	if err != nil {
 		return err
 	}

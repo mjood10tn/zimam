@@ -167,7 +167,7 @@ func worldWritable(ctx context.Context, e Env, a helper.Account) contract.Findin
 // support and fails after it (§8.1).
 func phpSupported(st sites.State, now time.Time) contract.Finding {
 	const check = "php_version_supported"
-	if st.Type != contract.SitePHP {
+	if !st.Type.RunsPHP() {
 		return finding(check, contract.FindingPass, "A static site runs no PHP.")
 	}
 	for _, r := range contract.PHPAllowlist {
@@ -192,7 +192,7 @@ func phpSupported(st sites.State, now time.Time) contract.Finding {
 // poolUser reads the pool's user and group lines.
 func poolUser(e Env, st sites.State) contract.Finding {
 	const check = "pool_runs_as_site_user"
-	if st.Type != contract.SitePHP {
+	if !st.Type.RunsPHP() {
 		return finding(check, contract.FindingPass, "A static site has no PHP pool.")
 	}
 	b, err := os.ReadFile(e.D.Paths.PHPPool(st.PHPVersion, st.Name))

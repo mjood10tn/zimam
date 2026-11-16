@@ -56,7 +56,7 @@ func TestPolicyRestartsJournald(t *testing.T) {
 	d, run := newDeps(t)
 	run.Add(logrotateTest(d.Paths))
 	run.Add(restartJournald)
-	if err := Apply(context.Background(), d, policy, []contract.SiteName{"shop", "blog"}); err != nil {
+	if err := Apply(context.Background(), d, policy, []Site{{Name: "shop", Type: contract.SiteStatic}, {Name: "blog", Type: contract.SiteLaravel}}); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	for _, path := range files(d.Paths, "shop", "blog") {
@@ -65,6 +65,12 @@ func TestPolicyRestartsJournald(t *testing.T) {
 		} else if fi.Mode().Perm() != 0o644 {
 			t.Errorf("%s: mode %v, want 0644", path, fi.Mode().Perm())
 		}
+	}
+	if b, _ := os.ReadFile(d.Paths.SiteLogrotateConf("blog")); !strings.Contains(string(b), "/home/s_blog/site/shared/storage/logs/*.log {") {
+		t.Errorf("the laravel site's rules don't rotate its storage's logs:\n%s", b)
+	}
+	if b, _ := os.ReadFile(d.Paths.SiteLogrotateConf("shop")); strings.Contains(string(b), "shared/storage") {
+		t.Errorf("the static site's rules rotate a Laravel log:\n%s", b)
 	}
 	for path, want := range map[string]string{
 		d.Paths.SiteLogrotateConf("shop"): "/var/log/zimam/sites/shop/*.log {",
@@ -96,7 +102,7 @@ func TestPolicyRollbackOnLogrotateFailure(t *testing.T) {
 	bad.Result = sysexec.Result{ExitCode: 1, Stderr: []byte("error: site-shop.conf:3 unknown user 's_shop'\n")}
 	run.Add(bad)
 	run.Add(logrotateTest(d.Paths)) // the retest
-	err := Apply(context.Background(), d, policy, []contract.SiteName{"shop"})
+	err := Apply(context.Background(), d, policy, []Site{{Name: "shop", Type: contract.SitePHP}})
 	var failed *configtx.TestFailed
 	if !errors.As(err, &failed) || !strings.Contains(err.Error(), "unknown user 's_shop'") {
 		t.Fatalf("Apply = %v, want a test failure with logrotate's output", err)
@@ -114,12 +120,13 @@ func TestPolicyRollbackOnLogrotateFailure(t *testing.T) {
 func TestPolicyRefusesInvalidValues(t *testing.T) {
 	for name, c := range map[string]struct {
 		p     Policy
-		sites []contract.SiteName
+		sites []Site
 	}{
 		"no retention":       {Policy{RetentionDays: 0, AuditRetentionDays: 365, SiteCapBytes: policy.SiteCapBytes}, nil},
 		"no audit retention": {Policy{RetentionDays: 14, SiteCapBytes: policy.SiteCapBytes}, nil},
 		"no cap":             {Policy{RetentionDays: 14, AuditRetentionDays: 365}, nil},
-		"bad site":           {policy, []contract.SiteName{"../shop"}},
+		"bad site":           {policy, []Site{{Name: "../shop", Type: contract.SiteStatic}}},
+		"bad site type":      {policy, []Site{{Name: "shop", Type: "wordpress"}}},
 	} {
 		d, run := newDeps(t)
 		if err := Apply(context.Background(), d, c.p, c.sites); err == nil {
@@ -140,7 +147,7 @@ func TestPolicyRefusesInvalidValues(t *testing.T) {
 func TestApplySite(t *testing.T) {
 	d, run := newDeps(t)
 	run.Add(logrotateTest(d.Paths))
-	if err := ApplySite(context.Background(), d, "shop", 30); err != nil {
+	if err := ApplySite(context.Background(), d, "shop", contract.SiteStatic, 30); err != nil {
 		t.Fatalf("ApplySite: %v", err)
 	}
 	if got := commands(run); !slices.Equal(got, []string{line(logrotateTest(d.Paths))}) {
@@ -150,14 +157,27 @@ func TestApplySite(t *testing.T) {
 	if err != nil || !strings.Contains(string(b), "/var/log/zimam/sites/shop/*.log {") || !strings.Contains(string(b), "maxage 30\n") {
 		t.Fatalf("rules = %q, %v", b, err)
 	}
-	if err := ApplySite(context.Background(), d, "shop", 30); err != nil {
+	if err := ApplySite(context.Background(), d, "shop", contract.SiteStatic, 30); err != nil {
 		t.Fatal(err)
 	}
 	if n := len(run.Calls()); n != 1 {
 		t.Errorf("the second ApplySite ran %d commands in all, want none of its own", n)
 	}
-	if err := ApplySite(context.Background(), d, "shop", 0); err == nil {
+	if err := ApplySite(context.Background(), d, "shop", contract.SiteStatic, 0); err == nil {
 		t.Error("ApplySite accepted 0 days")
+	}
+	if err := ApplySite(context.Background(), d, "shop", "wordpress", 30); err == nil {
+		t.Error("ApplySite accepted an unknown site type")
+	}
+
+	// A laravel site's rules also rotate its storage's logs, and a retry
+	// that finds them written changes nothing.
+	run.Add(logrotateTest(d.Paths))
+	if err := ApplySite(context.Background(), d, "app", contract.SiteLaravel, 30); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(d.Paths.SiteLogrotateConf("app")); !strings.Contains(string(b), "/home/s_app/site/shared/storage/logs/*.log {") {
+		t.Errorf("the laravel rules:\n%s", b)
 	}
 }
 

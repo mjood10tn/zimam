@@ -60,6 +60,9 @@ var goldenCases = map[string][]goldenFile{
 	"units": units(),
 	// The log policy (§11.3): Zimam's own rules, one site's, and the journal's.
 	"log-policy": logPolicy(),
+	// A laravel site's rules, which also rotate its shared storage's logs
+	// (R02-D8); logrotate.conf comes along, so logrotate -d reads them.
+	"logrotate-site-laravel": laravelLogs(),
 	// A site's vhost with its default security.conf, static or PHP, before
 	// and after its certificate exists; the PHP cases carry their pool, one
 	// on 8.4 and one on 8.5 (§9.3, §9.4, §9.6).
@@ -164,6 +167,14 @@ func logPolicy() []goldenFile {
 		{path: p.OwnLogrotateConf(), tmpl: "logrotate/zimam-own.conf", data: policy},
 		{path: p.SiteLogrotateConf("shop"), tmpl: "logrotate/site.conf", data: func() any { return SiteLogs{Name: "shop", RetentionDays: 14} }},
 		{path: p.JournaldDropIn(), tmpl: "journald/50-zimam.conf", data: policy},
+	}
+}
+
+func laravelLogs() []goldenFile {
+	var p paths.Paths
+	return []goldenFile{
+		{path: p.LogrotateConf(), tmpl: "logrotate/zimam.conf"},
+		{path: p.SiteLogrotateConf("shop"), tmpl: "logrotate/site.conf", data: func() any { return SiteLogs{Name: "shop", RetentionDays: 14, Laravel: true} }},
 	}
 }
 
