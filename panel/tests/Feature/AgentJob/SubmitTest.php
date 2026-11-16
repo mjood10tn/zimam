@@ -15,6 +15,7 @@ use App\Jobs\TrackAgentJob;
 use App\Models\AgentJob;
 use App\Models\User;
 use Filament\Notifications\Notification;
+use Filament\Notifications\NotificationMailbox;
 use Filament\Support\Exceptions\Halt;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -220,6 +221,8 @@ final class SubmitTest extends TestCase
     {
         Queue::fake();
         $this->agent->respond('e2e.sleep', new AgentUnavailable('connect: no such file'));
+        // As in a panel page's request, the only kind with someone to tell.
+        request()->setLaravelSession($this->app['session.store']);
 
         try {
             $this->submit(new E2eSleep(5, 'blog'));
@@ -230,6 +233,23 @@ final class SubmitTest extends TestCase
         Notification::assertNotified(__('zimam.agent.unavailable.title'));
         $this->assertSame(0, AgentJob::count());
         Queue::assertNothingPushed();
+    }
+
+    /** A hook request or a console command has no session: it still halts, and nothing goes to Filament's mailbox. */
+    public function testUnavailableWithoutSessionHaltsQuietly(): void
+    {
+        Queue::fake();
+        $this->agent->respond('e2e.sleep', new AgentUnavailable('connect: no such file'));
+        $mailbox = $this->spy(NotificationMailbox::class);
+
+        try {
+            $this->submit(new E2eSleep(5, 'blog'));
+            $this->fail('the action went on');
+        } catch (Halt) {
+        }
+
+        $mailbox->shouldNotHaveReceived('push');
+        $this->assertSame(0, AgentJob::count());
     }
 
     private function submit(E2eSleep $command, ?User $related = null): AgentJob

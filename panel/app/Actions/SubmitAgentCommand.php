@@ -21,7 +21,7 @@ final class SubmitAgentCommand
 {
     public function __construct(private readonly AgentClient $agent) {}
 
-    /** @throws Halt when the agent can't be reached, after telling the user */
+    /** @throws Halt when the agent can't be reached, after telling the user if there is one */
     public function run(AgentCommand $command, ?Model $related = null): AgentJob
     {
         try {
@@ -32,11 +32,15 @@ final class SubmitAgentCommand
 
             return $job;
         } catch (AgentUnavailable) {
-            Notification::make()
-                ->title(__('zimam.agent.unavailable.title'))
-                ->body(__('zimam.agent.unavailable.body'))
-                ->danger()
-                ->send();
+            // A hook request has no session, so no one to tell: its
+            // controller answers the caller itself.
+            if (request()->hasSession()) {
+                Notification::make()
+                    ->title(__('zimam.agent.unavailable.title'))
+                    ->body(__('zimam.agent.unavailable.body'))
+                    ->danger()
+                    ->send();
+            }
 
             throw new Halt;
         }

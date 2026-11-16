@@ -489,6 +489,24 @@ return [
         ],
     ],
 
+    // Answers to GitHub's webhook and the deploy URL (R02-D11), shown in
+    // GitHub's delivery log or to the script that called the URL.
+    'hooks' => [
+        'pong' => 'Webhook received. Pushes to the site’s branch deploy while auto-deploy is on.',
+        'deploying' => 'Deploying.',
+        'waiting' => 'The site is busy; the deploy starts when it is free.',
+        'duplicate' => 'This delivery was already handled.',
+        'ignored_event' => 'Ignored: only push events deploy.',
+        'ignored_deleted' => 'Ignored: the push deleted a branch.',
+        'ignored_branch' => 'Ignored: the push isn’t to the site’s branch.',
+        'ignored_auto_deploy' => 'Ignored: auto-deploy is off for this site.',
+        'json_only' => 'Set the webhook’s content type to application/json.',
+        'malformed' => 'The push event is incomplete or malformed.',
+        'not_connected' => 'The site’s repository isn’t connected yet.',
+        'unavailable' => 'The server’s agent can’t be reached. Try again shortly.',
+        'refused' => 'The server refused the deploy. The panel’s log has the reason.',
+    ],
+
     'checks' => [
         'title' => 'Security',
         'run' => 'Run checks now',
@@ -614,7 +632,7 @@ return [
             'log_retention_days' => 'Sites’ logs, the journal, the panel’s log and job logs: 1 to 365 days.',
             'audit_retention_days' => 'The audit log and the panel’s action history: 1 to 3650 days.',
             'site_log_cap' => 'A site’s own log archives are deleted oldest first when the site’s logs pass this. Nginx’s archives for the site are deleted by retention, or when they alone pass this: 1 to 100 GiB.',
-            'ip_allowlist' => 'One address or CIDR range per line. Empty allows every address; two-factor sign-in still applies.',
+            'ip_allowlist' => 'One address or CIDR range per line. Empty allows every address; two-factor sign-in still applies. GitHub webhooks and deploy URLs (/hooks/…) are open to every address: they need the webhook’s signature or the URL’s token, and each site takes at most six a minute.',
         ],
         'confirm_lockout' => 'I understand this list leaves out the address I am using now. To get back in, I will run :command over SSH.',
         'lockout' => 'Your address, :ip, isn’t in this list, so saving it locks you out. If that is what you want, confirm below; to undo it, run :command over SSH.',

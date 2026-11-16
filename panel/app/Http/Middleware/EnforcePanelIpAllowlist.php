@@ -14,6 +14,13 @@ final class EnforcePanelIpAllowlist
 
     public function handle(Request $request, Closure $next): Response
     {
+        // GitHub's webhook and the deploy URL come from GitHub's or a CI's
+        // addresses, and authenticate by signature or token, with a
+        // throttle instead (R02-D11, OQ2). Settings says so.
+        if ($request->is('hooks/*')) {
+            return $next($request);
+        }
+
         $allowlist = $this->settings->panelIpAllowlist();
 
         // getClientIp() is the TCP peer: no proxy is trusted (global rule 13).
