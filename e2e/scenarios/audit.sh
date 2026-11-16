@@ -207,7 +207,8 @@ check(n >= 1, f"hook cert-deployed audited as cli:root ({n})")
 runs = [e for e in entries if e["command"] == "maintenance"]
 idle = [e for e in runs if e["actor"] != "cli:root" or not any(
     (e.get("params") or {}).get(k) for k in ("restored_configs", "reconciled_jobs", "keyring_refreshed",
-                                             "deleted_archives", "pruned_jobs", "reloaded_php"))]
+                                             "deleted_archives", "pruned_jobs", "reloaded_php",
+                                             "rotation_timeouts"))]
 check(runs and not idle, f"maintenance audited as cli:root only when it changed something ({len(runs)} runs, {len(idle)} not)")
 n = sum(bool((e.get("params") or {}).get("deleted_archives")) for e in runs)
 check(n >= 1, f"maintenance's deletion of the backdated archive audited ({n})")
@@ -242,8 +243,9 @@ check(count(command="e2e.sleep", outcome="accepted") >= 1, "the e2e.sleep submis
 # v0.2.0 (v02-deploy and deploy.sh): laravel's and probe-deploy's
 # repositories; laravel's five deploys from the browser, the webhook and the
 # deploy URL (one failed on its script) and probe-deploy's six (four
-# failed); one rollback; two .env saves, one failed through a planted link.
-for command, accepted, ok in [("site.repo", 2, 2), ("site.deploy", 11, 6), ("site.rollback", 1, 1), ("site.env.write", 2, 1)]:
+# failed); one rollback; two .env saves, the browser's and the one that
+# replaced a planted link, both ok.
+for command, accepted, ok in [("site.repo", 2, 2), ("site.deploy", 11, 6), ("site.rollback", 1, 1), ("site.env.write", 2, 2)]:
     n = count(command=command, outcome="accepted")
     check(n >= accepted, f"{command} accepted: {n}, want at least {accepted}")
     n = count(command=command, outcome="ok")

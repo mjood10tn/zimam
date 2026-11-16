@@ -78,6 +78,8 @@ v0.2.0's deploys fetch from GitHub over SSH with each site's deploy key and GitH
 - `up` sets `e2e_git_host` (address, port, host key) in the server's `agent.json`. Only e2e builds accept the field; a release build refuses an `agent.json` that has it. With it, `site.repo` writes the Git host's key to the site's `known_hosts` under the name `github.com`, and git's SSH command gains `-o HostKeyAlias=github.com -o HostName=<address> -o Port=<port>`. The remote is still `git@github.com:<owner>/<name>.git`, and every other option is the release build's.
 - `authorize <key>` lets a site's deploy key fetch (the scenario plays the owner adding it on GitHub), and `commit <marker>` pushes a new commit whose `release.txt` holds the marker the app prints.
 
+A failed spec leaves a Playwright trace (`retain-on-failure`) in the uploaded logs. A trace of `v02-deploy` holds what the panel revealed: the webhook secret, the deploy URL's token and the site's `.env`. They are throwaway values that work only on this run's server, which is gone when the run ends, except on a VPS kept with **keep_server** (`vps/README.md`).
+
 `fixtures/laravel-app` is Laravel-shaped but needs nothing from Packagist: its `composer.json` has no dependencies, so `composer install` runs for real and writes the autoloader the app and `artisan` need, without depending on Packagist or GitHub's download limits from CI. Its `artisan` does what the Laravel preset's commands do to a release: `storage:link`, `migrate --force`, `config:cache` (from the shared `.env`), `route:cache` and `view:cache`. The app prints its release marker and `E2E_GREETING`, and `?log=<word>` writes a line to `storage/logs/laravel.log`.
 
 ## Running it locally

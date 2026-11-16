@@ -6,8 +6,9 @@
 # or its user plants may reach outside the home:
 #   - a deploy script that writes /etc/zimam-probe, or reads /root or
 #     /etc/shadow, fails as the site user, and the live release stays;
-#   - a planted shared/.env -> /etc/shadow makes site.env.read fail without
-#     shadow's content, and site.env.write never writes through it;
+#   - a planted shared/.env -> a file of the user's outside the home makes
+#     site.env.read answer conflict without its content, and site.env.write
+#     replace the link with a 0600 file, never writing through it;
 #   - planted releases/<id> -> / and -> a folder of the user's outside the
 #     home are removed by the next deploy's pruning, never followed;
 #   - a commit that isn't on the branch and an unknown release are refused,
@@ -106,33 +107,37 @@ else
 	fail "site.releases of a site that doesn't exist answers ${reply:0:200}; audit entries: $(audit_since "$before")"
 fi
 
-# shared/.env -> /etc/shadow, planted by the site user.
-shadow=$(in_c sha256sum /etc/shadow)
+# shared/.env -> a file outside the home that the site user owns, so only
+# the helper's os.Root can keep the read and the write inside the home (a
+# link to /etc/shadow would be stopped by the user's own permissions).
+envcanary=/var/tmp/zimam-e2e-env-canary
+marker=E2E_ENV_CANARY_$RANDOM$RANDOM
+in_c install -o "$user" -g "$user" -m 0600 /dev/null "$envcanary"
+in_c runuser -u "$user" -- sh -c "echo $marker=1 >$envcanary"
+before_canary=$(in_c sha256sum "$envcanary")
 in_c runuser -u "$user" -- mv "$home/site/shared/.env" "$home/site/shared/.env.e2e-saved"
-in_c runuser -u "$user" -- ln -s /etc/shadow "$home/site/shared/.env"
+in_c runuser -u "$user" -- ln -s "$envcanary" "$home/site/shared/.env"
 reply=$(request site.env.read "{\"name\":\"$site\"}")
-if [[ $reply == *root:* ]]; then
-	fail "site.env.read through the planted link shows shadow's content"
-elif [[ $(field type <<<"$reply") == error ]]; then
-	pass "site.env.read through shared/.env -> /etc/shadow answers $(field code <<<"$reply"), and nothing of shadow"
+if [[ $reply == *"$marker"* ]]; then
+	fail "site.env.read through the planted link shows the file outside the home"
+elif [[ $(field type <<<"$reply") == error && $(field code <<<"$reply") == conflict ]]; then
+	pass "site.env.read through shared/.env -> $envcanary answers conflict, and nothing of the file"
 else
 	fail "site.env.read through the planted link answers ${reply:0:300}"
 fi
-job=$(submit site.env.write "{\"name\":\"$site\",\"content\":\"E2E_PROBE=1\\n\"}") || die "site.env.write wasn't accepted"
+job=$(submit site.env.write "{\"name\":\"$site\",\"content\":\"E2E_PROBE=1\n\"}") || die "site.env.write wasn't accepted"
 status=$(job_end "$job")
-# The write never goes through the link: it fails, or its rename replaces
-# the link with the site user's own 0600 file. Shadow is unchanged either way.
-if [[ $(in_c sha256sum /etc/shadow) != "$shadow" ]]; then
-	fail "site.env.write through the planted link changed /etc/shadow"
-elif [[ $status == failed* ]]; then
-	pass "site.env.write through the planted link failed, and /etc/shadow is unchanged"
-elif [[ $status == succeeded* && $(in_c stat -c '%F %U %a' "$home/site/shared/.env") == "regular file $user 600" ]]; then
-	pass "site.env.write replaced the planted link with $user's own 0600 .env, and /etc/shadow is unchanged"
+# The write's rename replaces the link with the site user's own 0600 file
+# and never writes through it (the ruling on R02-D10).
+envmode=$(in_c stat -c '%F %U %a' "$home/site/shared/.env")
+if [[ $status == succeeded* && $envmode == "regular file $user 600" && $(in_c sha256sum "$envcanary") == "$before_canary" ]]; then
+	pass "site.env.write replaced the planted link with $user's own 0600 .env, and $envcanary is unchanged"
 else
-	fail "site.env.write through the planted link ended $status, .env is $(in_c stat -c '%F %U %a' "$home/site/shared/.env")"
+	fail "site.env.write through the planted link ended $status, .env is $envmode, $envcanary: $(in_c cat "$envcanary")"
 fi
 in_c runuser -u "$user" -- rm "$home/site/shared/.env"
 in_c runuser -u "$user" -- mv "$home/site/shared/.env.e2e-saved" "$home/site/shared/.env"
+in_c rm -f "$envcanary"
 
 # releases/<id> -> / and -> a folder the user owns outside its home, then a
 # deploy whose prune removes every release the state doesn't list.

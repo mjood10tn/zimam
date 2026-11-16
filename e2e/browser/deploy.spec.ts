@@ -142,6 +142,8 @@ test('v0.2.0: a Laravel site deploys, rolls back, and deploys on a webhook and i
   const greeting = `hello-${Date.now()}`;
   await test.step('done-when 8: the .env editor, after the password', async () => {
     await openTab(page, url, 'Environment');
+    // The tab has rendered, with the editor hidden behind the password.
+    await expect(page.getByRole('button', { name: 'Show and edit .env', exact: true })).toBeVisible();
     await expect(page.getByRole('textbox', { name: 'Contents' })).toHaveCount(0);
     await page.getByRole('button', { name: 'Show and edit .env', exact: true }).click();
     await confirm(page, 'Show the .env', 'Show and edit .env');
@@ -220,8 +222,10 @@ test('v0.2.0: a Laravel site deploys, rolls back, and deploys on a webhook and i
     scenario('v02-deploy.sh', 'serves', 'v1');
   });
 
-  await test.step('done-when 4: a signed GitHub push deploys its commit', async () => {
+  await test.step('done-when 4: a signed GitHub push deploys its commit, not the branch head', async () => {
+    // v5 is pushed on top of v4 before the delivery for v4 arrives.
     scenario('v02-deploy.sh', 'commit', 'v4');
+    scenario('v02-deploy.sh', 'commit', 'v5');
     scenario('v02-deploy.sh', 'mark');
     scenario('v02-deploy.sh', 'webhook', 'v4');
     scenario('v02-deploy.sh', 'wait', 'site.deploy', 'succeeded', 'webhook');
@@ -229,7 +233,6 @@ test('v0.2.0: a Laravel site deploys, rolls back, and deploys on a webhook and i
   });
 
   await test.step('done-when 5: the deploy URL deploys the branch head', async () => {
-    scenario('v02-deploy.sh', 'commit', 'v5');
     scenario('v02-deploy.sh', 'mark');
     scenario('v02-deploy.sh', 'deploy-url');
     scenario('v02-deploy.sh', 'wait', 'site.deploy', 'succeeded', 'url');

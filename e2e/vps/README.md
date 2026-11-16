@@ -22,7 +22,7 @@ Three jobs per architecture: `create` runs step 1, `vps` steps 2 and 3, and `del
    - `lxc-ssh` stands in for `lxc`, so `in_c` and `lxc file push` go over SSH, through one master connection.
    - The test names sit under `<ip-with-dashes>.sslip.io` (`E2E_DOMAIN`).
    - The release is served on the server's `127.0.0.1:8080`.
-   - The Git host that plays GitHub for v0.2.0's deploys (`e2e/githost`) runs in Docker on the runner; a reverse SSH tunnel, kept up by `githost.sh` until the job ends, makes the server's own `127.0.0.1:2222` reach it.
+   - The Git host that plays GitHub for v0.2.0's deploys (`e2e/githost`) runs in Docker on the runner; a reverse SSH tunnel, kept up by `githost.sh` until the job ends, makes the server's own `127.0.0.1:2222` reach it. Nothing stops them explicitly: the runner's cleanup ends the container and the tunnel with the job, and the `delete` job removes the server.
 3. `ipv6.sh`
    - Checks the panel and the sites over IPv4 and real DNS from the runner.
    - Checks IPv6 on the server: Nginx on `[::]`, UFW's v6 rules, and `curl -6` to the server's own address.
@@ -31,6 +31,8 @@ Three jobs per architecture: `create` runs step 1, `vps` steps 2 and 3, and `del
 A third server, amd64 only to bound the cost and tagged `<run>-<attempt>-upgrade-amd64`, comes from its own `create-upgrade` job, so it can't hold up the main run. The `upgrade` job attaches to it and runs the upgrade scenario on it (`e2e/README.md`, "The upgrade"). `delete` removes it like the others.
 
 `.github/workflows/vps-sweep.yml` runs `sweep.sh` daily. It deletes servers and keys labelled `zimam-vps` that are older than 3 hours, which is what a run that died before `destroy.sh` leaves behind. To test it, start `vps.yml` with **keep_server**, then start `vps-sweep.yml` with a small `hours`.
+
+A failed browser spec's Playwright trace, in `vps-logs-<arch>`, holds what the panel revealed: the admin's throwaway password, and from `v02-deploy` the webhook secret, the deploy URL's token and the site's `.env`. They only open this run's server. With **keep_server** that server stays reachable until the sweep deletes it, so keep the artifact private until then.
 
 ## Secrets
 
