@@ -67,6 +67,8 @@ The scenario:
    - both sites answer 200 with their placeholder;
    - `/admin/login` answers 200;
    - `zimam-agent maintenance` exits 0;
+   - both sites' state files keep `template_version: 1` and have no `repository`, `releases` or `keep_releases` (R02-D9);
+   - both vhosts, `up-php`'s FPM pool and both sites' logrotate rules have the same SHA-256 as before the upgrade;
    - the audit log has the cli:root `bootstrap` entries of both installer runs.
 5. Serves the previous release again and runs its installer. This is the `refuses a downgrade` case: the installer must exit non-zero with D25's message, the new agent must stay, and the audit log must not grow.
 

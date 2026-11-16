@@ -14,7 +14,10 @@
 #      both sites still answer 200 with their placeholder, a new static
 #      site up-new provisions and answers 200, the panel's /admin/login
 #      answers 200, maintenance exits 0, and the audit log has
-#      the installer's cli:root entries from both runs;
+#      the installer's cli:root entries from both runs. The two sites keep
+#      template_version 1 and no deploy fields in their state files, and
+#      their vhosts, up-php's pool and their logrotate rules are byte for
+#      byte as before (R02-D9);
 #   5. serve the previous release again and run its installer: D25 refuses
 #      the downgrade and changes nothing.
 # shellcheck source=../probes/lib.sh
@@ -129,6 +132,20 @@ run_job site.provision "{\"name\":\"up-static\",\"domain\":\"up-static.$E2E_DOMA
 run_job site.provision "{\"name\":\"up-php\",\"domain\":\"up-php.$E2E_DOMAIN\",\"type\":\"php\",\"php_version\":\"$php\"}"
 check_sites "on $old"
 ((failed == 0)) || die "FAIL sites: the sites don't answer on $old, before any upgrade"
+# What the agent rendered for the two sites (R02-D9: a release that keeps
+# their template_version re-renders nothing), hashed before and after.
+rendered=(
+	/etc/nginx/sites-available/zimam-up-static.conf
+	/etc/nginx/sites-available/zimam-up-php.conf
+	"/etc/php/$php/fpm/pool.d/zimam-up-php.conf"
+	/etc/zimam/logrotate.d/site-up-static.conf
+	/etc/zimam/logrotate.d/site-up-php.conf
+)
+rendered_before=$(in_c sha256sum "${rendered[@]}") || die "FAIL sites: the sites' rendered files can't be hashed on $old: $rendered_before"
+# hash_of <sha256sum output> <file> prints the file's hash in the output.
+hash_of() {
+	awk -v f="$2" '$2 == f { print $1 }' <<<"$1"
+}
 
 # 4. The upgrade: this tree's release, through the installer again.
 mark=$(audit_lines)
@@ -179,6 +196,33 @@ if in_c "$agent" maintenance >"$E2E_WORK/maintenance.txt" 2>&1; then
 else
 	fail "upgrade: zimam-agent maintenance failed: $(tail -n 20 "$E2E_WORK/maintenance.txt")"
 fi
+# R02-D9: the sites from $old keep template_version 1 and gain no deploy
+# fields; nothing of theirs is rendered again.
+for site in up-static up-php; do
+	problems=$(in_c python3 -I -c '
+import json, sys
+st = json.load(open(sys.argv[1]))
+bad = []
+if st.get("template_version") != 1:
+    bad.append("template_version is %r" % st.get("template_version"))
+bad += ["%s is %r" % (k, st[k]) for k in ("repository", "releases", "keep_releases") if k in st]
+print("; ".join(bad))' "/var/lib/zimam/sites/$site.json" 2>&1) || problems="unreadable: $problems"
+	if [[ -z $problems ]]; then
+		pass "upgrade: $site's state keeps template_version 1, without repository, releases or keep_releases"
+	else
+		fail "upgrade: $site's state on $new: $problems"
+	fi
+done
+rendered_after=$(in_c sha256sum "${rendered[@]}" 2>&1) || true
+for f in "${rendered[@]}"; do
+	was=$(hash_of "$rendered_before" "$f")
+	now=$(hash_of "$rendered_after" "$f")
+	if [[ -n $was && $now == "$was" ]]; then
+		pass "upgrade: $f is byte for byte as on $old"
+	else
+		fail "upgrade: $f changed on $new: sha256 ${was:-none} before, ${now:-none} after"
+	fi
+done
 end=$(audit_lines)
 before=$(bootstrap_steps 0 "$first")
 after=$(bootstrap_steps "$mark" "$end")
