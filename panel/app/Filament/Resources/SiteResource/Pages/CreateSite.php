@@ -58,7 +58,7 @@ class CreateSite extends CreateRecord
             $site = Site::create([
                 'name' => $data['name'],
                 'type' => $data['type'],
-                'php_version' => $data['type'] === Site::PHP ? $data['php_version'] : null,
+                'php_version' => $data['type'] !== Site::STATIC ? $data['php_version'] : null,
                 'status' => Site::PROVISIONING,
             ]);
             $site->domains()->create(['hostname' => $data['domain'], 'is_primary' => true]);

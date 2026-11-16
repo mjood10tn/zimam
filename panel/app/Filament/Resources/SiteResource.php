@@ -3,6 +3,7 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\SiteResource\Pages\CreateSite;
+use App\Filament\Resources\SiteResource\Pages\DeploymentsTab;
 use App\Filament\Resources\SiteResource\Pages\ListSites;
 use App\Filament\Resources\SiteResource\Pages\SecurityTab;
 use App\Filament\Resources\SiteResource\Pages\ViewSite;
@@ -81,19 +82,19 @@ class SiteResource extends Resource
                 ->dehydrateStateUsing(fn (?string $state): string => Domain::normalize((string) $state)),
             ToggleButtons::make('type')
                 ->label(__('zimam.sites.fields.type'))
-                ->options([Site::PHP => __('zimam.sites.types.php'), Site::STATIC => __('zimam.sites.types.static')])
+                ->options([Site::PHP => __('zimam.sites.types.php'), Site::LARAVEL => __('zimam.sites.types.laravel'), Site::STATIC => __('zimam.sites.types.static')])
                 ->default(Site::PHP)
                 ->inline()
                 ->live()
                 ->required()
-                ->in([Site::PHP, Site::STATIC]),
+                ->in(Site::TYPES),
             Select::make('php_version')
                 ->label(__('zimam.sites.fields.php_version'))
                 ->options(fn (CreateSite $livewire): array => $livewire->phpVersionOptions())
                 ->default(fn (CreateSite $livewire): ?string => $livewire->defaultPhpVersion())
                 ->noOptionsMessage(__('zimam.sites.fields.php_none'))
-                ->visible(fn (Get $get): bool => $get('type') === Site::PHP)
-                ->required(fn (Get $get): bool => $get('type') === Site::PHP)
+                ->visible(fn (Get $get): bool => in_array($get('type'), [Site::PHP, Site::LARAVEL], true))
+                ->required(fn (Get $get): bool => in_array($get('type'), [Site::PHP, Site::LARAVEL], true))
                 ->selectablePlaceholder(false),
         ]);
     }
@@ -144,6 +145,9 @@ class SiteResource extends Resource
                 ]),
                 Tab::make(__('zimam.sites.tabs.security'))->schema([
                     Livewire::make(SecurityTab::class, fn (Site $record): array => ['site' => $record])->key('site-security'),
+                ]),
+                Tab::make(__('zimam.sites.tabs.deployments'))->schema([
+                    Livewire::make(DeploymentsTab::class, fn (Site $record): array => ['site' => $record])->key('site-deployments'),
                 ]),
                 Tab::make(__('zimam.sites.tabs.logs'))->schema([
                     Livewire::make(SiteLogs::class, fn (Site $record): array => ['site' => $record])->key('site-logs'),

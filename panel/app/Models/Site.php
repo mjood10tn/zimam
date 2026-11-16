@@ -23,6 +23,12 @@ class Site extends Model
 
     public const PHP = 'php';
 
+    /** A PHP site with a shared .env and storage/ (R02-D8). */
+    public const LARAVEL = 'laravel';
+
+    /** The types a site can be created as. */
+    public const TYPES = [self::PHP, self::LARAVEL, self::STATIC];
+
     /** §5.4's site name, anchored with \z (global rule 14). */
     public const NAME_PATTERN = '/^[a-z][a-z0-9-]{0,22}[a-z0-9]\z/';
 
@@ -45,6 +51,23 @@ class Site extends Model
         return $this->hasOne(Domain::class)->where('is_primary', true);
     }
 
+    /** Whether the site has a PHP version and pool: PHP and Laravel sites. */
+    public function runsPhp(): bool
+    {
+        return in_array($this->type, [self::PHP, self::LARAVEL], true);
+    }
+
+    /** The GitHub repository the site deploys from (R02-D4). */
+    public function repository(): HasOne
+    {
+        return $this->hasOne(SiteRepository::class);
+    }
+
+    public function deployments(): HasMany
+    {
+        return $this->hasMany(Deployment::class);
+    }
+
     public function securitySettings(): HasOne
     {
         return $this->hasOne(SiteSecuritySetting::class);
@@ -59,7 +82,7 @@ class Site extends Model
     /** The site.provision that creates this site, or retries it. */
     public function provisionCommand(): SiteProvision
     {
-        return new SiteProvision($this->name, $this->primaryDomain->hostname, $this->type, $this->type === self::PHP ? $this->php_version : null);
+        return new SiteProvision($this->name, $this->primaryDomain->hostname, $this->type, $this->runsPhp() ? $this->php_version : null);
     }
 
     /** The password-protection users (§9.6), as bcrypt hashes. */

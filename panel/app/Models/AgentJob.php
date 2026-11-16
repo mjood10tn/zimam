@@ -29,6 +29,19 @@ class AgentJob extends Model
         'runtime_max_seconds', 'queued_at', 'started_at', 'finished_at', 'params', 'result',
     ];
 
+    /**
+     * A deploy's row follows its job through every change: queued after a
+     * busy wait, running, the outcome, and the panel giving up (R02-D12).
+     */
+    protected static function booted(): void
+    {
+        static::updated(function (AgentJob $job): void {
+            if ($job->command === 'site.deploy') {
+                Deployment::follow($job);
+            }
+        });
+    }
+
     protected function casts(): array
     {
         return [

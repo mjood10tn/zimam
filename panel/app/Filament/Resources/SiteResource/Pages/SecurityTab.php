@@ -94,7 +94,7 @@ class SecurityTab extends Component implements HasActions, HasSchemas
                         ->helperText(__('zimam.security.help.headers_preset')),
                 ]),
                 Section::make(__('zimam.security.sections.php'))
-                    ->visible(fn (): bool => $this->site->type === Site::PHP)
+                    ->visible(fn (): bool => $this->site->runsPhp())
                     ->schema([
                         Toggle::make('block_risky_functions')
                             ->label(__('zimam.security.fields.block_risky_functions'))

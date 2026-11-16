@@ -7,7 +7,10 @@ use App\Agent\AgentJobStatus;
 use App\Agent\Commands\AgentVersion;
 use App\Agent\Commands\E2eSleep;
 use App\Agent\Commands\JobCancel;
+use App\Agent\Commands\SiteDeploy;
 use App\Agent\Commands\SiteProvision;
+use App\Agent\Commands\SiteRepo;
+use App\Agent\Commands\SiteRollback;
 use App\Agent\Commands\SystemStatus;
 use App\Agent\Exceptions\AgentBusy;
 use App\Agent\Exceptions\AgentException;
@@ -49,6 +52,30 @@ abstract class AgentClientContract extends TestCase
         } catch (AgentValidationFailed $e) {
             $this->assertArrayHasKey('name', $e->fields());
             $this->assertArrayNotHasKey('domain', $e->fields());
+        }
+    }
+
+    /**
+     * The deploy commands' validation, answered before anything runs, so a
+     * real agent changes nothing: each refusal names the bad field and only
+     * that one.
+     */
+    public function testDeployCommandsValidationShape(): void
+    {
+        $cases = [
+            'repository' => new SiteRepo('contract-repo', 'octo/app.GIT', 'main'),
+            'branch' => new SiteRepo('contract-repo', 'octo/app', 'a..b'),
+            'commit' => new SiteDeploy('contract-repo', 'manual', false, 5, commit: 'ABC'),
+            'keep_releases' => new SiteDeploy('contract-repo', 'manual', false, 21),
+            'release' => new SiteRollback('contract-repo', '../initial'),
+        ];
+        foreach ($cases as $field => $command) {
+            try {
+                $this->client->submit($command);
+                $this->fail("{$command->name()} accepted a bad {$field}");
+            } catch (AgentValidationFailed $e) {
+                $this->assertSame([$field], array_keys($e->fields()), "{$command->name()} {$field}");
+            }
         }
     }
 

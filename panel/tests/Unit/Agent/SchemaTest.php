@@ -17,9 +17,13 @@ use App\Agent\Commands\PhpDefault;
 use App\Agent\Commands\PhpInstall;
 use App\Agent\Commands\PhpUninstall;
 use App\Agent\Commands\SecurityCheck;
+use App\Agent\Commands\SiteDeploy;
 use App\Agent\Commands\SiteDestroy;
 use App\Agent\Commands\SitePhp;
 use App\Agent\Commands\SiteProvision;
+use App\Agent\Commands\SiteReleases;
+use App\Agent\Commands\SiteRepo;
+use App\Agent\Commands\SiteRollback;
 use App\Agent\Commands\SiteSecurity;
 use App\Agent\Commands\SystemMetrics;
 use App\Agent\Commands\SystemStatus;
@@ -53,6 +57,9 @@ final class SchemaTest extends TestCase
         'security.check' => 600,
         'php.default' => 120,
         'logs.policy' => 120,
+        'site.repo' => 600,
+        'site.deploy' => 1800,
+        'site.rollback' => 300,
         'e2e.sleep' => 180,
     ];
 
@@ -75,6 +82,10 @@ final class SchemaTest extends TestCase
             new SiteSecurity('shop', forceHttps: true, hstsMaxAge: 31536000, hstsIncludeSubdomains: true, ipAllow: ['192.0.2.0/24'], ipDeny: ['2001:db8::1'], passwordProtection: true, users: [['username' => 'alice', 'password_hash' => '$2y$12$Mda0LhSrcwEX8fAIrkvr/eP5OR7zhBWHVUNmE9n4xm8B76JOYiAI.']]),
             new SiteDestroy('shop'),
             new CertIssue('shop'),
+            new SiteRepo('shop', 'octo/shop', 'release/2.x', rotateKey: true),
+            new SiteDeploy('shop', 'manual', composer: true, keepReleases: 5, script: "php artisan migrate --force\n", commit: str_repeat('a1', 20)),
+            new SiteRollback('shop', '20261116120000-abcdef1'),
+            new SiteReleases('shop'),
             new SecurityCheck('shop'),
             new LogsList('site.nginx-access', 'shop'),
             new LogsPolicy(14, 365, 5 * 1024 ** 3),
@@ -124,6 +135,49 @@ final class SchemaTest extends TestCase
         $static = new SiteProvision('docs', 'docs.example.com', 'static');
         $this->assertArrayNotHasKey('php_version', $static->params());
         $this->assertValid(self::wire($static->jsonParams()), file_get_contents($this->schemaPath('site.provision.params')), 'static site.provision params');
+    }
+
+    /** The optional deploy params are left out, not sent as null or empty: script has no null branch. */
+    public function testMinimalDeployParamsMatchSchema(): void
+    {
+        $deploy = new SiteDeploy('shop', 'webhook', composer: false, keepReleases: 1);
+        $this->assertSame(['name' => 'shop', 'composer' => false, 'trigger' => 'webhook', 'keep_releases' => 1], $deploy->params());
+        $this->assertValid(self::wire($deploy->jsonParams()), file_get_contents($this->schemaPath('site.deploy.params')), 'minimal site.deploy params');
+        $repo = new SiteRepo('shop', 'octo/shop', 'main');
+        $this->assertSame(['name' => 'shop', 'repository' => 'octo/shop', 'branch' => 'main'], $repo->params());
+        $this->assertValid(self::wire($repo->jsonParams()), file_get_contents($this->schemaPath('site.repo.params')), 'site.repo params without rotate_key');
+    }
+
+    /**
+     * The fake's deploy commands answer as the agent's do: the first deploy
+     * leaves previous_release out, the next names it (Task 5), and
+     * site.releases always has its three lists (Task 6).
+     */
+    public function testFakeDeployResultsMatchSchemas(): void
+    {
+        $fake = (new FakeAgentClient)->connectRepository('shop');
+        $empty = $fake->call(new SiteReleases('docs'))->data;
+        $this->assertSame(['name' => 'docs', 'releases' => [], 'missing' => [], 'unlisted' => []], $empty);
+        $this->assertResult('site.releases', $empty, 'fake site.releases without a repository');
+        $results = [];
+        foreach ([new SiteRepo('shop', 'octo/shop', 'main'), new SiteDeploy('shop', 'manual', true, 5), new SiteDeploy('shop', 'url', true, 5, 'echo hi', str_repeat('b', 40))] as $command) {
+            $final = $fake->follow($fake->submit($command)->id, 0, function (): void {});
+            $this->assertSame('succeeded', $final->status);
+            $this->assertResult($command->name(), $final->result, "fake {$command->name()} result");
+            $results[] = $final->result;
+        }
+        $this->assertArrayNotHasKey('previous_release', $results[1]);
+        $this->assertSame($results[1]['release'], $results[2]['previous_release']);
+        $this->assertSame(str_repeat('b', 40), $results[2]['commit']);
+
+        $releases = $fake->call(new SiteReleases('shop'))->data;
+        $this->assertResult('site.releases', $releases, 'fake site.releases');
+        $this->assertSame([$results[2]['release'], $results[1]['release']], array_column($releases['releases'], 'id'));
+        $this->assertSame([true, false], array_column($releases['releases'], 'active'));
+
+        $rollback = $fake->follow($fake->submit(new SiteRollback('shop', $results[1]['release']))->id, 0, function (): void {})->result;
+        $this->assertResult('site.rollback', $rollback, 'fake site.rollback result');
+        $this->assertSame([false, true], array_column($fake->call(new SiteReleases('shop'))->data['releases'], 'active'));
     }
 
     /** What the fake's jobs answer when they succeed matches each command's result schema. */

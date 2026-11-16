@@ -14,6 +14,7 @@ use App\Agent\Exceptions\AgentUnknownCommand;
 use App\Agent\Exceptions\AgentValidationFailed;
 use App\Models\SecurityFinding;
 use App\Models\SiteBasicAuthUser;
+use App\Models\SiteRepository;
 use App\Support\IpEntry;
 use Carbon\CarbonImmutable;
 use Closure;
@@ -68,6 +69,15 @@ final class FakeAgentClient implements AgentClient
 
     /** @var array<string, true> the sites with a certificate, by name, as succeeded cert.issue jobs left them */
     private array $certified = [];
+
+    /** @var array<string, array{repository: string, branch: string}> each site's repository, as succeeded site.repo jobs left it */
+    private array $repositories = [];
+
+    /** @var array<string, list<array{id: string, commit: string, created: string, active: bool}>> each site's kept releases, newest first */
+    private array $releases = [];
+
+    /** How many deploys took the branch's head: each gets its own commit. */
+    private int $heads = 0;
 
     public function __construct()
     {
@@ -131,6 +141,27 @@ final class FakeAgentClient implements AgentClient
         return $this;
     }
 
+    /** Connects a site to a repository on the fake's server, as a succeeded site.repo would. */
+    public function connectRepository(string $site, string $repository = 'octo/shop', string $branch = 'main'): static
+    {
+        $this->repositories[$site] = ['repository' => $repository, 'branch' => $branch];
+
+        return $this;
+    }
+
+    /** Gives a site a kept release, newest first; an active one becomes the live one. */
+    public function release(string $site, string $id, string $commit, bool $active = false, ?CarbonImmutable $created = null): static
+    {
+        $releases = $this->releases[$site] ?? [];
+        if ($active) {
+            $releases = array_map(fn (array $r): array => array_merge($r, ['active' => false]), $releases);
+        }
+        array_unshift($releases, ['id' => $id, 'commit' => $commit, 'created' => self::goTime($created ?? CarbonImmutable::now('UTC')), 'active' => $active]);
+        $this->releases[$site] = $releases;
+
+        return $this;
+    }
+
     /**
      * Changes what system.metrics answers from now on: $change gets the data
      * the fake would answer, counters already moved on, and returns it.
@@ -176,6 +207,7 @@ final class FakeAgentClient implements AgentClient
             $command->name() === 'system.metrics' => $this->metrics(),
             $command->name() === 'logs.list' => $this->logsList($command->params()),
             $command->name() === 'logs.read' => $this->logsRead($command->params()),
+            $command->name() === 'site.releases' => $this->siteReleases($command->params()['name']),
             $command instanceof JobStatus => $this->advance($command->job),
             $command instanceof JobCancel => $this->cancel($command->job),
             $command instanceof JobFollow => throw new LogicException('job.follow streams: use follow()'),
@@ -212,6 +244,17 @@ final class FakeAgentClient implements AgentClient
      */
     private function precheck(AgentCommand $command): void
     {
+        if (in_array($command->name(), ['site.deploy', 'site.rollback'], true)) {
+            $name = $command->params()['name'];
+            if (! isset($this->repositories[$name])) {
+                throw new AgentConflict("Site {$name} has no repository. Connect one first.");
+            }
+            if ($command->name() === 'site.rollback' && ! in_array($command->params()['release'], array_column($this->releases[$name] ?? [], 'id'), true)) {
+                throw new AgentNotFound("Site {$name} has no kept release {$command->params()['release']}.");
+            }
+
+            return;
+        }
         if ($command->name() === 'site.security' && $command->params()['force_https'] && ! isset($this->certified[$command->params()['name']])) {
             throw new AgentConflict("Site {$command->params()['name']} has no certificate yet, so HTTPS can't be forced. Issue one first.");
         }
@@ -254,11 +297,19 @@ final class FakeAgentClient implements AgentClient
      *
      * @return array<string, mixed>
      */
-    private static function defaultResult(AgentCommand $command): array
+    private function defaultResult(AgentCommand $command): array
     {
         $params = $command->params();
 
         return match ($command->name()) {
+            'site.repo' => [
+                'name' => $params['name'],
+                'repository' => $params['repository'],
+                'branch' => $params['branch'],
+                ...self::deployKey($params['name'].(($params['rotate_key'] ?? false) ? '/'.Str::random(8) : '')),
+            ],
+            'site.deploy' => $this->deployResult($params),
+            'site.rollback' => ['name' => $params['name'], 'release' => $params['release']],
             'php.install', 'php.uninstall', 'php.default' => ['version' => $params['version']],
             'site.provision' => ['name' => $params['name'], 'template_version' => 1],
             'site.php' => ['name' => $params['name'], 'php_version' => $params['php_version']],
@@ -272,13 +323,63 @@ final class FakeAgentClient implements AgentClient
     }
 
     /**
+     * An Ed25519 public key as site.repo reports it, without a comment, and
+     * its fingerprint as ssh-keygen -l prints it; made from $seed, so the
+     * same site keeps the same key.
+     *
+     * @return array{public_key: string, fingerprint: string}
+     */
+    private static function deployKey(string $seed): array
+    {
+        $blob = pack('N', 11).'ssh-ed25519'.pack('N', 32).hash('sha256', $seed, true);
+
+        return [
+            'public_key' => 'ssh-ed25519 '.base64_encode($blob),
+            'fingerprint' => 'SHA256:'.rtrim(base64_encode(hash('sha256', $blob, true)), '='),
+        ];
+    }
+
+    /**
+     * site.deploy's result: the release named from now and the commit (the
+     * given one, or a new head), and the live release before it, left out
+     * when there was none, as after provisioning.
+     *
+     * @param  array<string, mixed>  $params
+     * @return array<string, mixed>
+     */
+    private function deployResult(array $params): array
+    {
+        $commit = $params['commit'] ?? sha1($params['name'].'/head/'.(++$this->heads));
+        $result = ['name' => $params['name'], 'release' => CarbonImmutable::now('UTC')->format('YmdHis').'-'.substr($commit, 0, 7), 'commit' => $commit];
+        foreach ($this->releases[$params['name']] ?? [] as $release) {
+            if ($release['active']) {
+                $result['previous_release'] = $release['id'];
+            }
+        }
+
+        return $result;
+    }
+
+    /** @return array<string, mixed> site.releases's data: a site without a repository has none */
+    private function siteReleases(string $name): array
+    {
+        if (! preg_match(self::SITE_NAME, $name) || in_array($name, self::RESERVED_NAMES, true)) {
+            throw new AgentValidationFailed('Invalid parameters', ['name' => 'must be 2–24 lowercase letters, digits or hyphens, start with a letter and not end with a hyphen']);
+        }
+
+        return ['name' => $name, 'releases' => $this->releases[$name] ?? [], 'missing' => [], 'unlisted' => []];
+    }
+
+    /**
      * What a succeeded job changed on the fake's server, so system.status
-     * reports it: PHP versions, and the version a PHP site's pool now uses.
+     * reports it: PHP versions, and the version a PHP site's pool now uses;
+     * a site's repository and releases.
      *
      * @param  array<string, mixed>  $params
      */
-    private function applyEffect(string $command, array $params): void
+    private function applyEffect(string $command, array $params, mixed $result = null): void
     {
+        $this->applyDeployEffect($command, $params, is_array($result) ? $result : []);
         $php = &$this->systemStatus['php'];
         $moved = null;
         if (in_array($command, ['site.provision', 'site.php'], true) && isset($params['php_version'])) {
@@ -309,6 +410,50 @@ final class FakeAgentClient implements AgentClient
             default => null,
         };
         usort($php['installed'], fn (array $a, array $b): int => version_compare($a['version'], $b['version']));
+    }
+
+    /**
+     * @param  array<string, mixed>  $params
+     * @param  array<string, mixed>  $result
+     */
+    private function applyDeployEffect(string $command, array $params, array $result): void
+    {
+        $name = $params['name'] ?? '';
+        match ($command) {
+            'site.repo' => $this->connectRepository($name, $params['repository'], $params['branch']),
+            'site.deploy' => $this->keepReleases($name, $result, $params['keep_releases'] ?? 5),
+            'site.rollback' => $this->releases[$name] = array_map(
+                fn (array $r): array => array_merge($r, ['active' => $r['id'] === $params['release']]),
+                $this->releases[$name] ?? [],
+            ),
+            'site.destroy' => $this->forget($name),
+            default => null,
+        };
+    }
+
+    /**
+     * A deploy's release becomes the live one; the newest $keep stay, with
+     * the one live before it (R02-D5 step 11).
+     *
+     * @param  array<string, mixed>  $result
+     */
+    private function keepReleases(string $name, array $result, int $keep): void
+    {
+        if (! isset($result['release'], $result['commit'])) {
+            return;
+        }
+        $this->release($name, $result['release'], $result['commit'], active: true);
+        $previous = $result['previous_release'] ?? null;
+        $this->releases[$name] = array_values(array_filter(
+            $this->releases[$name],
+            fn (array $r, int $i): bool => $i < $keep || $r['id'] === $previous,
+            ARRAY_FILTER_USE_BOTH,
+        ));
+    }
+
+    private function forget(string $name): void
+    {
+        unset($this->repositories[$name], $this->releases[$name]);
     }
 
     public function status(string $jobId): AgentJobStatus
@@ -390,6 +535,11 @@ final class FakeAgentClient implements AgentClient
         }
         if ($command->name() === 'site.security') {
             $this->validateSecurity($params);
+
+            return;
+        }
+        if (in_array($command->name(), ['site.repo', 'site.deploy', 'site.rollback'], true)) {
+            $this->validateDeploy($command->name(), $params);
 
             return;
         }
@@ -510,6 +660,43 @@ final class FakeAgentClient implements AgentClient
         }
     }
 
+    /** @param array<string, mixed> $params site.repo's, site.deploy's or site.rollback's (agent/contract/deploy.go) */
+    private function validateDeploy(string $command, array $params): void
+    {
+        $fields = [];
+        if (! preg_match(self::SITE_NAME, $params['name']) || in_array($params['name'], self::RESERVED_NAMES, true)) {
+            $fields['name'] = 'must be 2–24 lowercase letters, digits or hyphens, start with a letter and not end with a hyphen';
+        }
+        if ($command === 'site.repo') {
+            if (! SiteRepository::isValidRepository($params['repository'])) {
+                $fields['repository'] = 'must be owner/name: an owner of 1–39 letters, digits or hyphens, not starting with a hyphen, and a name of 1–100 letters, digits, dots, underscores or hyphens, not ending in .git';
+            }
+            if (! SiteRepository::isValidBranch($params['branch'])) {
+                $fields['branch'] = 'must be 1–200 letters, digits, dots, underscores, hyphens or slashes, as git allows in a branch name';
+            }
+        }
+        if ($command === 'site.deploy') {
+            if (isset($params['commit']) && ! preg_match('/^[0-9a-f]{40}\z/', $params['commit'])) {
+                $fields['commit'] = 'must be 40 lowercase hex digits';
+            }
+            if (isset($params['script']) && SiteRepository::scriptError($params['script']) !== null) {
+                $fields['script'] = 'must be UTF-8 without NUL, at most 65536 bytes';
+            }
+            if (! in_array($params['trigger'], ['manual', 'webhook', 'url'], true)) {
+                $fields['trigger'] = 'must be manual, webhook or url';
+            }
+            if (isset($params['keep_releases']) && ($params['keep_releases'] < 1 || $params['keep_releases'] > 20)) {
+                $fields['keep_releases'] = 'must be between 1 and 20';
+            }
+        }
+        if ($command === 'site.rollback' && ! preg_match('/^[0-9]{14}-[0-9a-f]{7}\z/', $params['release'])) {
+            $fields['release'] = 'must be a release id: 14 digits, a hyphen and 7 lowercase hex digits';
+        }
+        if ($fields !== []) {
+            throw new AgentValidationFailed('Invalid parameters', $fields);
+        }
+    }
+
     /** @param array<string, mixed> $params site.provision's (§5.3, §5.4) */
     private function validateProvision(array $params): void
     {
@@ -522,9 +709,9 @@ final class FakeAgentClient implements AgentClient
         }
         $php = $params['php_version'] ?? null;
         match (true) {
-            ! in_array($params['type'], ['static', 'php'], true) => $fields['type'] = 'must be static or php',
-            $params['type'] === 'php' && $php === null => $fields['php_version'] = 'is required for a PHP site',
-            $params['type'] === 'php' && ! in_array($php, array_column($this->systemStatus['php']['available'], 'version'), true) => $fields['php_version'] = 'is not a supported PHP version',
+            ! in_array($params['type'], ['static', 'php', 'laravel'], true) => $fields['type'] = 'must be static, php or laravel',
+            $params['type'] !== 'static' && $php === null => $fields['php_version'] = 'is required for a PHP or Laravel site',
+            $params['type'] !== 'static' && ! in_array($php, array_column($this->systemStatus['php']['available'], 'version'), true) => $fields['php_version'] = 'is not a supported PHP version',
             $params['type'] === 'static' && $php !== null => $fields['php_version'] = 'must be left out for a static site',
             default => null,
         };
@@ -561,7 +748,7 @@ final class FakeAgentClient implements AgentClient
             'states' => $script['states'] ?? ['running', 'succeeded'],
             'step' => 0,
             'log' => array_map(fn (string $message): string => '['.self::goTime($now).'] '.$message, $log),
-            'result' => $script === null ? self::defaultResult($command) : $script['result'],
+            'result' => $script === null ? $this->defaultResult($command) : $script['result'],
             'error_code' => $script['error_code'] ?? null,
             'message' => $script['message'] ?? '',
             'started_at' => null,
@@ -619,7 +806,7 @@ final class FakeAgentClient implements AgentClient
             $job['finished_at'] = $now;
         }
         if ($status === 'succeeded') {
-            $this->applyEffect($job['command'], $job['params']);
+            $this->applyEffect($job['command'], $job['params'], $job['result']);
         }
     }
 

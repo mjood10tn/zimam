@@ -20,7 +20,7 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Support\Exceptions\Halt;
 
-/** A site's page: Overview, Jobs, Security and Logs tabs; Issue certificate for an active site (§10); Switch PHP version for an active PHP site (§9.5); Retry for a failed site (§9.2); Delete for an active or failed one (§9.8). */
+/** A site's page: Overview, Jobs, Security, Deployments and Logs tabs; Issue certificate for an active site (§10); Switch PHP version for an active PHP site (§9.5); Retry for a failed site (§9.2); Delete for an active or failed one (§9.8). */
 class ViewSite extends ViewRecord
 {
     protected static string $resource = SiteResource::class;
@@ -48,7 +48,7 @@ class ViewSite extends ViewRecord
                     ->modalHeading(fn (Site $record): string => __('zimam.sites.switch.heading', ['name' => $record->name]))
                     ->modalDescription(__('zimam.sites.switch.description'))
                     ->modalSubmitActionLabel(__('zimam.sites.switch.submit'))
-                    ->visible(fn (Site $record): bool => $record->type === Site::PHP && $record->status === Site::ACTIVE)
+                    ->visible(fn (Site $record): bool => $record->runsPhp() && $record->status === Site::ACTIVE)
                     ->schema([
                         Select::make('php_version')
                             ->label(__('zimam.sites.fields.php_version'))
