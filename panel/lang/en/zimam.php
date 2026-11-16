@@ -453,6 +453,7 @@ return [
         'deploy' => [
             'label' => 'Deploy now',
             'help' => 'Deploys the head of :branch with the saved settings.',
+            'refused' => 'The server refused the deploy settings. Fix them and save before deploying.',
             'submitted' => 'Deploying :name',
         ],
         'list' => [

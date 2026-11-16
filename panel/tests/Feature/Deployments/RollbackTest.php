@@ -2,8 +2,10 @@
 
 namespace Tests\Feature\Deployments;
 
+use App\Actions\StartDeployment;
 use App\Filament\Resources\SiteResource\Pages\DeploymentsTab;
 use App\Models\AgentJob;
+use App\Models\Deployment;
 use App\Models\Site;
 use Livewire\Livewire;
 
@@ -42,6 +44,28 @@ final class RollbackTest extends DeploymentsTestCase
         Livewire::test(DeploymentsTab::class, ['site' => $this->site()]);
 
         $this->assertSame([], array_filter($this->agent->calls(), fn (array $c): bool => $c['command'] === 'site.releases'));
+    }
+
+    /**
+     * The releases are read when the tab opens, not again on each 5-second
+     * poll while a job runs, and once more when it has ended.
+     */
+    public function testReleasesNotReadOnEveryPoll(): void
+    {
+        $site = $this->deployedTwice();
+        app(StartDeployment::class)->run($site, Deployment::MANUAL);
+        $reads = fn (): int => count(array_filter($this->agent->calls(), fn (array $c): bool => $c['command'] === 'site.releases'));
+
+        $tab = Livewire::test(DeploymentsTab::class, ['site' => $site])->assertSee(self::OLD);
+        $this->assertSame(1, $reads());
+        $tab->call('$refresh')->call('$refresh')->assertSee(self::OLD);
+        $this->assertSame(1, $reads());
+
+        $this->trackToTheEnd(AgentJob::sole());
+        $tab->call('$refresh');
+        $this->assertSame(2, $reads());
+        $tab->call('$refresh')->call('$refresh');
+        $this->assertSame(2, $reads());
     }
 
     public function testRollbackNeedsPasswordConfirmation(): void

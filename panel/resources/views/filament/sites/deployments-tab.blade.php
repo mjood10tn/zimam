@@ -38,7 +38,8 @@
                     <dt class="font-medium">{{ __('zimam.deployments.webhook.url') }}</dt>
                     <dd><code class="break-all">{{ $repository->webhookUrl() }}</code></dd>
                     <dt class="font-medium">{{ __('zimam.deployments.webhook.secret') }}</dt>
-                    <dd>
+                    {{-- Rendered with the secret only in the response that made it; wire:ignore keeps it on screen through later polls, and a new key swaps in a new one. --}}
+                    <dd wire:ignore wire:key="webhook-secret-{{ $webhookRevealKey ?? 'none' }}">
                         @if ($revealedWebhookSecret !== null)
                             <code class="break-all">{{ $revealedWebhookSecret }}</code>
                             <p class="text-gray-500 dark:text-gray-400">{{ __('zimam.deployments.once') }}</p>
@@ -54,12 +55,15 @@
         <x-filament::section :heading="__('zimam.deployments.deploy_url.heading')">
             <div class="grid gap-3 text-sm">
                 <p>{{ __('zimam.deployments.deploy_url.help') }}</p>
-                @if ($revealedDeployToken !== null)
-                    <code class="break-all">{{ $repository->deployUrl($revealedDeployToken) }}</code>
-                    <p class="text-gray-500 dark:text-gray-400">{{ __('zimam.deployments.once') }}</p>
-                @else
-                    <span class="text-gray-500 dark:text-gray-400">{{ __('zimam.deployments.deploy_url.hidden') }}</span>
-                @endif
+                {{-- As the webhook secret above: the token is in this response only. --}}
+                <div wire:ignore wire:key="deploy-url-{{ $deployUrlRevealKey ?? 'none' }}">
+                    @if ($revealedDeployToken !== null)
+                        <code class="break-all">{{ $repository->deployUrl($revealedDeployToken) }}</code>
+                        <p class="text-gray-500 dark:text-gray-400">{{ __('zimam.deployments.once') }}</p>
+                    @else
+                        <span class="text-gray-500 dark:text-gray-400">{{ __('zimam.deployments.deploy_url.hidden') }}</span>
+                    @endif
+                </div>
                 <div>{{ $this->regenerateDeployUrlAction }}</div>
             </div>
         </x-filament::section>

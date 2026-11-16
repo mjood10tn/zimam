@@ -54,19 +54,49 @@ class DeploymentsTab extends Component implements HasActions, HasSchemas
     /** @var array<string, mixed>|null */
     public ?array $settingsData = [];
 
-    /** The webhook secret, right after it was made; null on any later visit. */
-    public ?string $revealedWebhookSecret = null;
+    /**
+     * The webhook secret and the deploy URL's token, only in the response of
+     * the request that made them. They are private, so they never enter the
+     * snapshot that rides along on every later request; the view shows them
+     * in a wire:ignore block keyed by the reveal keys below, which the
+     * browser keeps through later morphs until the page is left.
+     */
+    private ?string $revealedWebhookSecret = null;
 
-    /** The deploy URL's token, right after it was made; never stored in plain. */
-    public ?string $revealedDeployToken = null;
+    private ?string $revealedDeployToken = null;
+
+    /** Changes with each reveal, so the browser swaps in the new value's block. */
+    public ?string $webhookRevealKey = null;
+
+    public ?string $deployUrlRevealKey = null;
 
     /** The deployment whose log is shown; the newest when null. */
     public ?int $logDeployment = null;
 
-    /** @var array<string, mixed>|false|null site.releases's data for this request; false when it couldn't be read */
-    private array|false|null $releasesData = null;
+    /**
+     * site.releases's last answer, kept between requests so the 5-second
+     * poll during a job doesn't ask again; null when it couldn't be read.
+     *
+     * @var array<string, mixed>|null
+     */
+    public ?array $releasesData = null;
 
-    private ?string $releasesError = null;
+    public ?string $releasesError = null;
+
+    /** Whether the releases must be read again: at first, and after a job on the site has run. */
+    public bool $releasesStale = true;
+
+    private function reveal(?string $webhookSecret = null, ?string $deployToken = null): void
+    {
+        if ($webhookSecret !== null) {
+            $this->revealedWebhookSecret = $webhookSecret;
+            $this->webhookRevealKey = bin2hex(random_bytes(8));
+        }
+        if ($deployToken !== null) {
+            $this->revealedDeployToken = $deployToken;
+            $this->deployUrlRevealKey = bin2hex(random_bytes(8));
+        }
+    }
 
     public function mount(): void
     {
@@ -155,7 +185,7 @@ class DeploymentsTab extends Component implements HasActions, HasSchemas
             ]);
     }
 
-    public function repository(): ?SiteRepository
+    private function repository(): ?SiteRepository
     {
         return $this->site->repository;
     }
@@ -221,8 +251,7 @@ class DeploymentsTab extends Component implements HasActions, HasSchemas
             return;
         }
         if ($new) {
-            $this->revealedWebhookSecret = $repository->webhook_secret;
-            $this->revealedDeployToken = $repository->revealedDeployToken;
+            $this->reveal($repository->webhook_secret, $repository->revealedDeployToken);
             $this->site->setRelation('repository', $repository);
             $this->fillSettings($repository);
         }
@@ -267,6 +296,15 @@ class DeploymentsTab extends Component implements HasActions, HasSchemas
             $deployment = app(StartDeployment::class)->run($this->site, Deployment::MANUAL, by: auth()->user());
         } catch (Halt) {
             return;
+        } catch (AgentValidationFailed $e) {
+            // The saved settings break a rule of the agent's: say which.
+            $fields = [];
+            foreach ($e->fields() as $field => $message) {
+                $fields[] = "{$field}: {$message}";
+            }
+            Notification::make()->title(__('zimam.deployments.deploy.refused'))->body(implode("\n", $fields))->danger()->send();
+
+            return;
         } catch (AgentException $e) {
             Notification::make()->title($e->getMessage())->danger()->send();
 
@@ -292,7 +330,7 @@ class DeploymentsTab extends Component implements HasActions, HasSchemas
                 ->modalSubmitActionLabel(__('zimam.deployments.webhook.regenerate'))
                 ->visible(fn (): bool => $this->repository() !== null)
                 ->action(function (): void {
-                    $this->revealedWebhookSecret = $this->repository()->regenerateWebhookSecret();
+                    $this->reveal(webhookSecret: $this->repository()->regenerateWebhookSecret());
                     Notification::make()->title(__('zimam.deployments.webhook.regenerated'))->success()->send();
                 }),
         );
@@ -309,7 +347,7 @@ class DeploymentsTab extends Component implements HasActions, HasSchemas
                 ->modalSubmitActionLabel(__('zimam.deployments.deploy_url.regenerate'))
                 ->visible(fn (): bool => $this->repository() !== null)
                 ->action(function (): void {
-                    $this->revealedDeployToken = $this->repository()->regenerateDeployToken();
+                    $this->reveal(deployToken: $this->repository()->regenerateDeployToken());
                     Notification::make()->title(__('zimam.deployments.deploy_url.regenerated'))->success()->send();
                 }),
         );
@@ -353,25 +391,34 @@ class DeploymentsTab extends Component implements HasActions, HasSchemas
     }
 
     /**
-     * site.releases's answer, read once per request and only for a site
-     * whose repository is connected; null otherwise or when it fails.
+     * site.releases's answer, only for a site whose repository is connected.
+     * It is read when the tab opens, then kept: while a job on the site runs,
+     * the 5-second poll shows the kept answer, and the next request after
+     * the job has ended reads it once more. Null when it couldn't be read.
      *
      * @return array<string, mixed>|null
      */
-    public function releases(): ?array
+    private function releases(): ?array
     {
-        if ($this->releasesData === null) {
-            $this->releasesData = false;
-            if ($this->repository()?->isConnected() ?? false) {
-                try {
-                    $this->releasesData = app(AgentClient::class)->call(new SiteReleases($this->site->name))->data;
-                } catch (AgentException $e) {
-                    $this->releasesError = $e->getMessage();
-                }
+        if (! ($this->repository()?->isConnected() ?? false)) {
+            return null;
+        }
+        $busy = $this->site->hasUnfinishedJob();
+        if ($this->releasesStale && (($this->releasesData === null && $this->releasesError === null) || ! $busy)) {
+            $this->releasesStale = false;
+            $this->releasesError = null;
+            try {
+                $this->releasesData = app(AgentClient::class)->call(new SiteReleases($this->site->name))->data;
+            } catch (AgentException $e) {
+                $this->releasesData = null;
+                $this->releasesError = $e->getMessage();
             }
         }
+        if ($busy) {
+            $this->releasesStale = true;
+        }
 
-        return $this->releasesData === false ? null : $this->releasesData;
+        return $this->releasesData;
     }
 
     /** @return list<string> the kept releases that aren't live: the only ones Roll back takes */
@@ -388,7 +435,7 @@ class DeploymentsTab extends Component implements HasActions, HasSchemas
     }
 
     /** @return Collection<int, Deployment> */
-    public function deployments(): Collection
+    private function deployments(): Collection
     {
         return $this->site->deployments()->with(['agentJob', 'creator'])->latest('id')->limit(self::LISTED)->get();
     }
@@ -404,6 +451,8 @@ class DeploymentsTab extends Component implements HasActions, HasSchemas
             'logDeploymentRow' => $log,
             'releases' => $this->releases(),
             'releasesError' => $this->releasesError,
+            'revealedWebhookSecret' => $this->revealedWebhookSecret,
+            'revealedDeployToken' => $this->revealedDeployToken,
             'polling' => $deployments->contains(fn (Deployment $d): bool => ! $d->isFinished()) || $this->site->hasUnfinishedJob(),
         ]);
     }

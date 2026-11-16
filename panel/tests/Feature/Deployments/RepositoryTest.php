@@ -8,6 +8,7 @@ use App\Models\AgentJob;
 use App\Models\Site;
 use App\Models\SiteRepository;
 use Illuminate\Support\Facades\DB;
+use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
 use Opis\JsonSchema\Validator;
 
@@ -114,6 +115,27 @@ final class RepositoryTest extends DeploymentsTestCase
         $this->assertSame(0, AgentJob::count());
     }
 
+    /** The deploy token in the deploy URL the tab shows right now. */
+    private static function shownToken(Testable $tab): ?string
+    {
+        return preg_match('#/hooks/deploy/[a-z0-9-]+/([0-9a-f]{64})#', $tab->html(), $m) === 1 ? $m[1] : null;
+    }
+
+    /**
+     * A revealed secret is rendered in the response that made it and nowhere
+     * else: never in the component's state or snapshot, which ride along on
+     * every later request, and not in the next response.
+     */
+    private function assertShownOnlyOnce(Testable $tab, string $value): void
+    {
+        $this->assertStringContainsString($value, $tab->html());
+        $this->assertStringNotContainsString($value, json_encode($tab->snapshot));
+        $tab->call('$refresh');
+        $this->assertStringNotContainsString($value, $tab->html());
+        $this->assertStringNotContainsString($value, json_encode($tab->snapshot));
+        $this->assertStringNotContainsString($value, json_encode($tab->instance()->all()));
+    }
+
     public function testWebhookSecretShownOnce(): void
     {
         $site = $this->site();
@@ -124,7 +146,8 @@ final class RepositoryTest extends DeploymentsTestCase
         $repository = SiteRepository::sole();
         $secret = $repository->webhook_secret;
         $this->assertMatchesRegularExpression('/^[0-9a-f]{64}\z/', $secret);
-        $token = $tab->get('revealedDeployToken');
+        $token = self::shownToken($tab);
+        $this->assertNotNull($token);
         $this->assertTrue($repository->matchesDeployToken($token));
         $tab->assertSee($secret)
             ->assertSee($repository->webhookUrl())
@@ -137,6 +160,11 @@ final class RepositoryTest extends DeploymentsTestCase
         $this->assertSame(hash('sha256', $token), $row->deploy_token_hash);
         $this->assertArrayNotHasKey('webhook_secret', $repository->toArray());
         $this->assertArrayNotHasKey('deploy_token_hash', $repository->toArray());
+
+        $this->assertShownOnlyOnce($tab, $secret);
+        $this->assertNull(self::shownToken($tab));
+        $this->assertStringNotContainsString($token, json_encode($tab->snapshot));
+        $tab->assertSee(__('zimam.deployments.webhook.hidden'))->assertSee(__('zimam.deployments.deploy_url.hidden'));
 
         Livewire::test(DeploymentsTab::class, ['site' => $site->fresh()])
             ->assertDontSee($secret)
@@ -161,7 +189,7 @@ final class RepositoryTest extends DeploymentsTestCase
             ->assertHasNoActionErrors();
         $new = $repository->fresh()->webhook_secret;
         $this->assertNotSame($old, $new);
-        $tab->assertSet('revealedWebhookSecret', $new)->assertSee($new);
+        $this->assertShownOnlyOnce($tab, $new);
     }
 
     public function testRegenerateDeployUrlInvalidatesOldToken(): void
@@ -170,8 +198,9 @@ final class RepositoryTest extends DeploymentsTestCase
         $tab = Livewire::test(DeploymentsTab::class, ['site' => $site])
             ->fillForm(['repository' => 'octo/shop', 'branch' => 'main'], 'repositoryForm')
             ->call('connect');
-        $old = $tab->get('revealedDeployToken');
+        $old = self::shownToken($tab);
         $this->assertTrue(SiteRepository::sole()->matchesDeployToken($old));
+        $this->assertShownOnlyOnce($tab, $old);
 
         Livewire::test(DeploymentsTab::class, ['site' => $site->fresh()])
             ->callAction('regenerateDeployUrl', ['current_password' => 'not the password'])
@@ -181,12 +210,13 @@ final class RepositoryTest extends DeploymentsTestCase
         $tab = Livewire::test(DeploymentsTab::class, ['site' => $site->fresh()])
             ->callAction('regenerateDeployUrl', ['current_password' => self::PASSWORD])
             ->assertHasNoActionErrors();
-        $new = $tab->get('revealedDeployToken');
-        $this->assertMatchesRegularExpression('/^[0-9a-f]{64}\z/', $new);
+        $new = self::shownToken($tab);
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{64}\z/', (string) $new);
         $repository = SiteRepository::sole();
         $this->assertFalse($repository->matchesDeployToken($old));
         $this->assertTrue($repository->matchesDeployToken($new));
         $tab->assertSee($repository->deployUrl($new));
+        $this->assertShownOnlyOnce($tab, $new);
     }
 
     /**

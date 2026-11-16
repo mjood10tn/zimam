@@ -4,13 +4,16 @@ namespace Tests\Feature\Deployments;
 
 use App\Actions\StartDeployment;
 use App\Agent\Exceptions\AgentBusy;
+use App\Agent\Exceptions\AgentValidationFailed;
 use App\Agent\JobOutcomes;
 use App\Filament\Resources\SiteResource\Pages\DeploymentsTab;
 use App\Models\AgentJob;
 use App\Models\Deployment;
 use App\Models\Site;
 use App\Models\SiteRepository;
+use Filament\Notifications\Notification;
 use Livewire\Livewire;
+use ReflectionMethod;
 
 /** Deploy now, the deploy settings and the deployments list (R02-D2, R02-D5, R02-D8, R02-D12). */
 final class DeployTest extends DeploymentsTestCase
@@ -217,6 +220,35 @@ final class DeployTest extends DeploymentsTestCase
             ->assertSee(__('zimam.deployments.triggers.manual'))
             ->assertSee(__('zimam.jobs.status.succeeded'))
             ->assertSeeLivewire('job-log');
+    }
+
+    /** A deploy the agent refuses on its params names each field in the notification. */
+    public function testDeployNowShowsAgentFieldErrors(): void
+    {
+        $site = $this->site();
+        $this->connected($site);
+        $this->agent->respond('site.deploy', new AgentValidationFailed('Invalid parameters', [
+            'script' => 'must be at most 65536 bytes',
+            'keep_releases' => 'must be between 1 and 20',
+        ]));
+
+        Livewire::test(DeploymentsTab::class, ['site' => $site])
+            ->call('deployNow')
+            ->assertNotified(
+                Notification::make()
+                    ->title(__('zimam.deployments.deploy.refused'))
+                    ->body("script: must be at most 65536 bytes\nkeep_releases: must be between 1 and 20")
+                    ->danger(),
+            );
+        $this->assertSame(0, Deployment::count());
+    }
+
+    /** Only the tab's own methods are callable from the browser; its data readers aren't. */
+    public function testDataReadersAreNotCallable(): void
+    {
+        foreach (['repository', 'releases', 'deployments'] as $method) {
+            $this->assertFalse((new ReflectionMethod(DeploymentsTab::class, $method))->isPublic(), $method);
+        }
     }
 
     /** Deploy now waits for a connected repository and for the site's other jobs. */
