@@ -7,13 +7,16 @@ use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Refuses a hook request whose body is over GitHub's largest delivery, 25 MiB
- * (A10), before anything reads it as JSON or checks a signature over it. The
- * same for every site name, so the answer tells nothing about which exist.
+ * Refuses a hook request whose body is over 1 MiB, before anything reads it
+ * as JSON or checks a signature over it. That is the panel vhost's Nginx
+ * limit (its default), so tests and production agree; GitHub can send up to
+ * 25 MiB, and the webhook setup text says to use Deploy now or the deploy
+ * URL for larger pushes. The same for every site name, so the answer tells
+ * nothing about which exist.
  */
 final class LimitHookBody
 {
-    public const MAX_BYTES = 25 * 1024 * 1024;
+    public const MAX_BYTES = 1024 * 1024;
 
     public function handle(Request $request, Closure $next): Response
     {

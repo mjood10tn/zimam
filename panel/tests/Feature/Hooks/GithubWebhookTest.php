@@ -171,7 +171,7 @@ final class GithubWebhookTest extends HooksTestCase
     public function testOversizedBodyRejected(): void
     {
         $repository = $this->connected($this->site(), ['auto_deploy' => true]);
-        $limit = 25 * 1024 * 1024;
+        $limit = 1024 * 1024;
         $body = $this->paddedPush($limit + 1);
         $this->assertSame($limit + 1, strlen($body));
 
@@ -186,7 +186,7 @@ final class GithubWebhookTest extends HooksTestCase
     public function testBodyAtTheLimitAccepted(): void
     {
         $repository = $this->connected($this->site(), ['auto_deploy' => true]);
-        $limit = 25 * 1024 * 1024;
+        $limit = 1024 * 1024;
         $body = $this->paddedPush($limit);
 
         $this->deliver('shop', $repository->webhook_secret, 'push', $body)->assertStatus(202);
@@ -260,13 +260,9 @@ final class GithubWebhookTest extends HooksTestCase
         $this->assertCount(1, $this->deploys());
     }
 
-    /**
-     * A push padded with JSON whitespace to $bytes. A few copies of it are
-     * alive at once, more than PHP's default 128M allows.
-     */
+    /** A push padded with JSON whitespace to $bytes. */
     private function paddedPush(int $bytes): string
     {
-        ini_set('memory_limit', '512M');
         $json = json_encode($this->push());
 
         return str_pad(substr($json, 0, -1), $bytes - 1).'}';

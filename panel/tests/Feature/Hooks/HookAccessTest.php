@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Hooks;
 
+use App\Http\Middleware\LimitHookBody;
 use App\Models\Deployment;
 use App\Settings\PanelSettings;
 use Illuminate\Cookie\Middleware\EncryptCookies;
@@ -82,6 +83,16 @@ final class HookAccessTest extends HooksTestCase
         $this->postRaw('/hooksx', '', ip: '198.51.100.7')->assertForbidden();
         $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.7'])->get('/admin/login')->assertForbidden();
         $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.7'])->get('/hooks')->assertForbidden();
+    }
+
+    /** The webhook setup text names the 1 MiB limit and what to do instead. */
+    public function testSetupTextSaysLargePushesAreRefused(): void
+    {
+        $text = __('zimam.deployments.webhook.setup', ['url' => 'https://panel.example.com/hooks/github/shop']);
+
+        $this->assertSame(1024 * 1024, LimitHookBody::MAX_BYTES);
+        $this->assertStringContainsString('1 MiB', $text);
+        $this->assertStringContainsString(__('zimam.deployments.deploy.label'), $text);
     }
 
     public function testSettingsSayHooksAreExempt(): void

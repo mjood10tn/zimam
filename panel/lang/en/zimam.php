@@ -417,7 +417,7 @@ return [
         ],
         'webhook' => [
             'heading' => 'Deploy on push',
-            'setup' => 'In the repository’s Settings → Webhooks, add a webhook with the payload URL :url, content type application/json, the secret below, and just the push event. Pushes to the branch then deploy while auto-deploy is on.',
+            'setup' => 'In the repository’s Settings → Webhooks, add a webhook with the payload URL :url, content type application/json, the secret below, and just the push event. Pushes to the branch then deploy while auto-deploy is on. A push whose payload is over 1 MiB is refused; deploy those with Deploy now or the deploy URL.',
             'url' => 'Payload URL',
             'secret' => 'Secret',
             'hidden' => 'Shown only once, when it was made. Regenerate it to see a new one.',
