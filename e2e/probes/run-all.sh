@@ -3,8 +3,9 @@
 # between two fs-hash.sh snapshots, which must be identical: README.md maps
 # each §14.4 item to its script. The snapshots' exclusions live in one
 # place, fs-hash.sh's prune list. The probes that change files on purpose
-# put them back: destroy-symlink.sh and destroy-schedules.sh destroy the
-# sites they provision, and maintenance.sh sends the old log policy back and removes what it planted.
+# put them back: destroy-symlink.sh, destroy-schedules.sh and deploy.sh
+# destroy the sites they provision, and maintenance.sh sends the old log
+# policy back and removes what it planted.
 # The milestone 2 scenarios have run, so the site users s_php84 and s_php85
 # exist. Everything that would change /etc, /root or /home by itself
 # happens before the first snapshot: the probe client and fs-hash.sh are
@@ -25,7 +26,7 @@ in_c systemctl start zimam-maintenance.service
 
 in_c zimam-fs-hash >"$E2E_WORK/fs-before.txt"
 code=0
-for probe in callers protocol validation archive-names log-symlink journal-paging oom destroy-symlink destroy-schedules maintenance; do
+for probe in callers protocol validation archive-names log-symlink journal-paging oom destroy-symlink destroy-schedules deploy maintenance; do
 	echo "== $probe.sh"
 	bash "$(dirname "$0")/$probe.sh" || code=1
 done

@@ -28,7 +28,7 @@ jobs:
             set -eu
             apt-get update -qq
             DEBIAN_FRONTEND=noninteractive apt-get install -y -qq shellcheck >/dev/null
-            shellcheck e2e/scripts/*.sh e2e/scenarios/*.sh e2e/probes/*.sh e2e/vps/*.sh e2e/vps/lxc-ssh'
+            shellcheck e2e/scripts/*.sh e2e/scenarios/*.sh e2e/probes/*.sh e2e/githost/*.sh e2e/vps/*.sh e2e/vps/lxc-ssh'
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: agent/go.mod
@@ -69,6 +69,10 @@ jobs:
         run: bash e2e/scripts/browser.sh --project m2-default
       - name: done-when 8 to 10, monitoring, php84's security and the log settings, in the browser
         run: bash e2e/scripts/browser.sh --project m3-settings
+      - name: the Git host that plays GitHub for deploys, a second container
+        run: bash e2e/githost/githost.sh up
+      - name: v0.2.0 done-when 1 to 8, a Laravel site deployed, rolled back and webhook-deployed, in the browser
+        run: bash e2e/scripts/browser.sh --project v02-deploy
       - name: done-when 12, every root-escalation probe in one pass between two identical snapshots
         run: bash e2e/probes/run-all.sh
       - name: done-when 11, the audit re-check (every command, the redaction, the cli:root runs, certbot renew)

@@ -32,7 +32,8 @@ export default defineConfig({
   // left: install PHP 8.4, then the sites, their certificates and the
   // switch, then the new default, which needs the sites to exist.
   // Milestone 3 runs monitoring, php84's security and the log settings
-  // (--project m3-settings), on the sites milestone 2 left.
+  // (--project m3-settings), on the sites milestone 2 left. v0.2.0's deploys
+  // (--project v02-deploy) need the Git host (e2e/githost) and PHP 8.4.
   projects: [
     { name: 'setup', testMatch: 'setup.spec.ts' },
     { name: 'recovery', testMatch: 'recovery.spec.ts', dependencies: ['setup'] },
@@ -42,5 +43,6 @@ export default defineConfig({
     { name: 'm3-monitoring', testMatch: 'monitoring.spec.ts' },
     { name: 'm3-security', testMatch: 'security.spec.ts', dependencies: ['m3-monitoring'] },
     { name: 'm3-settings', testMatch: 'settings.spec.ts', dependencies: ['m3-security'] },
+    { name: 'v02-deploy', testMatch: 'deploy.spec.ts' },
   ],
 });

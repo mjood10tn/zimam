@@ -203,7 +203,7 @@ func (b *build) git(d sysexec.Deps, dir string, capture io.Writer, max int64, ar
 		Program:    siteexec.Git,
 		Args:       args,
 		Dir:        dir,
-		Env:        map[string]string{"GIT_SSH_COMMAND": GitSSHCommand},
+		Env:        map[string]string{"GIT_SSH_COMMAND": gitSSHCommand(d.Config)},
 		LogPrefix:  "git: ",
 		Capture:    capture,
 		CaptureMax: max,

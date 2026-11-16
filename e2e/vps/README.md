@@ -22,6 +22,7 @@ Three jobs per architecture: `create` runs step 1, `vps` steps 2 and 3, and `del
    - `lxc-ssh` stands in for `lxc`, so `in_c` and `lxc file push` go over SSH, through one master connection.
    - The test names sit under `<ip-with-dashes>.sslip.io` (`E2E_DOMAIN`).
    - The release is served on the server's `127.0.0.1:8080`.
+   - The Git host that plays GitHub for v0.2.0's deploys (`e2e/githost`) runs in Docker on the runner; a reverse SSH tunnel, kept up by `githost.sh` until the job ends, makes the server's own `127.0.0.1:2222` reach it.
 3. `ipv6.sh`
    - Checks the panel and the sites over IPv4 and real DNS from the runner.
    - Checks IPv6 on the server: Nginx on `[::]`, UFW's v6 rules, and `curl -6` to the server's own address.

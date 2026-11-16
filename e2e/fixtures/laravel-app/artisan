@@ -1,0 +1,8 @@
+#!/usr/bin/env php
+<?php
+
+// The deploy preset's `php artisan …` commands (app/Console.php). It needs
+// Composer's autoloader, so a deploy without Composer fails here.
+require __DIR__.'/vendor/autoload.php';
+
+exit((new App\Console(new App\App(__DIR__)))->run(array_slice($argv, 1)));

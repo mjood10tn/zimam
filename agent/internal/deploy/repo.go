@@ -126,7 +126,7 @@ func Repo(ctx context.Context, d sysexec.Deps, h Helper, lookup sites.Lookup, p 
 		return contract.SiteRepoResult{}, err
 	}
 	d.Logf("Writing GitHub's pinned host keys to ~/%s", knownHosts)
-	if err := h.Write(ctx, a, knownHosts, 0o600, strings.NewReader(GitHubKnownHosts)); err != nil {
+	if err := h.Write(ctx, a, knownHosts, 0o600, strings.NewReader(pinnedHosts(d.Config))); err != nil {
 		return contract.SiteRepoResult{}, err
 	}
 	if st.Repository != p.Repository || st.Branch != p.Branch {

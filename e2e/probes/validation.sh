@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Validation probes (design §14.4), sent as zimam for milestone 2's
-# commands: bad site names, domains and PHP versions each answer
-# validation_failed before anything runs, and leave exactly one
+# commands (bad site names, domains and PHP versions), milestone 3's
+# site.security, and every field of v0.2.0's six commands: each answers
+# validation_failed before anything runs, and leaves exactly one
 # error:validation_failed audit entry. run-all.sh runs them between its two
 # file snapshots.
 # shellcheck source=lib.sh
@@ -69,4 +70,66 @@ for name in 'a:b' 'a\nb' 'a\rb' ''; do
 	send_field "site.security with the username '$name'" site.security \
 		"$(security '[]' '[]' "{\"enabled\":true,\"users\":[{\"username\":\"$name\",\"password_hash\":\"\$2y\$12\$$salt\"}]}")" password_protection
 done
+
+# v0.2.0's six commands, every field. A JSON type the field can't take
+# fails the decode, which names params rather than the field.
+# json_str prints its argument as a JSON string.
+json_str() {
+	python3 -I -c 'import json, sys; print(json.dumps(sys.argv[1]))' "$1"
+}
+repo() {
+	echo "{\"name\":\"$1\",\"repository\":$(json_str "$2"),\"branch\":$(json_str "$3")$4}"
+}
+# site.repo: names, repositories (owner/name, no .git, no path, no space),
+# branches (Git's ref rules) and rotate_key.
+for name in ../laravel Laravel 'laravel/..'; do
+	send_field "site.repo of $name" site.repo "$(repo "$name" zimam-e2e/laravel-app main '')" name
+done
+# shellcheck disable=SC2016 # $(id) is the probe
+for r in octo/app.git -octo/app octo/.. octo/. 'octo/a b' octo '' ../etc/passwd octo/app/x 'octo/$(id)' "$(printf 'o%.0s' {1..40})/app"; do
+	send_field "site.repo of the repository '$r'" site.repo "$(repo laravel "$r" main '')" repository
+done
+for b in -rf a..b refs/heads/../x .hidden/x x.lock a//b 'a@{1}' x/ x. '' 'a b' 'a;id' 'a~1' 'a^' 'a:b' '/main' "$(printf 'b%.0s' {1..201})"; do
+	send_field "site.repo of the branch '$b'" site.repo "$(repo laravel zimam-e2e/laravel-app "$b" '')" branch
+done
+for v in '"yes"' 1 '""'; do
+	send_field "site.repo with rotate_key $v" site.repo "$(repo laravel zimam-e2e/laravel-app main ",\"rotate_key\":$v")" params
+done
+# site.deploy: name, commit (40 lowercase hex), script (UTF-8, no NUL, at
+# most 64 KiB), composer, trigger and keep_releases (1 to 20).
+deploy() {
+	echo "{\"name\":\"laravel\",\"composer\":true,\"trigger\":\"manual\"$1}"
+}
+send_field "site.deploy of ../laravel" site.deploy '{"name":"../laravel","composer":true,"trigger":"manual"}' name
+for c in "$(printf 'A%.0s' {1..40})" "$(printf 'a%.0s' {1..39})" "$(printf 'a%.0s' {1..41})" HEAD main "$(printf 'g%.0s' {1..40})" ''; do
+	send_field "site.deploy of the commit '$c'" site.deploy "$(deploy ",\"commit\":$(json_str "$c")")" commit
+done
+send_field "site.deploy with a NUL in its script" site.deploy "$(deploy ',"script":"php artisan migrate\u0000 --force"')" script
+send_field "site.deploy with a script of 64 KiB + 1" site.deploy "$(deploy ",\"script\":\"$(printf 'x%.0s' $(seq 65537))\"")" script
+for v in '"yes"' 1 '""'; do
+	send_field "site.deploy with composer $v" site.deploy "{\"name\":\"laravel\",\"composer\":$v,\"trigger\":\"manual\"}" params
+done
+for t in push MANUAL '' 'manual ' webhooks; do
+	send_field "site.deploy with the trigger '$t'" site.deploy "{\"name\":\"laravel\",\"composer\":true,\"trigger\":$(json_str "$t")}" trigger
+done
+for k in 0 21 -1 100; do
+	send_field "site.deploy keeping $k releases" site.deploy "$(deploy ",\"keep_releases\":$k")" keep_releases
+done
+send_field "site.deploy keeping \"5\" releases" site.deploy "$(deploy ',"keep_releases":"5"')" params
+# site.rollback: name and release (<14 digits>-<7 lowercase hex>).
+send_field "site.rollback of ../laravel" site.rollback '{"name":"../laravel","release":"20261116000000-abcdef0"}' name
+for r in ../initial initial / 20261116000000-ABCDEF0 20261116-abcdef0 '20261116000000-abcdef0/..' 20261116000000-abcdef01 ''; do
+	send_field "site.rollback to the release '$r'" site.rollback "{\"name\":\"laravel\",\"release\":$(json_str "$r")}" release
+done
+# site.releases and site.env.read take a name only.
+for command in site.releases site.env.read; do
+	for name in ../laravel Laravel 'laravel/../..' ''; do
+		send_field "$command of '$name'" "$command" "{\"name\":$(json_str "$name")}" name
+	done
+done
+# site.env.write: name, and content (UTF-8, no NUL, at most 64 KiB).
+send_field "site.env.write of ../laravel" site.env.write '{"name":"../laravel","content":"A=1\n"}' name
+send_field "site.env.write with a NUL" site.env.write '{"name":"laravel","content":"APP_KEY=x\u0000\n"}' content
+send_field "site.env.write of 64 KiB + 1" site.env.write "{\"name\":\"laravel\",\"content\":\"$(printf 'x%.0s' $(seq 65537))\"}" content
+send_field "site.env.write with content 1" site.env.write '{"name":"laravel","content":1}' params
 exit "$failed"

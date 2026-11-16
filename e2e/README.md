@@ -15,7 +15,9 @@ The end-to-end harness (design §14.2): a release built with the `e2e` tag and a
 | The contract suite against the real agent, as `zimam` | `scenarios/m1-contract.sh` | container |
 | The root-only Go tests | `scenarios/m1-roottests.sh` | container |
 | Done-when 3 to 7 in Chromium: install PHP 8.4, create `static`, `php84` and `php85`, issue their certificates, switch `php84` to 8.5 and back under a request loop, make 8.4 the default. The specs call `scenarios/m2-*.sh` for the checks from outside the browser | `scripts/browser.sh --project m2-default` | host |
-| The caller (`nobody`, `s_php84`), protocol, validation, log and job-limit (`e2e.memhog` ends `oom-kill`) probes between two file snapshots, then the `site.destroy` symlink and maintenance (planted links, a 1 KiB cap) probes with their own | `probes/run.sh` | container |
+| The Git host that plays GitHub (below): a second container, `$E2E_CONTAINER-git`, holding `zimam-e2e/laravel-app`; the server's `agent.json` gets `e2e_git_host` | `githost/githost.sh up` | host |
+| v0.2.0 done-when 1 to 8 in Chromium: a Laravel site connects the repository (the webhook secret and the deploy URL shown once, kept through polls, replaced by Regenerate, gone after a reload), deploys with Composer and the Laravel preset, has its `.env` edited (a refused save keeps the text), deploys again under a request loop, keeps its release through a failing script, rolls back, and deploys on a signed webhook and on its deploy URL; its Laravel log shows the app's line. The spec calls `scenarios/v02-deploy.sh` for the checks from outside the browser | `scripts/browser.sh --project v02-deploy` | host |
+| The caller (`nobody`, `s_php84`), protocol, validation, log and job-limit (`e2e.memhog` ends `oom-kill`) probes between two file snapshots, then the `site.destroy` symlink, deploy (`probes/deploy.sh`) and maintenance (planted links, a 1 KiB cap) probes | `probes/run-all.sh` | container |
 | Done-when 11: the audit log, for every command so far | `scenarios/audit.sh` | host |
 | Running the installer again repairs, after `zimam-agent version --at-least` (D25) | `scenarios/m1-repair.sh` | host |
 | The main run's container goes; the upgrade gets its own work directory and container | `scripts/down.sh` | host |
@@ -67,6 +69,16 @@ The scenario:
    - `zimam-agent maintenance` exits 0;
    - the audit log has the cli:root `bootstrap` entries of both installer runs.
 5. Serves the previous release again and runs its installer. This is the `refuses a downgrade` case: the installer must exit non-zero with D25's message, the new agent must stay, and the audit log must not grow.
+
+## The Git host
+
+v0.2.0's deploys fetch from GitHub over SSH with each site's deploy key and GitHub's pinned host keys. The run can't push to GitHub, so `githost/githost.sh` starts a Git host that plays it:
+- OpenSSH, and a user `git` whose shell is `git-shell`, holding `~git/zimam-e2e/laravel-app.git` (`githost/server.sh`). Its host key is made when it starts.
+- In LXD it is a second container on `lxdbr0`, reached at its address, port 22. On a VPS it is a Docker container on the runner, and a reverse SSH tunnel makes the server's own `127.0.0.1:2222` reach it.
+- `up` sets `e2e_git_host` (address, port, host key) in the server's `agent.json`. Only e2e builds accept the field; a release build refuses an `agent.json` that has it. With it, `site.repo` writes the Git host's key to the site's `known_hosts` under the name `github.com`, and git's SSH command gains `-o HostKeyAlias=github.com -o HostName=<address> -o Port=<port>`. The remote is still `git@github.com:<owner>/<name>.git`, and every other option is the release build's.
+- `authorize <key>` lets a site's deploy key fetch (the scenario plays the owner adding it on GitHub), and `commit <marker>` pushes a new commit whose `release.txt` holds the marker the app prints.
+
+`fixtures/laravel-app` is Laravel-shaped but needs nothing from Packagist: its `composer.json` has no dependencies, so `composer install` runs for real and writes the autoloader the app and `artisan` need, without depending on Packagist or GitHub's download limits from CI. Its `artisan` does what the Laravel preset's commands do to a release: `storage:link`, `migrate --force`, `config:cache` (from the shared `.env`), `route:cache` and `view:cache`. The app prints its release marker and `E2E_GREETING`, and `?log=<word>` writes a line to `storage/logs/laravel.log`.
 
 ## Running it locally
 

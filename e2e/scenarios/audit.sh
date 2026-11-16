@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Done-when 11 (design §2, §5.8): the audit re-check. First every one of
-# §5.3's 18 commands runs at least once: the scenarios and probes before
-# this sent all but php.uninstall, which runs here on PHP 8.3 (installed
-# for it and removed again), and the seven reads run here once each, as
-# zimam, and must add no entry. Then certbot renews every certificate
+# the 24 commands (§5.3's 18 and v0.2.0's six) runs at least once: the
+# scenarios and probes before this sent all but php.uninstall, which runs
+# here on PHP 8.3 (installed for it and removed again), and the eight
+# routine reads run here once each, as zimam, and must add no entry, while
+# site.env.read, which returns a secret, adds exactly one with its result
+# redacted (R02-D10). Then certbot renews every certificate
 # against Pebble, so `hook cert-deployed` runs once per lineage. Then the
 # whole audit log: every audited command has its submissions and outcomes,
 # every accepted job has exactly one outcome, password hashes show as
@@ -34,7 +36,7 @@ else
 	fail "PHP 8.3 is still installed after php.uninstall: $installed"
 fi
 
-# The seven reads, each answered, none audited.
+# The eight routine reads, each answered, none audited.
 before=$(audit_lines)
 reads=(
 	'agent.version' '{}'
@@ -44,6 +46,7 @@ reads=(
 	'job.follow' "{\"job\":\"$uninstall\",\"from_offset\":0}"
 	'logs.list' '{"source":"site.nginx-access","name":"php84"}'
 	'logs.read' '{"source":"journal.nginx","direction":"back","limit":3}'
+	'site.releases' '{"name":"laravel"}'
 )
 for ((i = 0; i < ${#reads[@]}; i += 2)); do
 	reply=$(request "${reads[i]}" "${reads[i + 1]}")
@@ -55,9 +58,34 @@ for ((i = 0; i < ${#reads[@]}; i += 2)); do
 	fi
 done
 if [[ $(audit_lines) == "$before" ]]; then
-	pass "the seven reads added no audit entry"
+	pass "the eight reads added no audit entry"
 else
 	fail "the reads added: $(audit_since "$before")"
+fi
+
+# site.env.read returns the .env, a secret: it is audited, once, with the
+# params and the result, whose content shows as "[redacted]" (R02-D10).
+before=$(audit_lines)
+reply=$(request site.env.read '{"name":"laravel"}')
+app_key=$(python3 -I -c 'import json, re, sys; r = json.load(sys.stdin); print(re.search(r"^APP_KEY=(.+)$", r["data"]["content"], re.M).group(1))' <<<"$reply" 2>/dev/null || true)
+entries=$(audit_since "$before")
+if [[ -z $app_key ]]; then
+	fail "site.env.read answered ${reply:0:100}…"
+elif [[ $(wc -l <<<"$entries") == 1 && $entries != *"$app_key"* ]] &&
+	python3 -I -c 'import json, sys; e = json.loads(sys.argv[1]); sys.exit(0 if e["command"] == "site.env.read" and e["outcome"] == "ok" and e["params"] == {"name": "laravel"} and e["result"]["content"] == "[redacted]" else 1)' "$entries"; then
+	pass "site.env.read answered the .env and left one ok entry, its content \"[redacted]\""
+else
+	fail "site.env.read left: ${entries//$app_key/<APP_KEY>}"
+fi
+# The panel keeps no .env either: the marker the browser saved in it is in
+# no agent_actions or agent_jobs row.
+marker=$(cat "$E2E_WORK/v02-env-marker" 2>/dev/null || true)
+if [[ -z $marker ]]; then
+	fail "no .env marker from the v02-deploy browser run"
+elif panel_sql 'select * from agent_actions' | grep -qF "$marker" || panel_sql 'select * from agent_jobs' | grep -qF "$marker"; then
+	fail "the panel's agent_actions or agent_jobs hold the .env's E2E_GREETING"
+else
+	pass "the panel's agent_actions and agent_jobs hold nothing of the saved .env"
 fi
 
 # certbot's renewal confs name Pebble and the hook, but not Pebble's CA,
@@ -82,7 +110,7 @@ fi
 
 # Read through cat, so this user owns the copy: lxc runs as root here.
 in_c cat /var/log/zimam/audit.log >"$E2E_WORK/audit.log"
-python3 -I - "$E2E_WORK/audit.log" <<'PY' || failed=1
+python3 -I - "$E2E_WORK/audit.log" "$marker" <<'PY' || failed=1
 import json, sys
 
 raw = open(sys.argv[1]).read()
@@ -100,19 +128,25 @@ def count(**want):
     return sum(all(e.get(k) == v for k, v in want.items()) for e in entries)
 
 
-# §5.3's 18 commands: the jobs are audited at submission and outcome,
-# job.cancel when it acts, and the reads never, unless refused.
+# The 24 commands, §5.3's 18 and v0.2.0's six: the jobs are audited at
+# submission and outcome, job.cancel when it acts, the routine reads never,
+# unless refused, and site.env.read, which returns a secret, every time.
 jobs = ["php.install", "php.uninstall", "php.default", "site.provision", "site.php", "site.security",
-        "site.destroy", "cert.issue", "security.check", "logs.policy"]
-reads = ["agent.version", "system.status", "system.metrics", "job.status", "job.follow", "logs.list", "logs.read"]
-assert len(jobs) + 1 + len(reads) == 18
+        "site.destroy", "cert.issue", "security.check", "logs.policy",
+        "site.repo", "site.deploy", "site.rollback", "site.env.write"]
+reads = ["agent.version", "system.status", "system.metrics", "job.status", "job.follow", "logs.list", "logs.read",
+         "site.releases"]
+audited_reads = ["site.env.read"]
+assert len(jobs) + 1 + len(reads) + len(audited_reads) == 24
 for command in jobs:
     for outcome in ("accepted", "ok"):
         n = count(command=command, outcome=outcome)
         check(n >= 1, f"{command} {outcome}: {n}")
 check(count(command="job.cancel", outcome="ok") >= 1, "job.cancel audited")
 bad = [e for e in entries if e["command"] in reads and not e["outcome"].startswith("error:")]
-check(not bad, f"no successful read audited ({len(bad)} found)")
+check(not bad, f"no successful routine read audited ({len(bad)} found)")
+n = count(command="site.env.read", outcome="ok")
+check(n >= 3, f"site.env.read audited when it answered: {n}, want at least 3 (two reveals and audit.sh's)")
 
 # Every accepted job has exactly one outcome entry, ok or error:<code>; a
 # cancelled job's is the job.cancel that stopped it (jobs.auditOutcome).
@@ -150,6 +184,14 @@ check(hashes and all(h == "[redacted]" for h in hashes),
       f"every password_hash shows as \"[redacted]\" ({len(hashes)}; others: {[h for h in hashes if h != '[redacted]'][:3]})")
 check(not any(p in raw for p in ("$2y$", "$2a$", "$2b$")), "no bcrypt hash in the audit log")
 check("/setup/" not in raw, "no setup link in the audit log")
+# The .env (R02-D10): every content, in params (site.env.write, refused or
+# not) and results (site.env.read), shows as "[redacted]", and the marker
+# the browser saved in the .env is nowhere.
+contents = [(e.get(part) or {}).get("content") for e in entries if e["command"] in ("site.env.read", "site.env.write")
+            for part in ("params", "result") if "content" in (e.get(part) or {})]
+check(len(contents) >= 4 and all(c == "[redacted]" for c in contents),
+      f"every .env content shows as \"[redacted]\" ({len(contents)}; others: {[c[:20] for c in contents if c != '[redacted]'][:3]})")
+check(len(sys.argv[2]) > 8 and sys.argv[2] not in raw, "the .env marker the browser saved is not in the audit log")
 
 # The command line, as cli:root.
 steps = ["agent-config", "directories", "sury-repository", "php", "nginx", "panel-release",
@@ -165,7 +207,7 @@ check(n >= 1, f"hook cert-deployed audited as cli:root ({n})")
 runs = [e for e in entries if e["command"] == "maintenance"]
 idle = [e for e in runs if e["actor"] != "cli:root" or not any(
     (e.get("params") or {}).get(k) for k in ("restored_configs", "reconciled_jobs", "keyring_refreshed",
-                                             "deleted_archives", "pruned_jobs"))]
+                                             "deleted_archives", "pruned_jobs", "reloaded_php"))]
 check(runs and not idle, f"maintenance audited as cli:root only when it changed something ({len(runs)} runs, {len(idle)} not)")
 n = sum(bool((e.get("params") or {}).get("deleted_archives")) for e in runs)
 check(n >= 1, f"maintenance's deletion of the backdated archive audited ({n})")
@@ -197,9 +239,22 @@ n = sum(e["command"] == "site.security" and e["outcome"].startswith("error:") an
         and bool(e.get("job")) for e in entries)
 check(n >= 1, f"the site.security job that met the broken tls.conf audited as failed ({n})")
 check(count(command="e2e.sleep", outcome="accepted") >= 1, "the e2e.sleep submission accepted")
+# v0.2.0 (v02-deploy and deploy.sh): laravel's and probe-deploy's
+# repositories; laravel's five deploys from the browser, the webhook and the
+# deploy URL (one failed on its script) and probe-deploy's six (four
+# failed); one rollback; two .env saves, one failed through a planted link.
+for command, accepted, ok in [("site.repo", 2, 2), ("site.deploy", 11, 6), ("site.rollback", 1, 1), ("site.env.write", 2, 1)]:
+    n = count(command=command, outcome="accepted")
+    check(n >= accepted, f"{command} accepted: {n}, want at least {accepted}")
+    n = count(command=command, outcome="ok")
+    check(n >= ok, f"{command} ok: {n}, want at least {ok}")
+n = sum(e["command"] == "site.deploy" and e["outcome"].startswith("error:") and bool(e.get("job")) for e in entries)
+check(n >= 5, f"the failing deploys audited as failed: {n}, want at least 5")
 # The validation probes, and the contract suite's bad site name.
 for command, least in [("site.provision", 23), ("php.install", 3), ("site.php", 3), ("site.destroy", 3), ("cert.issue", 3),
-                       ("site.security", 31), ("logs.read", 7)]:
+                       ("site.security", 31), ("logs.read", 7),
+                       ("site.repo", 34), ("site.deploy", 23), ("site.rollback", 9), ("site.releases", 4),
+                       ("site.env.read", 4), ("site.env.write", 4)]:
     n = count(command=command, outcome="error:validation_failed")
     check(n >= least, f"{command} refused as validation_failed: {n}, want at least {least}")
 sys.exit(1 if failed else 0)

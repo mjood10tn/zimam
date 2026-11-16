@@ -38,6 +38,9 @@ type Agent struct {
 	LogRetentionDays   contract.RetentionDays      `json:"log_retention_days"`
 	AuditRetentionDays contract.AuditRetentionDays `json:"audit_retention_days"`
 	SiteLogCapBytes    contract.SiteCapBytes       `json:"site_log_cap_bytes"`
+	// E2EGitHost is for e2e builds only (e2egithost.go): release builds
+	// refuse an agent.json that has it.
+	E2EGitHost *E2EGitHost `json:"e2e_git_host,omitempty"`
 }
 
 // New returns the config bootstrap writes, with the §5.9 defaults. Bootstrap
@@ -73,6 +76,9 @@ func (a Agent) Validate() error {
 	f.Check("log_retention_days", a.LogRetentionDays)
 	f.Check("audit_retention_days", a.AuditRetentionDays)
 	f.Check("site_log_cap_bytes", a.SiteLogCapBytes)
+	if a.E2EGitHost != nil {
+		f.Check("e2e_git_host", a.E2EGitHost)
+	}
 	return f.Err()
 }
 

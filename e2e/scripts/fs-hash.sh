@@ -4,16 +4,22 @@
 # target, then every regular file's SHA-256: the proof that the probes left
 # the system unchanged (design §14.4). This list is the one place the
 # probes' exclusions live. Only what the system changes by itself is left
-# out: the panel's database and storage, site homes' logs/, and the account
-# files' backups (/etc/passwd- and its kind), which useradd and userdel
-# rewrite when the probes' throwaway sites come and go, and the at queue's
-# sequence file, which every at job moves.
+# out: the panel's database and storage, site homes' logs/ and a Laravel
+# site's site/shared/storage/logs/ (its app writes there, and maintenance
+# rotates and caps it as it does logs/), the account files' backups
+# (/etc/passwd- and its kind), which useradd and userdel rewrite when the
+# probes' throwaway sites come and go, and the at queue's sequence file,
+# which every at job moves. Jobs' spec.json files, which hold a running
+# job's params, secrets included, are under /var/lib/zimam/jobs, which no
+# root here reaches: never add /var/lib to the roots without leaving them
+# out.
 set -Eeuo pipefail
 
 prune=(
 	-path '/home/zimam/panel/shared/database.sqlite*' -o
 	-path /home/zimam/panel/shared/storage -o
 	-path '/home/s_*/logs' -o
+	-path '/home/s_*/site/shared/storage/logs' -o
 	-path /var/spool/cron/atjobs/.SEQ -o
 	-regex '/etc/\(passwd\|group\|shadow\|gshadow\|subuid\|subgid\)-'
 )

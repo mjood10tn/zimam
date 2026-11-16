@@ -1,0 +1,70 @@
+<?php
+
+namespace App;
+
+/**
+ * The artisan commands Zimam's Laravel deploy preset runs, doing what
+ * Laravel's do to the release, without Laravel: the e2e run needs no
+ * packages from Packagist.
+ */
+final class Console
+{
+    public function __construct(private readonly App $app) {}
+
+    /** @param list<string> $args */
+    public function run(array $args): int
+    {
+        $command = $args[0] ?? 'list';
+        $base = $this->app->base;
+        switch ($command) {
+            case 'storage:link':
+                // public/storage -> ../storage/app/public, relative, as Laravel's --relative.
+                $link = $base.'/public/storage';
+                if (! is_link($link) && ! symlink('../storage/app/public', $link)) {
+                    return $this->fail('The [public/storage] link could not be created.');
+                }
+                echo "The [public/storage] link has been connected to [storage/app/public].\n";
+
+                return 0;
+            case 'migrate':
+                if (($this->app->config()['APP_ENV'] ?? 'production') === 'production' && ! in_array('--force', $args, true)) {
+                    return $this->fail('The application is in production: run migrate with --force.');
+                }
+                echo "Nothing to migrate.\n";
+
+                return 0;
+            case 'config:cache':
+                @unlink($base.'/bootstrap/cache/config.php');
+                $this->write('bootstrap/cache/config.php', '<?php return '.var_export($this->app->env(), true).";\n");
+                echo "Configuration cached successfully.\n";
+
+                return 0;
+            case 'route:cache':
+                $this->write('bootstrap/cache/routes-v7.php', "<?php return ['/' => 'public/index.php'];\n");
+                echo "Routes cached successfully.\n";
+
+                return 0;
+            case 'view:cache':
+                $this->write('storage/framework/views/'.$this->app->release().'.php', "<?php // compiled\n");
+                echo "Blade templates cached successfully.\n";
+
+                return 0;
+            default:
+                return $this->fail("Command \"{$command}\" is not defined.");
+        }
+    }
+
+    private function write(string $path, string $content): void
+    {
+        if (file_put_contents($this->app->base.'/'.$path, $content) === false) {
+            throw new \RuntimeException("{$path} could not be written");
+        }
+    }
+
+    private function fail(string $message): int
+    {
+        fwrite(STDERR, $message."\n");
+
+        return 1;
+    }
+}
