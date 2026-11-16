@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"io/fs"
 	"os"
 	"slices"
 	"strings"
@@ -17,19 +18,23 @@ var laravel84 = contract.SiteProvisionParams{Name: "shop", Domain: "shop.example
 
 const sharedEnv = "site/shared/.env"
 
-// laravelDirs are the shared directories a laravel site gets, each 0750
-// (R02-D8): www-data, in the site's group, reaches storage/app/public
-// through public/storage.
-var laravelDirs = []string{
-	"site/shared",
-	"site/shared/storage",
-	"site/shared/storage/app",
-	"site/shared/storage/app/public",
-	"site/shared/storage/framework",
-	"site/shared/storage/framework/cache",
-	"site/shared/storage/framework/sessions",
-	"site/shared/storage/framework/views",
-	"site/shared/storage/logs",
+// laravelDirs are the shared directories a laravel site gets (R02-D8).
+// www-data, in the site's group, reaches storage/app/public through
+// public/storage, so that chain is 0750; the rest holds sessions, cache and
+// logs, which only the site user reads, so it is 0700.
+var laravelDirs = []struct {
+	name string
+	mode fs.FileMode
+}{
+	{"site/shared", 0o750},
+	{"site/shared/storage", 0o750},
+	{"site/shared/storage/app", 0o750},
+	{"site/shared/storage/app/public", 0o750},
+	{"site/shared/storage/framework", 0o700},
+	{"site/shared/storage/framework/cache", 0o700},
+	{"site/shared/storage/framework/sessions", 0o700},
+	{"site/shared/storage/framework/views", 0o700},
+	{"site/shared/storage/logs", 0o700},
 }
 
 // provisionLaravel provisions laravel84 with FPM 8.4 not yet running, and
@@ -86,12 +91,12 @@ func TestProvisionLaravelCreatesShared(t *testing.T) {
 		t.Error("the placeholder isn't the PHP one")
 	}
 	for _, dir := range laravelDirs {
-		n := e.help.nodes[dir]
-		if n == nil || !n.dir || n.mode != 0o750 {
-			t.Errorf("%s = %+v, want a 0750 directory", dir, n)
+		n := e.help.nodes[dir.name]
+		if n == nil || !n.dir || n.mode != dir.mode {
+			t.Errorf("%s = %+v, want a %o directory", dir.name, n, dir.mode)
 		}
-		if !slices.Contains(e.help.changes(), helperUser+" mkdir "+dir+" 750") {
-			t.Errorf("%s wasn't made 0750 explicitly: %q", dir, e.help.changes())
+		if op := fmt.Sprintf("%s mkdir %s %o", helperUser, dir.name, dir.mode); !slices.Contains(e.help.changes(), op) {
+			t.Errorf("%s wasn't made %o explicitly: %q", dir.name, dir.mode, e.help.changes())
 		}
 	}
 	env := e.help.nodes[sharedEnv]
@@ -209,7 +214,7 @@ func TestLaravelRetryFinishesShared(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := e.help.changes()[ops:]
-	want := []string{helperUser + " mkdir site/shared/storage/framework/views 750", helperUser + " write " + sharedEnv + " 600"}
+	want := []string{helperUser + " mkdir site/shared/storage/framework/views 700", helperUser + " write " + sharedEnv + " 600"}
 	if !slices.Equal(got, want) {
 		t.Errorf("the retry did %q, want %q", got, want)
 	}

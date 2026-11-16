@@ -66,7 +66,9 @@ func enforceCaps(ctx context.Context, d sysexec.Deps, homes Homes) ([]string, er
 		files, acct, err := siteLogFiles(ctx, d, homes, st)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("site %s's logs: %w", st.Name, err))
-			continue
+			if files == nil {
+				continue
+			}
 		}
 		var rootTotal, homeTotal int64
 		var archives []logFile
@@ -162,7 +164,10 @@ const laravelLogDir = "site/shared/storage/logs"
 // siteLogFiles lists a site's log files: root's, then the home's through
 // the helper (skipped while the site user doesn't exist): logs/, and for a
 // laravel site its shared storage's logs. A home folder that isn't there
-// has nothing to count.
+// has nothing to count. If root's folder or logs/ can't be listed, it
+// returns no files, and the site is skipped. If only the shared logs can't
+// be, it returns the rest with the error: root's budget and logs/'s still
+// run, and with less counted, the home loses no more than it would have.
 func siteLogFiles(ctx context.Context, d sysexec.Deps, homes Homes, st sites.State) ([]logFile, helper.Account, error) {
 	name := st.Name
 	var files []logFile
@@ -201,6 +206,9 @@ func siteLogFiles(ctx context.Context, d sysexec.Deps, homes Homes, st sites.Sta
 		l, err := homes.Helper.List(ctx, acct, dir)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
+		}
+		if err != nil && dir == laravelLogDir {
+			return files, acct, err
 		}
 		if err != nil {
 			return nil, acct, err

@@ -472,3 +472,37 @@ func TestCapLaravelLogsOnlyForLaravelSites(t *testing.T) {
 		t.Errorf("a static site listed %v, want only logs", e.h.dirs)
 	}
 }
+
+// failingShared is a helper whose listing of a laravel site's shared logs
+// fails, while logs/ lists.
+type failingShared struct{ *homeHelper }
+
+func (f failingShared) List(ctx context.Context, a helper.Account, dir string) (helper.Listing, error) {
+	if dir == laravelLogs {
+		return helper.Listing{}, fmt.Errorf("list %s: helper failed", dir)
+	}
+	return f.homeHelper.List(ctx, a, dir)
+}
+
+// The shared logs' listing failing is reported, but the site's other
+// budgets still run: root's Nginx archives and the home's logs/ archives
+// are still capped from what was listed.
+func TestCapLaravelListingFailureKeepsOtherBudgets(t *testing.T) {
+	e := newCapEnv(t, 2*blk)
+	e.laravel()
+	e.root("access.log", blk, 0)
+	e.root("access.log-20261101-1761955200.gz", 2*blk, 50*time.Hour)
+	e.root("access.log-20261102-1762041600.gz", blk, 26*time.Hour)
+	e.home("php-error.log-20261101-1761955200.gz", blk, 40*time.Hour, 0o640)
+	homes := e.homes
+	homes.Helper = failingShared{e.h}
+	deleted, err := enforceCaps(context.Background(), e.d, homes)
+	if err == nil || !strings.Contains(err.Error(), "site shop's logs") || !strings.Contains(err.Error(), laravelLogs) {
+		t.Errorf("err = %v, want the shared listing's failure", err)
+	}
+	// 5 units: the home archive goes (4), then root's oldest (2), and that fits.
+	want := []string{"/home/s_shop/logs/php-error.log-20261101-1761955200.gz", e.dir + "/access.log-20261101-1761955200.gz"}
+	if !slices.Equal(deleted, want) {
+		t.Errorf("deleted %v, want %v", deleted, want)
+	}
+}

@@ -316,18 +316,23 @@ func ensureSiteFiles(ctx context.Context, h Helper, a helper.Account, p contract
 }
 
 // laravelShared are a laravel site's shared directories (R02-D8), parents
-// first. Each gets 0750 explicitly, not whatever mkdir -p leaves: www-data,
-// in the site's group, reaches storage/app/public through public/storage.
-var laravelShared = []string{
-	"site/shared",
-	"site/shared/storage",
-	"site/shared/storage/app",
-	"site/shared/storage/app/public",
-	"site/shared/storage/framework",
-	"site/shared/storage/framework/cache",
-	"site/shared/storage/framework/sessions",
-	"site/shared/storage/framework/views",
-	"site/shared/storage/logs",
+// first, each made with its mode explicitly, not whatever mkdir -p leaves.
+// www-data, in the site's group, reaches storage/app/public through
+// public/storage, so that chain is 0750. Sessions, cache, compiled views
+// and logs are the site user's alone: 0700.
+var laravelShared = []struct {
+	name string
+	mode fs.FileMode
+}{
+	{"site/shared", 0o750},
+	{"site/shared/storage", 0o750},
+	{"site/shared/storage/app", 0o750},
+	{"site/shared/storage/app/public", 0o750},
+	{"site/shared/storage/framework", 0o700},
+	{"site/shared/storage/framework/cache", 0o700},
+	{"site/shared/storage/framework/sessions", 0o700},
+	{"site/shared/storage/framework/views", 0o700},
+	{"site/shared/storage/logs", 0o700},
 }
 
 // ensureLaravelShared is step 2 for a laravel site, as the site user
@@ -337,13 +342,15 @@ var laravelShared = []string{
 // again: a new key would break everything the app encrypted, and the owner
 // may have changed it.
 func ensureLaravelShared(ctx context.Context, h Helper, a helper.Account, domain contract.Domain) error {
+	// Like the rest of step 2, a directory already there is left as it is:
+	// a retry creates only what is missing.
 	for _, dir := range laravelShared {
-		if _, err := h.Stat(ctx, a, dir); err == nil {
+		if _, err := h.Stat(ctx, a, dir.name); err == nil {
 			continue
 		} else if !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
-		if err := h.Mkdir(ctx, a, dir, 0o750); err != nil {
+		if err := h.Mkdir(ctx, a, dir.name, dir.mode); err != nil {
 			return err
 		}
 	}
