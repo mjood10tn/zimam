@@ -40,10 +40,14 @@ return [
             'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
             // §7.1: WAL lets the queue worker, the scheduler and web requests read
             // while one of them writes; writers wait up to 5 s for the lock.
+            // Transactions take the write lock at BEGIN: a deferred one that
+            // reads and then writes (the cache's increment) fails at once with
+            // "database is locked" when another connection wrote in between,
+            // without waiting for the busy timeout.
             'busy_timeout' => 5000,
             'journal_mode' => 'wal',
             'synchronous' => 'normal',
-            'transaction_mode' => 'DEFERRED',
+            'transaction_mode' => 'IMMEDIATE',
         ],
 
         'mysql' => [

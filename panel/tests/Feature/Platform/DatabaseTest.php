@@ -38,6 +38,52 @@ final class DatabaseTest extends TestCase
     }
 
     /**
+     * A transaction that reads and then writes (the cache's increment, which
+     * the webhook rate limiter uses) must not fail with "database is locked"
+     * when another connection writes in between. Under WAL a deferred
+     * transaction whose snapshot went stale fails at once, without waiting
+     * for the busy timeout; an immediate one takes the write lock at BEGIN,
+     * so the other writer waits instead.
+     */
+    public function testReadThenWriteTransactionHoldsTheWriteLock(): void
+    {
+        $dir = sys_get_temp_dir().DIRECTORY_SEPARATOR.'zimam-lock-'.bin2hex(random_bytes(6));
+        File::ensureDirectoryExists($dir);
+        $file = $dir.DIRECTORY_SEPARATOR.'database.sqlite';
+        touch($file);
+        config(['database.connections.lock_check' => ['database' => $file] + config('database.connections.sqlite')]);
+
+        try {
+            $db = DB::connection('lock_check');
+            $db->statement('CREATE TABLE counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL)');
+            $db->insert("INSERT INTO counters VALUES ('hits', 1)");
+
+            $other = new \PDO('sqlite:'.$file);
+            $other->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+            $other->exec('PRAGMA busy_timeout = 0');
+            $otherWrote = null;
+
+            $db->transaction(function () use ($db, $other, &$otherWrote): void {
+                $value = (int) $db->selectOne("SELECT value FROM counters WHERE name = 'hits'")->value;
+                try {
+                    $other->exec("UPDATE counters SET value = 100 WHERE name = 'hits'");
+                    $otherWrote = true;
+                } catch (\PDOException) {
+                    $otherWrote = false;
+                }
+                $db->update("UPDATE counters SET value = ? WHERE name = 'hits'", [$value + 1]);
+            });
+
+            $this->assertFalse($otherWrote, 'the other connection wrote inside the transaction');
+            $this->assertSame(2, (int) $db->selectOne("SELECT value FROM counters WHERE name = 'hits'")->value);
+        } finally {
+            $other = null;
+            DB::purge('lock_check');
+            File::deleteDirectory($dir);
+        }
+    }
+
+    /**
      * §7.1: the queue, the cache and the sessions live in SQLite too, so the
      * panel depends on no other service. That holds with the server's .env
      * naming them or not.
