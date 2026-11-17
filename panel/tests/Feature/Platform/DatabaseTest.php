@@ -47,6 +47,12 @@ final class DatabaseTest extends TestCase
      */
     public function testReadThenWriteTransactionHoldsTheWriteLock(): void
     {
+        if (PHP_VERSION_ID < 80400) {
+            // Before PHP 8.4 Laravel begins with PDO's own deferred transaction
+            // and ignores transaction_mode. The panel runs on the newest
+            // allowlisted PHP, which is past that.
+            $this->markTestSkipped('transaction_mode needs PHP 8.4 or later');
+        }
         $dir = sys_get_temp_dir().DIRECTORY_SEPARATOR.'zimam-lock-'.bin2hex(random_bytes(6));
         File::ensureDirectoryExists($dir);
         $file = $dir.DIRECTORY_SEPARATOR.'database.sqlite';
