@@ -44,6 +44,12 @@ cp "$E2E_WORK/state.env" "$prev/state.env"
 log "the previous release: $tag as $version, in $tree"
 trap remove_tree EXIT
 git -C "$E2E_ROOT" worktree add -q --detach "$tree" "refs/tags/$tag"
+# A tag from before common.sh read E2E_PORT sets the release server's port
+# itself, which would put the wrong URL in the release when a second run on
+# this host serves on another port. Only the port line of the throwaway
+# checkout changes, and only then.
+# shellcheck disable=SC2016 # the line's own ${...}
+sed -i 's/^E2E_PORT=8080$/E2E_PORT=${E2E_PORT:-8080}/' "$tree/e2e/scripts/common.sh"
 E2E_WORK=$prev E2E_VERSION=$version bash "$tree/e2e/scripts/build.sh"
 
 built=$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["version"])' "$prev/dist/manifest.json")
