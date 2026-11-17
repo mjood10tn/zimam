@@ -94,11 +94,11 @@ func checkSiteDestroy(d sysexec.Deps, p contract.SiteDestroyParams) (sites.State
 // not_found, as the precheck does.
 //
 // A site with a Valkey user needs Valkey installed and answering before
-// anything changes, or the destroy is refused with a conflict. Its user is
-// removed first of all, by clearing the hash in the state and applying the
-// users (valkey.ApplyUsers), which closes the user's connections; if that
-// fails, the state has the hash again and nothing else was touched. A site
-// without a hash never touches Valkey.
+// anything changes, or the destroy is refused with a conflict. Its keys and
+// user go first of all (valkey.RemoveSiteUser: purge, remove the user, purge
+// again), and the hash leaves the state only after the last purge, so a
+// failure leaves a site that is destroyed again by running the same steps. A
+// site without a hash never touches Valkey.
 //
 // MySQL goes next, before Nginx, the pools and the site's user and files: a
 // failure there leaves the site as it was, serving and able to be destroyed
@@ -123,12 +123,18 @@ func siteDestroy(ctx context.Context, j *jobs.Context, p contract.Params) (any, 
 		if err := requireValkeyRunning(ctx, d); err != nil {
 			return nil, err
 		}
-		var previous string
-		if err := valkey.ApplyUsers(ctx, d, cacheUsers(d.Paths), cacheHashChange(d, params.Name, "", &previous)); err != nil {
+		clear := func() error {
+			st, err := loadDBSite(d, params.Name)
+			if err != nil {
+				return err
+			}
+			st.CacheUserHash = ""
+			return sites.Save(d.Paths, st)
+		}
+		if err := valkey.RemoveSiteUser(ctx, d, cacheUsers(d.Paths), params.Name, clear); err != nil {
 			return nil, err
 		}
-		// The connections of a removed user are closed by Valkey itself.
-		d.Logf("Removed the Valkey user of site %s", params.Name)
+		d.Logf("Removed the Valkey user of site %s and its keys", params.Name)
 		// The state on disk no longer has the hash; the copy in hand must not
 		// write it back when a MySQL step saves it.
 		st.CacheUserHash = ""

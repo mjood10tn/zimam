@@ -1,12 +1,15 @@
 package commands_test
 
 import (
+	"os"
 	"slices"
 	"strings"
 	"testing"
 
 	"zimam/agent/contract"
 	"zimam/agent/internal/sites"
+	"zimam/agent/internal/sysexec"
+	"zimam/agent/internal/valkey"
 )
 
 // shopWithCache is a server where Valkey runs and shop and blog both have a
@@ -20,6 +23,7 @@ func shopWithCache(t *testing.T) *dbEnv {
 		e.saveSite(t, st)
 	}
 	e.run.Add(cliPing)
+	e.addPurge("shop")
 	return e
 }
 
@@ -37,7 +41,7 @@ func TestDestroyRemovesValkeyUser(t *testing.T) {
 		t.Errorf("users.acl =\n%s", acl)
 	}
 	// Removing a user closes its connections by itself; nothing is killed.
-	if got := e.valkeyRuns(); !slices.Equal(got, []string{"PING", "ACL LOAD"}) {
+	if got := e.valkeyRuns(); !slices.Equal(got, []string{"PING", "PURGE s_shop:*", "ACL LOAD", "PURGE s_shop:*"}) {
 		t.Errorf("valkey-cli ran %q", got)
 	}
 	if stateExists(e, "shop") {
@@ -172,6 +176,7 @@ func TestDestroyValkeyThenMySQL(t *testing.T) {
 	st.DBUser = true
 	e.saveSite(t, st)
 	e.run.Add(cliPing)
+	e.addPurge("shop")
 	e.run.Add(cliLoad)
 	e.answer("", "")
 	e.answer("", "")
@@ -182,12 +187,12 @@ func TestDestroyValkeyThenMySQL(t *testing.T) {
 	var order []string
 	for _, c := range e.run.Calls() {
 		if c.Path == valkeyCli {
-			order = append(order, "valkey "+strings.Join(c.Args[8:], " "))
+			order = append(order, "valkey "+strings.Join(valkeyWords(c), " "))
 		} else {
 			order = append(order, "mysql")
 		}
 	}
-	if want := []string{"valkey PING", "valkey ACL LOAD", "mysql", "mysql", "mysql"}; !slices.Equal(order, want) {
+	if want := []string{"valkey PING", "valkey PURGE s_shop:*", "valkey ACL LOAD", "valkey PURGE s_shop:*", "mysql", "mysql", "mysql"}; !slices.Equal(order, want) {
 		t.Errorf("order %q, want %q", order, want)
 	}
 	got := e.site(t, "shop")
@@ -201,4 +206,76 @@ func TestDestroyValkeyThenMySQL(t *testing.T) {
 
 func newState(name contract.SiteName) sites.State {
 	return sites.State{Name: name, Domain: contract.Domain(string(name) + ".example.com"), Type: contract.SiteStatic, TemplateVersion: 1, Security: sites.DefaultSecurity()}
+}
+
+// The hash leaves the state only after the last purge, and the step that
+// failed is repeated by running the destroy again, which ends the same way.
+func TestDestroyFailureAtEachValkeyStepConverges(t *testing.T) {
+	purgeFail := cli("ERR boom\n", 1, "EVAL", valkey.PurgeScript, "0", "0", "s_shop:*")
+	for name, tc := range map[string]struct {
+		scripts      []sysexec.Script
+		wantRuns     []string
+		aclHasShop   bool
+		hashRemained bool
+	}{
+		"the first purge fails": {
+			scripts:      []sysexec.Script{purgeFail},
+			wantRuns:     []string{"PING", "PURGE s_shop:*"},
+			aclHasShop:   true,
+			hashRemained: true,
+		},
+		"the load fails": {
+			scripts:      append(cliPurge("shop", 3, 0), cli("ERR bad\n", 1, "ACL", "LOAD"), cliLoad),
+			wantRuns:     []string{"PING", "PURGE s_shop:*", "ACL LOAD", "ACL LOAD"},
+			aclHasShop:   true,
+			hashRemained: true,
+		},
+		"the second purge fails": {
+			scripts:      []sysexec.Script{cli("0 3\n", 0, "EVAL", valkey.PurgeScript, "0", "0", "s_shop:*"), cliLoad, purgeFail},
+			wantRuns:     []string{"PING", "PURGE s_shop:*", "ACL LOAD", "PURGE s_shop:*"},
+			aclHasShop:   false, // the live users lack it; the state still has the hash
+			hashRemained: true,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := withValkey(t, newDBEnv(t))
+			for n, pw := range map[contract.SiteName]contract.ServicePassword{"shop": pwOne, "blog": pwTwo} {
+				st := e.site(t, n)
+				st.CacheUserHash = sum(pw)
+				e.saveSite(t, st)
+			}
+			if err := os.WriteFile(e.p.ValkeyACL(), []byte(e.acl(t)+aclLine("blog", pwTwo)+aclLine("shop", pwOne)), 0o640); err != nil {
+				t.Fatal(err)
+			}
+			e.run.Add(cliPing)
+			for _, s := range tc.scripts {
+				e.run.Add(s)
+			}
+			if _, err := e.job(t, "site.destroy", destroyParams(false)); err == nil {
+				t.Fatal("the destroy passed")
+			}
+			if got := e.valkeyRuns(); !slices.Equal(got, tc.wantRuns) {
+				t.Errorf("valkey-cli ran %q, want %q", got, tc.wantRuns)
+			}
+			if !stateExists(e, "shop") || (e.site(t, "shop").CacheUserHash != "") != tc.hashRemained {
+				t.Errorf("state: exists %v, hash %q; the hash stays until the last purge", stateExists(e, "shop"), e.site(t, "shop").CacheUserHash)
+			}
+			if has := strings.Contains(e.acl(t), "s_shop"); has != tc.aclHasShop {
+				t.Errorf("users.acl has s_shop = %v, want %v", has, tc.aclHasShop)
+			}
+			// Again, Valkey well: the same steps run and the destroy ends.
+			e.run = sysexec.NewFakeRunner(append([]sysexec.Script{cliPing, cliLoad}, cliPurge("shop", 0, 0)...)...)
+			e.d.Run = e.run
+			if _, err := e.job(t, "site.destroy", destroyParams(false)); err != nil {
+				t.Fatal(err)
+			}
+			want := []string{"PING", "PURGE s_shop:*", "ACL LOAD", "PURGE s_shop:*"}
+			if got := e.valkeyRuns(); !slices.Equal(got, want) {
+				t.Errorf("the second run made %q, want %q", got, want)
+			}
+			if stateExists(e, "shop") || strings.Contains(e.acl(t), "s_shop") || !strings.Contains(e.acl(t), aclLine("blog", pwTwo)) {
+				t.Errorf("the second destroy didn't end: state %v, users.acl\n%s", stateExists(e, "shop"), e.acl(t))
+			}
+		})
+	}
 }

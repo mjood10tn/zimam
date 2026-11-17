@@ -93,9 +93,19 @@ func KillUserConnections(ctx context.Context, d sysexec.Deps, site contract.Site
 // A process that is killed between the change and the load leaves the state
 // ahead of the file; the next apply or install renders from the state.
 func ApplyUsers(ctx context.Context, d sysexec.Deps, users func() ([]SiteUser, error), change func() (revert func() error, err error)) error {
+	unlock, err := lockUsers(ctx, d)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return applyLocked(ctx, d, users, change)
+}
+
+// lockUsers takes the lock on Valkey's users that valkey.install also takes.
+func lockUsers(ctx context.Context, d sysexec.Deps) (func(), error) {
 	p := d.Paths
 	if err := os.MkdirAll(p.LocksDir(), 0o700); err != nil {
-		return err
+		return nil, err
 	}
 	lockCtx, cancel := context.WithTimeout(ctx, lockWait)
 	unlock, err := sysexec.Lock(lockCtx, p.ValkeyACLLock())
@@ -103,11 +113,16 @@ func ApplyUsers(ctx context.Context, d sysexec.Deps, users func() ([]SiteUser, e
 	cancel()
 	if err != nil {
 		if timedOut {
-			return fmt.Errorf("Valkey's users are being changed by another job, which can take several minutes after an install; try again shortly: %w", err)
+			return nil, fmt.Errorf("Valkey's users are being changed by another job, which can take several minutes after an install; try again shortly: %w", err)
 		}
-		return fmt.Errorf("waiting for the lock on Valkey's users: %w", err)
+		return nil, fmt.Errorf("waiting for the lock on Valkey's users: %w", err)
 	}
-	defer unlock()
+	return unlock, nil
+}
+
+// applyLocked is ApplyUsers for a caller that holds the lock.
+func applyLocked(ctx context.Context, d sysexec.Deps, users func() ([]SiteUser, error), change func() (revert func() error, err error)) error {
+	p := d.Paths
 
 	pass, found, err := readAdminPassword(d)
 	if err != nil {

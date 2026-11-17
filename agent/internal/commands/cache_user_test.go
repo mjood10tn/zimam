@@ -15,6 +15,7 @@ import (
 	"zimam/agent/internal/jobs"
 	"zimam/agent/internal/services"
 	"zimam/agent/internal/sysexec"
+	"zimam/agent/internal/valkey"
 )
 
 const (
@@ -87,7 +88,7 @@ func (e *dbEnv) valkeyRuns() []string {
 	var out []string
 	for _, c := range e.run.Calls() {
 		if c.Path == valkeyCli {
-			out = append(out, strings.Join(c.Args[8:], " "))
+			out = append(out, strings.Join(valkeyWords(c), " "))
 		}
 	}
 	return out
@@ -341,4 +342,29 @@ func TestCacheUserRunsOnlyValkeyCli(t *testing.T) {
 			t.Errorf("ran %s", c.Path)
 		}
 	}
+}
+
+// cliPurge scripts the first purge of a site's keys, then the second, as the
+// admin: each a single page that ends the scan.
+func cliPurge(site string, first, second int) []sysexec.Script {
+	step := func(n int) sysexec.Script {
+		return cli(fmt.Sprintf("0 %d\n", n), 0, "EVAL", valkey.PurgeScript, "0", "0", "s_"+site+":*")
+	}
+	return []sysexec.Script{step(first), step(second)}
+}
+
+func (e *dbEnv) addPurge(site string) {
+	for _, s := range cliPurge(site, 3, 1) {
+		e.run.Add(s)
+	}
+}
+
+// valkeyWords are the words of a valkey-cli call after its connection
+// options, with the purge script shortened to PURGE and its pattern.
+func valkeyWords(c sysexec.Call) []string {
+	words := c.Args[8:]
+	if words[0] == "EVAL" && words[1] == valkey.PurgeScript {
+		return []string{"PURGE", words[4]}
+	}
+	return words
 }

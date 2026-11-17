@@ -289,3 +289,112 @@ func TestRootSiteUsers(t *testing.T) {
 		}
 	})
 }
+
+// A destroyed site leaves no key and no connection, another site whose name
+// starts the same is untouched, and a site made again under the name reads
+// nothing old. Key names with a space and a line break are written by the
+// admin, which is how they could break a purge that read names from
+// valkey-cli's output.
+func TestRootDestroyPurgesKeys(t *testing.T) {
+	d := rootDeps(t)
+	ctx := context.Background()
+	var st states
+	if ok, err := Installed(d); err != nil {
+		t.Fatal(err)
+	} else if !ok {
+		if _, err := Install(ctx, d, st.users); err != nil {
+			t.Fatalf("Install: %v", err)
+		}
+	}
+	admin := func(args ...string) string {
+		t.Helper()
+		out, err := cliAdmin(ctx, d, args...)
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		return out
+	}
+	if err := ApplyUsers(ctx, d, st.users, st.setting("shop", passA1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyUsers(ctx, d, st.users, st.setting("shop-x", passB1)); err != nil {
+		t.Fatal(err)
+	}
+
+	odd := []string{"s_shop:plain", "s_shop:with space", "s_shop:line\nbreak", "s_shop:quote\"it's", "s_shop:tab\tand\\slash", "s_shop:é-ünï", "s_shop:", "s_shop:*star", "s_shop:[x]"}
+	for _, k := range odd {
+		admin("SET", k, "old")
+	}
+	others := []string{"s_shop-x:plain", "s_shop-x:with space", "s_shop-x:line\nbreak", "s_shopx:a", "s_sho:a", "other:s_shop:a"}
+	for _, k := range others {
+		admin("SET", k, "keep")
+	}
+	if out := asUser("s_shop", passA1, "SET", "s_shop:written-by-site", "1"); out != "OK" {
+		t.Fatalf("the site's SET: %q", out)
+	}
+	open := dialAs(t, "s_shop", passA1)
+
+	// Timing: 50,000 keys of the site.
+	t.Run("50000 keys", func(t *testing.T) {
+		admin("EVAL", "for i = 1, 50000 do redis.call('SET', 's_shop:bulk:' .. i, i) end return 1", "0")
+		start := time.Now()
+		n, err := PurgeSiteKeys(ctx, d, "shop")
+		took := time.Since(start)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("purged %d keys (50,000 bulk + %d others of the site) in %s", n, len(odd)+1, took)
+		if n != 50000+len(odd)+1 {
+			t.Errorf("purged %d, want %d", n, 50000+len(odd)+1)
+		}
+		// Put the site's odd keys back for the destroy below.
+		for _, k := range odd {
+			admin("SET", k, "old")
+		}
+		admin("SET", "s_shop:written-by-site", "1")
+	})
+
+	cleared := false
+	err := RemoveSiteUser(ctx, d, st.users, "shop", func() error {
+		delete(st.hash, "shop")
+		cleared = true
+		return nil
+	})
+	if err != nil || !cleared {
+		t.Fatalf("RemoveSiteUser = %v (cleared %v)", err, cleared)
+	}
+	if got := admin("EVAL", "return #redis.call('KEYS', ARGV[1])", "0", "s_shop:*"); got != "0" {
+		t.Errorf("%s keys s_shop:* remain", got)
+	}
+	for _, k := range append(append([]string{}, others...), "s_shop-x:plain") {
+		if got := admin("EXISTS", k); got != "1" {
+			t.Errorf("the key %q of another site is gone (EXISTS %s)", k, got)
+		}
+	}
+	if got := admin("EVAL", "return #redis.call('KEYS', ARGV[1])", "0", "s_shop-x:*"); got != "3" {
+		t.Errorf("s_shop-x:* has %s keys, want 3", got)
+	}
+	if out, err := open.do("PING"); err == nil {
+		t.Errorf("the site's connection is still open: %q", out)
+	}
+	if out := asUser("s_shop", passA1, "PING"); !strings.Contains(out, "WRONGPASS") {
+		t.Errorf("the removed user logged in: %q", out)
+	}
+	if !strings.Contains(admin("ACL", "USERS"), "s_shop-x") || strings.Contains(strings.ReplaceAll(admin("ACL", "USERS"), "s_shop-x", ""), "s_shop") {
+		t.Errorf("live users: %q", admin("ACL", "USERS"))
+	}
+
+	// A site made again under the name starts empty.
+	if err := ApplyUsers(ctx, d, st.users, st.setting("shop", passA2)); err != nil {
+		t.Fatal(err)
+	}
+	if out := asUser("s_shop", passA2, "GET", "s_shop:plain"); out != "" {
+		t.Errorf("the new site read %q", out)
+	}
+	if out := asUser("s_shop", passA2, "SCAN", "0", "MATCH", "s_shop:*"); out != "0" {
+		t.Errorf("the new site sees keys: %q", out)
+	}
+	if out := asUser("s_shop-x", passB1, "GET", "s_shop-x:plain"); out != "keep" {
+		t.Errorf("the other site's key: %q", out)
+	}
+}
