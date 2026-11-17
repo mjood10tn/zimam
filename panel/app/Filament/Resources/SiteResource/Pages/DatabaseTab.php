@@ -7,6 +7,7 @@ use App\Actions\WriteCredentialsToEnv;
 use App\Agent\AgentHealth;
 use App\Agent\Commands\DbUser;
 use App\Agent\Commands\ServiceUserCommand;
+use App\Agent\ServerStatus;
 use App\Filament\Concerns\RotatesServicePassword;
 use App\Models\ServerService;
 use App\Models\Site;
@@ -45,9 +46,13 @@ class DatabaseTab extends Component implements HasActions, HasSchemas
         $this->envDatabase = $this->site->databases()->orderBy('name')->value('name');
     }
 
+    /** Whether the agent last said MySQL is installed (system.status, cached for a few seconds), else what the panel's row says. */
     public function mysqlInstalled(): bool
     {
-        return ServerService::named(ServerService::MYSQL)?->status === ServerService::INSTALLED;
+        $status = ServerStatus::current();
+
+        return $status?->service(ServerService::MYSQL)['installed']
+            ?? ServerService::named(ServerService::MYSQL)?->status === ServerService::INSTALLED;
     }
 
     protected function credentialKind(): string

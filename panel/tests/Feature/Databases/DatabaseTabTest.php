@@ -2,9 +2,12 @@
 
 namespace Tests\Feature\Databases;
 
+use App\Agent\AgentClient;
+use App\Agent\AuditingAgentClient;
 use App\Agent\Exceptions\AgentBusy;
 use App\Agent\Exceptions\AgentConflict;
 use App\Agent\Exceptions\AgentUnavailable;
+use App\Agent\FakeAgentClient;
 use App\Filament\Resources\SiteResource\Pages\DatabaseTab;
 use App\Filament\Resources\SiteResource\Pages\ViewSite;
 use App\Models\AgentAction;
@@ -15,6 +18,7 @@ use App\Models\Site;
 use App\Models\SiteCredential;
 use Filament\Notifications\Notification;
 use Illuminate\Log\Events\MessageLogged;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
@@ -533,5 +537,24 @@ final class DatabaseTabTest extends DatabasesTestCase
         $tab->call('writeEnv', $password)->assertNotified(__('zimam.agent.paused'));
 
         $this->assertSame([], $this->submitted('site.env.write'));
+    }
+
+    /** The agent's status comes first, as on the Databases page and the Cache tab: with no panel row yet, an installed MySQL is installed. */
+    public function testInstalledFollowsTheStatusBeforeTheRow(): void
+    {
+        $site = $this->site();
+        $this->agent->installMysql();
+        $this->assertSame(0, ServerService::count());
+
+        $this->tab($site)
+            ->assertDontSee(__('zimam.databases.not_installed'))
+            ->assertActionEnabled('rotate');
+
+        // And the other way: a row that says installed doesn't outlast a status that says it isn't.
+        ServerService::create(['name' => ServerService::MYSQL, 'status' => ServerService::INSTALLED, 'version' => '8.4.13']);
+        $bare = new FakeAgentClient;
+        $this->app->instance(AgentClient::class, new AuditingAgentClient($bare));
+        Cache::forget('zimam.system_status');
+        $this->tab($site)->assertSee(__('zimam.databases.not_installed'));
     }
 }

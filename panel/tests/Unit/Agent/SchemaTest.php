@@ -54,30 +54,25 @@ final class SchemaTest extends TestCase
 {
     private const JOB = '01JBX7Q3A1B2C3D4E5F6G7H8J9';
 
-    /** §5.7's RuntimeMaxSec for every job command, plus e2e.sleep's (D22). */
-    private const RUNTIME_MAX = [
-        'php.install' => 900,
-        'php.uninstall' => 900,
-        'site.provision' => 300,
-        'site.php' => 300,
-        'site.security' => 300,
-        'site.destroy' => 300,
-        'cert.issue' => 300,
-        'security.check' => 600,
-        'php.default' => 120,
-        'logs.policy' => 120,
-        'site.repo' => 600,
-        'site.deploy' => 1800,
-        'site.rollback' => 300,
-        'site.env.write' => 120,
-        'mysql.install' => 900,
-        'db.create' => 120,
-        'db.drop' => 300,
-        'db.user' => 120,
-        'valkey.install' => 600,
-        'cache.user' => 120,
-        'e2e.sleep' => 180,
-    ];
+    /**
+     * The agent's RuntimeMaxSec for every job command, read from the files that
+     * define them (the e2e-only commands included), so no second list can drift.
+     *
+     * @return array<string, int>
+     */
+    private static function agentRuntimeLimits(): array
+    {
+        $limits = [];
+        foreach (['limits.go', 'limits_e2e.go'] as $file) {
+            $source = file_get_contents(base_path("../agent/internal/jobs/{$file}"));
+            preg_match_all('/(?:^\s*|limits\[)"([a-z0-9.]+)"\]?(?::|\s*=)\s*(?:Limits)?\{[^}]*RuntimeMaxSec:\s*(\d+)/m', $source, $hits, PREG_SET_ORDER);
+            foreach ($hits as $hit) {
+                $limits[$hit[1]] = (int) $hit[2];
+            }
+        }
+
+        return $limits;
+    }
 
     /** @return array<string, array{AgentCommand}> one of every command the panel sends */
     public static function commands(): array
@@ -261,6 +256,17 @@ final class SchemaTest extends TestCase
         $this->assertSame(['content' => "APP_KEY=x\n"], $read);
     }
 
+    /** A service the agent couldn't read is left out of system.status: the schema allows it, for either service. */
+    public function testStatusMayLeaveAServiceOut(): void
+    {
+        $fake = new FakeAgentClient;
+        foreach ([new \stdClass, ['mysql' => null], ['valkey' => ['installed' => false, 'version' => '', 'active' => false]]] as $services) {
+            $data = $fake->call(new SystemStatus)->data;
+            $data['services'] = $services;
+            $this->assertResult('system.status', $data, 'system.status with services '.json_encode($services));
+        }
+    }
+
     /** What the fake's jobs answer when they succeed matches each command's result schema. */
     public function testFakeJobResultsMatchSchemas(): void
     {
@@ -346,8 +352,9 @@ final class SchemaTest extends TestCase
 
             return;
         }
-        $this->assertArrayHasKey($command->name(), self::RUNTIME_MAX, 'a job command missing from §5.7');
-        $this->assertSame(self::RUNTIME_MAX[$command->name()], $command->runtimeMaxSeconds());
+        $limits = self::agentRuntimeLimits();
+        $this->assertArrayHasKey($command->name(), $limits, 'a job command the agent has no limits for');
+        $this->assertSame($limits[$command->name()], $command->runtimeMaxSeconds());
     }
 
     /**

@@ -106,4 +106,28 @@ final class DeleteSiteDatabasesTest extends DatabasesTestCase
         $this->assertSame(Site::FAILED, $site->refresh()->status);
         $this->assertSame(['s_shop_main'], Database::pluck('name')->all());
     }
+
+    /**
+     * A destroy that failed may already have removed the MySQL and Valkey
+     * users, so no credential row is left to offer a rotation for a user that
+     * may be gone.
+     */
+    public function testFailedDestroyForgetsTheCredentialRows(): void
+    {
+        $site = $this->site();
+        $other = $this->site('blog');
+        foreach ([$site, $other] as $s) {
+            foreach ([SiteCredential::MYSQL, SiteCredential::VALKEY] as $kind) {
+                SiteCredential::create(['site_id' => $s->id, 'kind' => $kind, 'username' => "s_{$s->name}", 'rotated_at' => now()]);
+            }
+        }
+        $this->agent->scriptJob('site.destroy', ['running', 'failed'], errorCode: 'internal', message: 'removing the site failed');
+        $this->siteView($site)->callAction('delete', ['current_password' => self::PASSWORD]);
+
+        $this->trackToTheEnd(AgentJob::sole());
+
+        $this->assertSame(Site::FAILED, $site->refresh()->status);
+        $this->assertSame(0, SiteCredential::where('site_id', $site->id)->count());
+        $this->assertSame(2, SiteCredential::where('site_id', $other->id)->count(), 'another site\'s rows are kept');
+    }
 }

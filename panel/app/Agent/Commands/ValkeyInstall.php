@@ -25,6 +25,6 @@ final class ValkeyInstall extends AgentCommand
 
     public function runtimeMaxSeconds(): ?int
     {
-        return 600;
+        return 900;
     }
 }
