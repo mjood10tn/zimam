@@ -404,7 +404,7 @@ func breakState(t *testing.T, e *dbEnv, name contract.SiteName) func() {
 }
 
 func privRow(kind, user, host, object string) string {
-	return kind + "\t" + user + "\t" + host + "\t" + strings.ReplaceAll(object, `\`, `\`) + "\n"
+	return kind + "\t" + user + "\t" + host + "\t" + strings.ReplaceAll(object, `\`, `\\`) + "\n"
 }
 
 // An account that holds anything beyond grants on the site's own databases

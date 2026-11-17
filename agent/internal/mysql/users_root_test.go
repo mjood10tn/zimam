@@ -501,3 +501,51 @@ func TestDbUserRefusesForeignPrivilegesAgainstRealMySQL(t *testing.T) {
 		}
 	}
 }
+
+// A site's user can create a procedure and a function in its own database.
+// MySQL gives a routine's creator EXECUTE and ALTER ROUTINE on it by adding
+// a row to mysql.procs_priv unless automatic_sp_privileges is off; such a
+// row would outlive the database, so none may appear, or the later drop,
+// create and password commands would meet it.
+func TestRoutinesLeaveNoGrantRowsAgainstRealMySQL(t *testing.T) {
+	const (
+		pw contract.ServicePassword = "Rr1_rrrrrrrrrrrrrrrrrrrrrrrrrr-R"
+	)
+	e := newUserEnv(t)
+	e.wipe("ur")
+	t.Cleanup(func() { e.wipe("ur") })
+	e.newSite("ur")
+	must := func(command string, p contract.Params) {
+		t.Helper()
+		if err := e.run(command, p); err != nil {
+			t.Fatalf("%s: %v", command, err)
+		}
+	}
+	must("db.create", &contract.DbCreateParams{Site: "ur", Database: "s_ur_main"})
+	must("db.user", &contract.DbUserParams{Site: "ur", Password: pw})
+	for _, sql := range []string{
+		"CREATE PROCEDURE s_ur_main.p() SELECT 1",
+		"CREATE FUNCTION s_ur_main.f() RETURNS INT DETERMINISTIC RETURN 1",
+	} {
+		if out, err := loginAs("s_ur", pw, false, sql); err != nil {
+			t.Fatalf("%s: %v\n%s", sql, err, out)
+		}
+	}
+	rows := rootOut(t, "SELECT CONCAT(User, '@', Host, ' ', Db, '.', Routine_name, ' ', Proc_priv) FROM mysql.procs_priv WHERE Db = 's_ur_main'")
+	t.Logf("procs_priv rows for the database after the routines were created: %q", rows)
+	t.Logf("automatic_sp_privileges = %s", rootOut(t, "SELECT @@automatic_sp_privileges"))
+	if rows != "" {
+		t.Fatalf("creating routines left rows in mysql.procs_priv: %q", rows)
+	}
+	for _, p := range []struct {
+		command string
+		params  contract.Params
+	}{
+		{"db.user", &contract.DbUserParams{Site: "ur", Password: pw}},
+		{"db.drop", &contract.DbDropParams{Site: "ur", Database: "s_ur_main"}},
+		{"db.create", &contract.DbCreateParams{Site: "ur", Database: "s_ur_main"}},
+		{"db.user", &contract.DbUserParams{Site: "ur", Password: pw}},
+	} {
+		must(p.command, p.params)
+	}
+}

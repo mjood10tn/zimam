@@ -39,7 +39,7 @@ func TestDestroyDropDatabasesDefaultsFalse(t *testing.T) {
 }
 
 // system.status's services are additive: a result without them still
-// decodes, and an unset service reports not installed.
+// decodes, and a service the agent could not read is left out (unknown).
 func TestSystemStatusServices(t *testing.T) {
 	var r SystemStatusResult
 	if err := json.Unmarshal([]byte(`{"agent_version":"1"}`), &r); err != nil {

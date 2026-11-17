@@ -240,8 +240,8 @@ func (v liveValues) check(poolMiB int) error {
 	if want := uint64(poolMiB) << 20; v.bufferPoolBytes < want || v.bufferPoolBytes-want >= 1<<30 {
 		wrong = append(wrong, fmt.Sprintf("innodb_buffer_pool_size is %d, want %d", v.bufferPoolBytes, want))
 	}
-	// Binary logs record every change, passwords in CREATE USER included, and
-	// grow without bound; Zimam has no use for them.
+	// Binary logs grow without bound and keep the data of deleted sites on
+	// disk after they are dropped; Zimam has no use for them.
 	if v.logBin != "0" {
 		wrong = append(wrong, fmt.Sprintf("log_bin is %q, want 0", v.logBin))
 	}
