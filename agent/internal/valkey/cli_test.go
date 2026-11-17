@@ -28,7 +28,7 @@ func cliEnv(t *testing.T) *testEnv {
 func TestCliRunsAsTheAdminWithThePasswordInTheEnvironment(t *testing.T) {
 	e := cliEnv(t)
 	e.add(live("PONG\n", "PING"))
-	out, err := Cli(context.Background(), e.d, "PING")
+	out, err := cliAdmin(context.Background(), e.d, "PING")
 	if err != nil || out != "PONG" {
 		t.Fatalf("Cli = %q, %v", out, err)
 	}
@@ -65,7 +65,7 @@ func TestCliErrorRepliesAreErrors(t *testing.T) {
 	} {
 		e := cliEnv(t)
 		e.add(live(reply, "ACL", "LOAD"))
-		out, err := Cli(context.Background(), e.d, "ACL", "LOAD")
+		out, err := cliAdmin(context.Background(), e.d, "ACL", "LOAD")
 		if err == nil {
 			t.Errorf("Cli accepted %q (output %q)", reply, out)
 			continue
@@ -77,7 +77,7 @@ func TestCliErrorRepliesAreErrors(t *testing.T) {
 	for _, reply := range []string{"OK\n", "PONG\n", "1\n", "0\n", liveConfig, "# Server\r\nredis_version:7.2.4\r\n", "user default off sanitize-payload\n", "\n"} {
 		e := cliEnv(t)
 		e.add(live(reply, "X"))
-		if _, err := Cli(context.Background(), e.d, "X"); err != nil {
+		if _, err := cliAdmin(context.Background(), e.d, "X"); err != nil {
 			t.Errorf("Cli refused %q: %v", reply, err)
 		}
 	}
@@ -88,7 +88,7 @@ func TestCliFailureNeverQuotesThePassword(t *testing.T) {
 	s := live("", "PING")
 	s.Result = sysexec.Result{ExitCode: 1, Stdout: []byte("AUTH failed: WRONGPASS (sent " + testPass + ")\n"), Stderr: []byte("Could not connect, tried " + testPass + "\n")}
 	e.add(s)
-	_, err := Cli(context.Background(), e.d, "PING")
+	_, err := cliAdmin(context.Background(), e.d, "PING")
 	if err == nil {
 		t.Fatal("Cli ignored the exit code")
 	}
@@ -102,7 +102,7 @@ func TestCliFailureNeverQuotesThePassword(t *testing.T) {
 
 func TestCliWithoutAnAdminPassword(t *testing.T) {
 	e := newEnv(t)
-	if _, err := Cli(context.Background(), e.d, "PING"); err == nil {
+	if _, err := cliAdmin(context.Background(), e.d, "PING"); err == nil {
 		t.Fatal("Cli ran with no admin password")
 	}
 	if n := len(e.run.Calls()); n != 0 {

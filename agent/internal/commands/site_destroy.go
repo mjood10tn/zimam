@@ -14,6 +14,7 @@ import (
 	"zimam/agent/internal/mysql"
 	"zimam/agent/internal/sites"
 	"zimam/agent/internal/sysexec"
+	"zimam/agent/internal/valkey"
 )
 
 func init() {
@@ -69,6 +70,14 @@ func checkSiteDestroy(d sysexec.Deps, p contract.SiteDestroyParams) (sites.State
 		}
 		return sites.State{}, noMySQL, conflict("Site %s still has the databases %s. Delete the site with its databases, or drop the databases first.", p.Name, strings.Join(names, ", "))
 	}
+	// A site with a Valkey user needs Valkey installed to remove it. A site
+	// without one never touches Valkey, so a server without Valkey destroys
+	// sites as before.
+	if st.CacheUserHash != "" {
+		if err := requireValkey(d); err != nil {
+			return sites.State{}, noMySQL, err
+		}
+	}
 	if len(st.Databases) == 0 && !st.DBUser {
 		if ok, err := mysql.Installed(d); err == nil && ok {
 			return st, tidyMySQL, nil
@@ -84,7 +93,14 @@ func checkSiteDestroy(d sysexec.Deps, p contract.SiteDestroyParams) (sites.State
 // siteDestroy removes the site (§9.8). A site already gone answers
 // not_found, as the precheck does.
 //
-// MySQL goes first, before Nginx, the pools and the site's user and files: a
+// A site with a Valkey user needs Valkey installed and answering before
+// anything changes, or the destroy is refused with a conflict. Its user is
+// removed first of all, by clearing the hash in the state and applying the
+// users (valkey.ApplyUsers), which closes the user's connections; if that
+// fails, the state has the hash again and nothing else was touched. A site
+// without a hash never touches Valkey.
+//
+// MySQL goes next, before Nginx, the pools and the site's user and files: a
 // failure there leaves the site as it was, serving and able to be destroyed
 // again. A database that is already dropped stays dropped (and out of the
 // state file), and the rest are dropped when the command runs again. Once
@@ -100,6 +116,22 @@ func siteDestroy(ctx context.Context, j *jobs.Context, p contract.Params) (any, 
 	st, work, err := checkSiteDestroy(d, params)
 	if err != nil {
 		return nil, err
+	}
+	if st.CacheUserHash != "" {
+		// Before anything changes: a Valkey that is down must not be found out
+		// after databases were dropped.
+		if err := requireValkeyRunning(ctx, d); err != nil {
+			return nil, err
+		}
+		var previous string
+		if err := valkey.ApplyUsers(ctx, d, cacheUsers(d.Paths), cacheHashChange(d, params.Name, "", &previous)); err != nil {
+			return nil, err
+		}
+		// The connections of a removed user are closed by Valkey itself.
+		d.Logf("Removed the Valkey user of site %s", params.Name)
+		// The state on disk no longer has the hash; the copy in hand must not
+		// write it back when a MySQL step saves it.
+		st.CacheUserHash = ""
 	}
 	switch work {
 	case requiredMySQL:

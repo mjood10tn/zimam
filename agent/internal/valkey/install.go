@@ -654,14 +654,14 @@ type liveValues struct {
 // That the admin logs in at all is part of it.
 func readLive(ctx context.Context, d sysexec.Deps) (liveValues, error) {
 	var v liveValues
-	out, err := Cli(ctx, d, "PING")
+	out, err := cliAdmin(ctx, d, "PING")
 	if err != nil {
 		return v, err
 	}
 	if out != "PONG" {
 		return v, fmt.Errorf("Valkey answered PING with %q", out)
 	}
-	if out, err = Cli(ctx, d, "CONFIG", "GET", "bind", "port", "aclfile", "maxmemory", "maxmemory-policy"); err != nil {
+	if out, err = cliAdmin(ctx, d, "CONFIG", "GET", "bind", "port", "aclfile", "maxmemory", "maxmemory-policy"); err != nil {
 		return v, err
 	}
 	// Each setting prints as its name and then its value, one per line.
@@ -675,7 +675,7 @@ func readLive(ctx context.Context, d sysexec.Deps) (liveValues, error) {
 	}
 	v.bind, v.port, v.aclFile, v.maxMemory, v.policy = cfg["bind"], cfg["port"], cfg["aclfile"], cfg["maxmemory"], cfg["maxmemory-policy"]
 
-	if out, err = Cli(ctx, d, "ACL", "LIST"); err != nil {
+	if out, err = cliAdmin(ctx, d, "ACL", "LIST"); err != nil {
 		return v, err
 	}
 	seen := false
@@ -693,7 +693,7 @@ func readLive(ctx context.Context, d sysexec.Deps) (liveValues, error) {
 	}
 	slices.Sort(v.users)
 
-	if out, err = Cli(ctx, d, "INFO", "server"); err != nil {
+	if out, err = cliAdmin(ctx, d, "INFO", "server"); err != nil {
 		return v, err
 	}
 	for line := range strings.Lines(out) {

@@ -24,7 +24,7 @@ const (
 // never answers can't hold a job until its time limit.
 var cliTimeout = 10 * time.Second
 
-// Cli is the one way the agent talks to Valkey: valkey-cli as the admin user,
+// cliAdmin is the one way the agent talks to Valkey: valkey-cli as the admin user,
 // to the server on 127.0.0.1:6379, with the admin password in REDISCLI_AUTH.
 // The environment is the one place a password may travel besides stdin; it
 // never goes in argv, a log line or an error. The arguments are fixed words
@@ -33,11 +33,14 @@ var cliTimeout = 10 * time.Second
 //
 // valkey-cli with -e exits non-zero on an error reply, and the reply text is
 // checked too, so an error never passes for a result.
-func Cli(ctx context.Context, d sysexec.Deps, args ...string) (string, error) {
+//
+// Only this package's typed functions (Ping, aclLoad, KillUserConnections and
+// the install's checks) call it, so no text from the panel reaches it.
+func cliAdmin(ctx context.Context, d sysexec.Deps, args ...string) (string, error) {
 	return cli(ctx, d, []string{"-h", "127.0.0.1", "-p", "6379"}, args)
 }
 
-// cliSocket is Cli for a server that listens on a unix socket only, which is
+// cliSocket is cliAdmin for a server that listens on a unix socket only, which is
 // how the config test's candidate server runs.
 func cliSocket(ctx context.Context, d sysexec.Deps, socket string, args ...string) (string, error) {
 	return cli(ctx, d, []string{"-s", socket}, args)

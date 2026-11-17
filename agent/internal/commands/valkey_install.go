@@ -25,8 +25,8 @@ func valkeyInstall(ctx context.Context, j *jobs.Context, _ contract.Params) (any
 }
 
 // cacheUsers lists the Valkey users the ACL file must hold: one for each
-// site whose state records a cache user's password hash. valkey.Install calls
-// it under the ACL lock. A site state that can't be read is an error, since
+// site whose state records a cache user's password hash. valkey.Install and
+// valkey.ApplyUsers call it under the ACL lock. A site state that can't be read is an error, since
 // an ACL file written without that site's user would lock the site out.
 func cacheUsers(p paths.Paths) func() ([]valkey.SiteUser, error) {
 	return func() ([]valkey.SiteUser, error) {

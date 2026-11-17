@@ -248,7 +248,7 @@ func TestRootValkeyInstall(t *testing.T) {
 	if out := asUser("zimam-admin", "not the password", "PING"); !strings.Contains(out, "WRONGPASS") {
 		t.Errorf("the admin with a wrong password gave %q", out)
 	}
-	if out, err := Cli(ctx, d, "PING"); err != nil || out != "PONG" {
+	if out, err := cliAdmin(ctx, d, "PING"); err != nil || out != "PONG" {
 		t.Errorf("the admin's PING = %q, %v", out, err)
 	}
 	if !isActive() {
@@ -278,7 +278,7 @@ func TestRootValkeyInstall(t *testing.T) {
 		t.Fatalf("second Install: %v", err)
 	}
 	for range 40 {
-		if _, err := Cli(ctx, d, "PING"); err != nil {
+		if _, err := cliAdmin(ctx, d, "PING"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -332,7 +332,7 @@ func TestRootValkeyInstall(t *testing.T) {
 		if !isActive() {
 			t.Fatalf("%s: Valkey is not running after the rollback", name)
 		}
-		if out, err := Cli(ctx, d, "PING"); err != nil || out != "PONG" {
+		if out, err := cliAdmin(ctx, d, "PING"); err != nil || out != "PONG" {
 			t.Fatalf("%s: the admin's PING = %q, %v", name, out, err)
 		}
 		if v4, v6 := listeners(t); len(v4) != 1 || v4[0] != "0100007F" || len(v6) != 1 {
@@ -347,7 +347,7 @@ func TestRootValkeyInstall(t *testing.T) {
 	// A working server whose settings lose a file is stopped and masked, and
 	// brought back on Zimam's settings by the next run, with the sites' data
 	// kept and nobody let in meanwhile; and one left masked by hand is healed.
-	if out, err := Cli(ctx, d, "SET", "s_blog:kept", "the sites' own data"); err != nil || out != "OK" {
+	if out, err := cliAdmin(ctx, d, "SET", "s_blog:kept", "the sites' own data"); err != nil || out != "OK" {
 		t.Fatalf("SET as the admin = %q, %v", out, err)
 	}
 	if err := os.Remove(d.Paths.ValkeyDropIn()); err != nil {
@@ -357,7 +357,7 @@ func TestRootValkeyInstall(t *testing.T) {
 		t.Fatalf("Install after the drop-in was removed: %v", err)
 	}
 	assertRunning(t, d, "the drop-in was made again")
-	if out, err := Cli(ctx, d, "GET", "s_blog:kept"); err != nil || out != "the sites' own data" {
+	if out, err := cliAdmin(ctx, d, "GET", "s_blog:kept"); err != nil || out != "the sites' own data" {
 		t.Errorf("the key after the run that made the drop-in again = %q, %v", out, err)
 	}
 	shell(t, "/usr/bin/systemctl", "mask", "--now", unit)
@@ -368,7 +368,7 @@ func TestRootValkeyInstall(t *testing.T) {
 		t.Fatalf("Install after the service was masked by hand: %v", err)
 	}
 	assertRunning(t, d, "the masked service was healed")
-	if out, err := Cli(ctx, d, "GET", "s_blog:kept"); err != nil || out != "the sites' own data" {
+	if out, err := cliAdmin(ctx, d, "GET", "s_blog:kept"); err != nil || out != "the sites' own data" {
 		t.Errorf("the key after the run that unmasked the service = %q, %v", out, err)
 	}
 
@@ -536,7 +536,7 @@ func assertRunning(t *testing.T, d sysexec.Deps, what string) {
 	if out := shell(t, "/usr/bin/systemctl", "show", "-p", "ExecStart", "--value", unit); !strings.Contains(out, "/etc/zimam/valkey/valkey.conf") {
 		t.Errorf("%s: ExecStart = %s", what, out)
 	}
-	if out, err := Cli(context.Background(), d, "PING"); err != nil || out != "PONG" {
+	if out, err := cliAdmin(context.Background(), d, "PING"); err != nil || out != "PONG" {
 		t.Errorf("%s: the admin's PING = %q, %v", what, out, err)
 	}
 }
