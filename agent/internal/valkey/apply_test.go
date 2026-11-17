@@ -92,7 +92,7 @@ func (s *states) setting(name, pw string) func() (func() error, error) {
 
 func userLine(name, pw string) string {
 	h := hashOf(pw)
-	return "user s_" + name + " on #" + hex.EncodeToString(h[:]) + " resetkeys ~s_" + name + ":* resetchannels &s_" + name + ":* +@all -@admin -@dangerous -function\n"
+	return "user s_" + name + " on #" + hex.EncodeToString(h[:]) + " resetkeys ~s_" + name + ":* resetchannels &s_" + name + ":* +@all -@admin -@dangerous -function -script|kill -script|flush -script|debug\n"
 }
 
 func TestACLRenderedFromStates(t *testing.T) {

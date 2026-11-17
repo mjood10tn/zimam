@@ -102,7 +102,7 @@ func (e *dbEnv) valkeyRuns() []string {
 }
 
 func aclLine(site string, pw contract.ServicePassword) string {
-	return "user s_" + site + " on #" + sum(pw) + " resetkeys ~s_" + site + ":* resetchannels &s_" + site + ":* +@all -@admin -@dangerous -function\n"
+	return "user s_" + site + " on #" + sum(pw) + " resetkeys ~s_" + site + ":* resetchannels &s_" + site + ":* +@all -@admin -@dangerous -function -script|kill -script|flush -script|debug\n"
 }
 
 func TestCacheUserWired(t *testing.T) {

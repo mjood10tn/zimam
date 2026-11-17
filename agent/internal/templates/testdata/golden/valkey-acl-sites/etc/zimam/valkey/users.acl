@@ -1,4 +1,4 @@
 user default off
 user zimam-admin on #dabf8ec58870c5d84ba95ab88e2c49bfc3b8d9e91de1da2cbdf59a6866c2dfa9 ~* &* +@all
-user s_blog on #7496233957412952cb52cdb1a5d0bc0fa9651dd666fb40d86ef2835076782acf resetkeys ~s_blog:* resetchannels &s_blog:* +@all -@admin -@dangerous -function
-user s_my-shop on #18cc82ccef4a3cf3fb0dbb07064ec0d2ad0fe08b23cc96f55f2354d83b1fba97 resetkeys ~s_my-shop:* resetchannels &s_my-shop:* +@all -@admin -@dangerous -function
+user s_blog on #7496233957412952cb52cdb1a5d0bc0fa9651dd666fb40d86ef2835076782acf resetkeys ~s_blog:* resetchannels &s_blog:* +@all -@admin -@dangerous -function -script|kill -script|flush -script|debug
+user s_my-shop on #18cc82ccef4a3cf3fb0dbb07064ec0d2ad0fe08b23cc96f55f2354d83b1fba97 resetkeys ~s_my-shop:* resetchannels &s_my-shop:* +@all -@admin -@dangerous -function -script|kill -script|flush -script|debug

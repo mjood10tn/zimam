@@ -942,8 +942,8 @@ func TestSiteUsersAreKeptAndSorted(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := readFile(t, e.p.ValkeyACL())
-	wantBlog := "user s_blog on #" + hex.EncodeToString(a[:]) + " resetkeys ~s_blog:* resetchannels &s_blog:* +@all -@admin -@dangerous -function\n"
-	wantShop := "user s_shop on #" + hex.EncodeToString(b[:]) + " resetkeys ~s_shop:* resetchannels &s_shop:* +@all -@admin -@dangerous -function\n"
+	wantBlog := "user s_blog on #" + hex.EncodeToString(a[:]) + " resetkeys ~s_blog:* resetchannels &s_blog:* +@all -@admin -@dangerous -function -script|kill -script|flush -script|debug\n"
+	wantShop := "user s_shop on #" + hex.EncodeToString(b[:]) + " resetkeys ~s_shop:* resetchannels &s_shop:* +@all -@admin -@dangerous -function -script|kill -script|flush -script|debug\n"
 	if !strings.HasSuffix(got, wantBlog+wantShop) {
 		t.Errorf("users.acl =\n%s\nwant it to end with the site users, sorted:\n%s%s", got, wantBlog, wantShop)
 	}
