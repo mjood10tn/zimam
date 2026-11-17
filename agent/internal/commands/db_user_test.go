@@ -38,10 +38,10 @@ func wantUserSQL(pw contract.ServicePassword) []string {
 	by := " IDENTIFIED BY '" + string(pw) + "'"
 	accounts := "'s_shop'@'localhost'" + by + ", 's_shop'@'127.0.0.1'" + by
 	return []string{
-		"CREATE USER IF NOT EXISTS " + accounts + ";",
-		"ALTER USER " + accounts + ";",
+		"CREATE USER IF NOT EXISTS " + both + " ACCOUNT LOCK;",
 		"GRANT ALL PRIVILEGES ON `s" + `\_shop\_a` + "`.* TO " + both + ";",
 		"GRANT ALL PRIVILEGES ON `s" + `\_shop\_b` + "`.* TO " + both + ";",
+		"ALTER USER " + accounts + " ACCOUNT UNLOCK;",
 	}
 }
 
@@ -134,69 +134,95 @@ func TestRotateKeepsGrants(t *testing.T) {
 	}
 }
 
-// The failure points, each with what it leaves. The password is also
-// checked in every error.
+// The failure points, for a new user and for a rotation, each with what it
+// leaves. The password is also checked in every error. The statement that
+// sets the password and unlocks is the last one and runs only after every
+// grant; the state records the user before the first grant.
 func TestDbUserFailurePoints(t *testing.T) {
 	const fail = "ERROR 1396 (HY000) at line 1: Operation failed"
-	for name, tc := range map[string]struct {
-		step     int  // the statement that fails, from 0
-		wantRuns int  // statements run
-		dbUser   bool // db_user in the state afterwards
+	cases := map[string]struct {
+		step     int    // the statement that fails, from 0
+		wantRuns int    // statements run
+		kind     string // what the error names
+		savedNew bool   // db_user in the state afterwards, for a new user
 	}{
-		"create fails":       {0, 1, false},
-		"alter fails":        {1, 2, false},
-		"first grant fails":  {2, 3, true},
-		"second grant fails": {3, 4, true},
-	} {
-		t.Run(name, func(t *testing.T) {
-			e := shopWithDatabases(t)
-			for i := range 4 {
-				if i == tc.step {
-					e.answer("", fail)
-				} else {
-					e.answer("", "")
+		"create fails":       {0, 1, "create user", false},
+		"first grant fails":  {1, 2, "grant", true},
+		"second grant fails": {2, 3, "grant", true},
+		"alter fails last":   {3, 4, "alter user", true},
+	}
+	for _, rotation := range []bool{false, true} {
+		for name, tc := range cases {
+			t.Run(fmt.Sprintf("rotation %v/%s", rotation, name), func(t *testing.T) {
+				e := shopWithDatabases(t)
+				if rotation {
+					st := e.site(t, "shop")
+					st.DBUser = true
+					e.saveSite(t, st)
 				}
-			}
-			var logs []string
-			j := &jobs.Context{ID: "01JBX7Q3A1B2C3D4E5F6G7H8J9", Logf: func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) }, Paths: e.p, Run: e.run}
-			_, err := commands.JobHandlers()["db.user"](context.Background(), j, userParams("shop", pwOne))
-			if err == nil {
-				t.Fatal("no error")
-			}
-			if strings.Contains(err.Error(), string(pwOne)) {
-				t.Errorf("the password is in the error: %v", err)
-			}
-			// A later step is never run after a failure.
-			if got := e.sql(); len(got) != tc.wantRuns {
-				t.Errorf("%d statements, want %d", len(got), tc.wantRuns)
-			}
-			if got := e.site(t, "shop").DBUser; got != tc.dbUser {
-				t.Errorf("db_user = %v, want %v", got, tc.dbUser)
-			}
-		})
+				before := e.stateFile(t, "shop")
+				for i := range 4 {
+					if i == tc.step {
+						e.answer("", fail)
+					} else {
+						e.answer("", "")
+					}
+				}
+				j := &jobs.Context{ID: "01JBX7Q3A1B2C3D4E5F6G7H8J9", Logf: t.Logf, Paths: e.p, Run: e.run}
+				_, err := commands.JobHandlers()["db.user"](context.Background(), j, userParams("shop", pwOne))
+				if err == nil {
+					t.Fatal("no error")
+				}
+				if strings.Contains(err.Error(), string(pwOne)) {
+					t.Errorf("the password is in the error: %v", err)
+				}
+				if !strings.Contains(err.Error(), tc.kind) || !strings.Contains(err.Error(), "1396") {
+					t.Errorf("error %q doesn't name %q and MySQL's error", err, tc.kind)
+				}
+				got := e.sql()
+				if len(got) != tc.wantRuns {
+					t.Errorf("%d statements, want %d: %q", len(got), tc.wantRuns, got)
+				}
+				var alters int
+				for _, s := range got {
+					if strings.HasPrefix(s, "ALTER USER") {
+						alters++
+					}
+				}
+				if want := map[bool]int{true: 1, false: 0}[tc.step == 3]; alters != want {
+					t.Errorf("%d ALTER USER statements ran, want %d: the account is unlocked and given its password only after every grant", alters, want)
+				}
+				wantSaved := rotation || tc.savedNew
+				if got := e.site(t, "shop").DBUser; got != wantSaved {
+					t.Errorf("db_user = %v, want %v", got, wantSaved)
+				}
+				if rotation && e.stateFile(t, "shop") != before {
+					t.Error("state changed by a failed rotation")
+				}
+			})
+		}
 	}
 }
 
-// A rotation that fails at the password statement changes nothing: no grant
-// is run, the state stays as it was, and the old password keeps working.
-func TestRotationFailingAtThePasswordChangesNothingElse(t *testing.T) {
+// Whatever the failure, the statements before the password one never hold the
+// password, so an interrupted run leaves an account that is locked (new) or
+// keeps its old password (rotation).
+func TestOnlyTheLastStatementCarriesThePassword(t *testing.T) {
 	e := shopWithDatabases(t)
-	st := e.site(t, "shop")
-	st.DBUser = true
-	e.saveSite(t, st)
-	before := e.stateFile(t, "shop")
-	e.answer("", "")
-	e.answer("", "ERROR 1396 (HY000) at line 1: Operation failed")
-	if _, err := e.job(t, "db.user", userParams("shop", pwTwo)); err == nil {
-		t.Fatal("no error")
+	for range 4 {
+		e.answer("", "")
 	}
-	for _, s := range e.sql() {
-		if strings.HasPrefix(s, "GRANT") {
-			t.Errorf("a grant ran after the password failed: %s", s)
+	if _, err := e.job(t, "db.user", userParams("shop", pwOne)); err != nil {
+		t.Fatal(err)
+	}
+	got := e.sql()
+	for i, s := range got {
+		if has := strings.Contains(s, string(pwOne)); has != (i == len(got)-1) {
+			t.Errorf("statement %d carries the password = %v: %s", i, has, s)
 		}
 	}
-	if e.stateFile(t, "shop") != before {
-		t.Error("state changed")
+	if !strings.HasPrefix(got[0], "CREATE USER IF NOT EXISTS") || !strings.HasSuffix(got[0], "ACCOUNT LOCK;") {
+		t.Errorf("first statement %q", got[0])
 	}
 }
 
@@ -206,7 +232,7 @@ func TestRotationFailingAtThePasswordChangesNothingElse(t *testing.T) {
 func TestDbUserStateSaveFailureSaysRunAgain(t *testing.T) {
 	e := shopWithDatabases(t)
 	e.run = sysexec.NewFakeRunner()
-	hook := &hookRunner{Runner: e.run, after: 2, do: breakState(t, e, "shop")}
+	hook := &hookRunner{Runner: e.run, after: 1, do: breakState(t, e, "shop")}
 	for range 4 {
 		e.run.Add(sysexec.Script{Path: mysqlClient, Args: mysqlClientArgs})
 	}
@@ -215,7 +241,7 @@ func TestDbUserStateSaveFailureSaysRunAgain(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "run the command again") || strings.Contains(err.Error(), string(pwOne)) {
 		t.Fatalf("err = %v", err)
 	}
-	if n := len(e.run.Calls()); n != 2 {
+	if n := len(e.run.Calls()); n != 1 {
 		t.Errorf("%d statements ran after the state could not be saved", n)
 	}
 }
@@ -251,7 +277,7 @@ func TestDbUserWhileMySQLDownOrMissing(t *testing.T) {
 // and on each failure.
 func TestPasswordNeverInJobLogOrArgv(t *testing.T) {
 	const fail = "ERROR 1396 (HY000) at line 1: Operation failed"
-	for name, failAt := range map[string]int{"success": -1, "create fails": 0, "alter fails": 1, "grant fails": 2} {
+	for name, failAt := range map[string]int{"success": -1, "create fails": 0, "grant fails": 1, "alter fails": 3} {
 		t.Run(name, func(t *testing.T) {
 			e := shopWithDatabases(t)
 			for i := range 4 {
@@ -286,7 +312,7 @@ func TestPasswordNeverInJobLogOrArgv(t *testing.T) {
 				}
 			}
 			// It does go to the client, on stdin, so the search above looks for the right text.
-			if !strings.Contains(e.sql()[0], string(pwOne)) {
+			if failAt != 0 && failAt != 1 && !strings.Contains(e.sql()[len(e.sql())-1], string(pwOne)) {
 				t.Error("the password never reached the client's stdin")
 			}
 		})

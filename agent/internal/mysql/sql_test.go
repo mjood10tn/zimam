@@ -29,10 +29,10 @@ func TestStatementsQuoteIdentifiers(t *testing.T) {
 			"CREATE DATABASE `s_my_shop_blog` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;"},
 		{"drop database", DropDatabase("s_my_shop_blog"),
 			"DROP DATABASE IF EXISTS `s_my_shop_blog`;"},
-		{"create user", CreateUser("my-shop", testPassword),
-			"CREATE USER IF NOT EXISTS 's_my-shop'@'localhost' IDENTIFIED BY '" + string(testPassword) + "', 's_my-shop'@'127.0.0.1' IDENTIFIED BY '" + string(testPassword) + "';"},
+		{"create user", CreateUser("my-shop"),
+			"CREATE USER IF NOT EXISTS 's_my-shop'@'localhost', 's_my-shop'@'127.0.0.1' ACCOUNT LOCK;"},
 		{"alter user", AlterUserPassword("my-shop", testPassword),
-			"ALTER USER 's_my-shop'@'localhost' IDENTIFIED BY '" + string(testPassword) + "', 's_my-shop'@'127.0.0.1' IDENTIFIED BY '" + string(testPassword) + "';"},
+			"ALTER USER 's_my-shop'@'localhost' IDENTIFIED BY '" + string(testPassword) + "', 's_my-shop'@'127.0.0.1' IDENTIFIED BY '" + string(testPassword) + "' ACCOUNT UNLOCK;"},
 		// _ is a wildcard in a grant's database name; the escape makes it
 		// one character. The name's backslashes stay out of the other
 		// statements, where a database name is not a pattern.
@@ -63,7 +63,7 @@ func TestStatementWithUnvalidatedValueIsRefused(t *testing.T) {
 	for name, st := range map[string]Statement{
 		"backtick in a database name": CreateDatabase("a`b"),
 		"reserved database name":      DropDatabase("mysql"),
-		"quote in a password":         CreateUser("shop", short),
+		"quote in a password":         AlterUserPassword("shop", short),
 		"short password":              AlterUserPassword("shop", "short"),
 		"quote in a site name":        DropUser("a'b"),
 		"bad grant database":          GrantAll("shop", "x' OR '1"),
@@ -185,13 +185,13 @@ func typeName(e ast.Expr) string {
 // A statement that holds a password prints as its kind, in every format
 // verb, so a log line or an error can't carry it.
 func TestStatementDoesNotPrintItsSQL(t *testing.T) {
-	st := CreateUser("shop", testPassword)
+	st := AlterUserPassword("shop", testPassword)
 	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q"} {
 		if got := fmt.Sprintf(verb, st); strings.Contains(got, string(testPassword)) || strings.Contains(got, "IDENTIFIED") {
 			t.Errorf("%s prints %q", verb, got)
 		}
 	}
-	if got := fmt.Sprint(st); got != "create user" {
+	if got := fmt.Sprint(st); got != "alter user" {
 		t.Errorf("Sprint = %q, want the kind", got)
 	}
 }
@@ -221,11 +221,11 @@ func TestExecRunsEachStatementThroughTheRootClient(t *testing.T) {
 }
 
 func TestExecStopsAtTheFirstFailureAndKeepsSecretsOut(t *testing.T) {
-	stderr := "ERROR 1396 (HY000) at line 1: Operation CREATE USER failed for 's_shop'@'localhost' IDENTIFIED BY '" + string(testPassword) + "'"
+	stderr := "ERROR 1396 (HY000) at line 1: Operation ALTER USER failed for 's_shop'@'localhost' IDENTIFIED BY '" + string(testPassword) + "'"
 	run := sysexec.NewFakeRunner(
 		failing(sysexec.Script{Path: clientPath, Args: clientArgs}, 1, stderr),
 	)
-	_, err := Exec(context.Background(), sysexec.Deps{Run: run}, CreateUser("shop", testPassword), DropUser("shop"))
+	_, err := Exec(context.Background(), sysexec.Deps{Run: run}, AlterUserPassword("shop", testPassword), DropUser("shop"))
 	if err == nil {
 		t.Fatal("no error")
 	}
@@ -238,8 +238,8 @@ func TestExecStopsAtTheFirstFailureAndKeepsSecretsOut(t *testing.T) {
 		}
 	}
 	var e *Error
-	if !errors.As(err, &e) || e.Errno() != 1396 || e.Kind() != "create user" {
-		t.Fatalf("error = %#v, want errno 1396 of a create user", err)
+	if !errors.As(err, &e) || e.Errno() != 1396 || e.Kind() != "alter user" {
+		t.Fatalf("error = %#v, want errno 1396 of an alter user", err)
 	}
 	var exit *sysexec.ExitError
 	if errors.As(err, &exit) {

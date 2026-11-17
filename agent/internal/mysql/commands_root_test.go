@@ -52,7 +52,7 @@ func TestDbCommandsAgainstRealMySQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	pw := contract.ServicePassword("Aaaaaaaaaaaaaaaaaaaaaaaa-1_aaaa")
-	if _, err := mysql.Exec(ctx, d, mysql.CreateUser("aa", pw), mysql.AlterUserPassword("aa", pw)); err != nil {
+	if _, err := mysql.Exec(ctx, d, mysql.CreateUser("aa"), mysql.AlterUserPassword("aa", pw)); err != nil {
 		t.Fatal(err)
 	}
 	j := &jobs.Context{ID: "01JBX7Q3A1B2C3D4E5F6G7H8J9", Logf: t.Logf, Paths: p, Run: sysexec.ExecRunner{}}
@@ -195,7 +195,7 @@ func TestDbCreateClearsOrRefusesOtherGrantsAgainstRealMySQL(t *testing.T) {
 		}
 	}
 	for site, pw := range map[contract.SiteName]contract.ServicePassword{"shop": pwShop, "shop-x": pwShopX} {
-		if _, err := mysql.Exec(ctx, d, mysql.CreateUser(site, pw), mysql.AlterUserPassword(site, pw)); err != nil {
+		if _, err := mysql.Exec(ctx, d, mysql.CreateUser(site), mysql.AlterUserPassword(site, pw)); err != nil {
 			t.Fatal(err)
 		}
 	}

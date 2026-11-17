@@ -107,31 +107,107 @@ func TestDestroyDropsUser(t *testing.T) {
 	}
 }
 
-// A server that never installed MySQL destroys a site as before, and a site
-// with no databases and no user leaves MySQL alone even when it is installed.
-func TestDestroyTouchesNoMySQLForASiteWithNothingThere(t *testing.T) {
-	for name, setup := range map[string]func(*dbEnv){
-		"installed":     func(*dbEnv) {},
-		"not installed": func(e *dbEnv) { removeServices(t, e) },
-	} {
-		t.Run(name, func(t *testing.T) {
+// A server that never installed MySQL destroys a site as before. A site that
+// lists nothing in MySQL still has its accounts dropped when MySQL is
+// installed (an orphan from a failed state save would otherwise stay), but
+// never fails the destroy: MySQL down or the statement failing is only logged.
+func TestDestroyTidiesTheAccountsOfASiteWithNothingListed(t *testing.T) {
+	t.Run("installed", func(t *testing.T) {
+		e := withLocks(t, newDBEnv(t))
+		e.answer("", "")
+		if err := e.precheck(t, "site.destroy", destroyParams(false)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.job(t, "site.destroy", destroyParams(true)); err != nil {
+			t.Fatal(err)
+		}
+		equalSQL(t, e.sql(), []string{"DROP USER IF EXISTS " + both + ";"})
+		if stateExists(e, "shop") {
+			t.Error("the state file is left")
+		}
+	})
+	for name, stderr := range map[string]string{"down": errDown, "failing": "ERROR 1396 (HY000) at line 1: Operation failed"} {
+		t.Run("installed but "+name, func(t *testing.T) {
 			e := withLocks(t, newDBEnv(t))
-			setup(e)
+			e.answer("", stderr)
 			if err := e.precheck(t, "site.destroy", destroyParams(false)); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := e.job(t, "site.destroy", destroyParams(true)); err != nil {
-				t.Fatal(err)
-			}
-			for _, c := range e.run.Calls() {
-				if c.Path == mysqlClient {
-					t.Error("the MySQL client ran")
-				}
+			if _, err := e.job(t, "site.destroy", destroyParams(false)); err != nil {
+				t.Fatalf("the destroy failed for a site that lists nothing in MySQL: %v", err)
 			}
 			if stateExists(e, "shop") {
 				t.Error("the state file is left")
 			}
 		})
+	}
+	t.Run("not installed", func(t *testing.T) {
+		e := withLocks(t, newDBEnv(t))
+		removeServices(t, e)
+		if err := e.precheck(t, "site.destroy", destroyParams(false)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.job(t, "site.destroy", destroyParams(true)); err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range e.run.Calls() {
+			if c.Path == mysqlClient {
+				t.Error("the MySQL client ran")
+			}
+		}
+		if stateExists(e, "shop") {
+			t.Error("the state file is left")
+		}
+	})
+}
+
+// The state lists databases but not a user: the databases go and the accounts
+// are dropped all the same.
+func TestDestroyDropsTheUserEvenWhenTheStateHasNone(t *testing.T) {
+	e := withLocks(t, newDBEnv(t))
+	st := e.site(t, "shop")
+	st.Databases = []contract.DatabaseName{"s_shop_a"}
+	e.saveSite(t, st)
+	for range 3 {
+		e.answer("", "")
+	}
+	if _, err := e.job(t, "site.destroy", destroyParams(true)); err != nil {
+		t.Fatal(err)
+	}
+	equalSQL(t, e.sql(), []string{
+		"REVOKE IF EXISTS ALL PRIVILEGES ON `s" + `\_shop\_a` + "`.* FROM " + both + " IGNORE UNKNOWN USER;",
+		"DROP DATABASE IF EXISTS `s_shop_a`;",
+		"DROP USER IF EXISTS " + both + ";",
+	})
+}
+
+// DROP USER failing leaves the databases dropped, the site whole and the state
+// saying it still has a user; running the destroy again finishes it.
+func TestDestroyDropUserFailureLeavesAWorkingSite(t *testing.T) {
+	e := shopWithUser(t, "s_shop_a")
+	e.answer("", "")
+	e.answer("", "")
+	e.answer("", "ERROR 1396 (HY000) at line 1: Operation failed")
+	_, err := e.job(t, "site.destroy", destroyParams(true))
+	if err == nil || !strings.Contains(err.Error(), "drop user") {
+		t.Fatalf("err = %v", err)
+	}
+	st := e.site(t, "shop")
+	if len(st.Databases) != 0 || !st.DBUser {
+		t.Errorf("state: databases %v, db_user %v", st.Databases, st.DBUser)
+	}
+	for _, c := range e.run.Calls() {
+		if c.Path != mysqlClient {
+			t.Errorf("%s ran before the user was dropped", c.Path)
+		}
+	}
+	// Again: nothing is left to drop but the user.
+	e.answer("", "")
+	if _, err := e.job(t, "site.destroy", destroyParams(false)); err != nil {
+		t.Fatal(err)
+	}
+	if stateExists(e, "shop") {
+		t.Error("the state file is left")
 	}
 }
 

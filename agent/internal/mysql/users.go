@@ -33,24 +33,27 @@ func checkSiteAndPassword(kind string, site contract.SiteName, pw contract.Servi
 	return Statement{}, true
 }
 
-// CreateUser creates the site's two accounts if they don't exist. An
-// account that exists keeps its password, so a caller sets the password with
-// AlterUserPassword afterwards.
-func CreateUser(site contract.SiteName, pw contract.ServicePassword) Statement {
+// CreateUser creates the site's two accounts if they don't exist, locked and
+// without a password, so a new account can't be used until
+// AlterUserPassword sets its password and unlocks it. An account that exists
+// is left as it is: its password, its grants and whether it is locked.
+func CreateUser(site contract.SiteName) Statement {
 	const kind = "create user"
-	if st, ok := checkSiteAndPassword(kind, site, pw); !ok {
-		return st
+	if err := site.Validate(); err != nil {
+		return invalid(kind, "the site name", err)
 	}
-	return Statement{kind: kind, secret: true, sql: "CREATE USER IF NOT EXISTS " + passwordAccounts(site, pw) + ";"}
+	return Statement{kind: kind, sql: "CREATE USER IF NOT EXISTS " + accounts(site) + " ACCOUNT LOCK;"}
 }
 
-// AlterUserPassword sets the password of both of the site's accounts.
+// AlterUserPassword sets the password of both of the site's accounts and
+// unlocks them, in one statement: MySQL applies it to both or to neither, so
+// this is the step that makes the user usable.
 func AlterUserPassword(site contract.SiteName, pw contract.ServicePassword) Statement {
 	const kind = "alter user"
 	if st, ok := checkSiteAndPassword(kind, site, pw); !ok {
 		return st
 	}
-	return Statement{kind: kind, secret: true, sql: "ALTER USER " + passwordAccounts(site, pw) + ";"}
+	return Statement{kind: kind, secret: true, sql: "ALTER USER " + passwordAccounts(site, pw) + " ACCOUNT UNLOCK;"}
 }
 
 // DropUser drops both of the site's accounts, which takes their grants with

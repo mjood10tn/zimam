@@ -376,3 +376,68 @@ func TestNoGlobalPrivileges(t *testing.T) {
 	}
 	e.requireOnlyDatabaseGrants("s_ua", "s_ua_one", "s_ua_two")
 }
+
+// An interrupted first run leaves locked accounts that nobody can log in to,
+// whatever password is tried; an interrupted rotation leaves the old
+// password working; the last statement unlocks both accounts with the new
+// password; and it is all or nothing for the two accounts.
+func TestLockedUntilThePasswordStatementAgainstRealMySQL(t *testing.T) {
+	e := newUserEnv(t)
+	e.wipe("ua")
+	t.Cleanup(func() { e.wipe("ua") })
+	pw1, pw2 := contract.ServicePassword("Aa1_aaaaaaaaaaaaaaaaaaaaaaaaaaaa-A"), contract.ServicePassword("Ff6-ffffffffffffffffffffffffffffff_F")
+	run := func(st ...mysql.Statement) {
+		t.Helper()
+		if _, err := mysql.Exec(e.ctx, e.d, st...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	locked := func() string {
+		return rootOut(t, "SELECT GROUP_CONCAT(host, '=', account_locked ORDER BY host) FROM mysql.user WHERE User = 's_ua'")
+	}
+	rootSQL(t, "CREATE DATABASE IF NOT EXISTS s_ua_one; CREATE TABLE IF NOT EXISTS s_ua_one.t (id INT)")
+	t.Cleanup(func() { rootSQL(t, "DROP DATABASE IF EXISTS s_ua_one") })
+
+	// First run interrupted after the grants: locked, with grants.
+	run(mysql.CreateUser("ua"), mysql.GrantAll("ua", "s_ua_one"))
+	if got := locked(); got != "127.0.0.1=Y,localhost=Y" {
+		t.Errorf("locked = %s, want both accounts locked", got)
+	}
+	// The server answers 3118 (account is locked) to the empty password the
+	// account has, and 1045 (access denied) to any other: a refusal either way.
+	e.mustBeDenied("s_ua", "", "SELECT COUNT(*) FROM s_ua_one.t", 3118)
+	for _, pw := range []contract.ServicePassword{pw1, "Zz9_zzzzzzzzzzzzzzzzzzzzzzzzzzzz"} {
+		e.mustBeDenied("s_ua", pw, "SELECT COUNT(*) FROM s_ua_one.t", 1045, 3118)
+	}
+
+	// The last statement completes it.
+	run(mysql.AlterUserPassword("ua", pw1))
+	if got := locked(); got != "127.0.0.1=N,localhost=N" {
+		t.Errorf("locked = %s, want both unlocked", got)
+	}
+	e.mustReach("s_ua", pw1, "SELECT COUNT(*) FROM s_ua_one.t")
+
+	// A rotation interrupted before its last statement: create (a no-op on
+	// existing accounts) and grants again, no alter. The old password works.
+	run(mysql.CreateUser("ua"), mysql.GrantAll("ua", "s_ua_one"))
+	if got := locked(); got != "127.0.0.1=N,localhost=N" {
+		t.Errorf("an existing account was locked by CreateUser: %s", got)
+	}
+	e.mustReach("s_ua", pw1, "SELECT COUNT(*) FROM s_ua_one.t")
+
+	// One statement, both accounts or neither: with one account missing, the
+	// ALTER fails and the other keeps its password and its lock state.
+	rootSQL(t, "DROP USER 's_ua'@'127.0.0.1'")
+	if _, err := mysql.Exec(e.ctx, e.d, mysql.AlterUserPassword("ua", pw2)); err == nil {
+		t.Fatal("the alter succeeded with one account missing")
+	}
+	if got := locked(); got != "localhost=N" {
+		t.Errorf("locked = %s", got)
+	}
+	if out, err := loginAs("s_ua", pw1, false, "SELECT COUNT(*) FROM s_ua_one.t"); err != nil {
+		t.Errorf("the old password stopped working after a failed alter: %v\n%s", err, out)
+	}
+	if _, err := loginAs("s_ua", pw2, false, "SELECT 1"); err == nil {
+		t.Error("the new password works after a failed alter")
+	}
+}

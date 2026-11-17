@@ -79,9 +79,9 @@ func TestCreateAndDropAgainstRealMySQL(t *testing.T) {
 	must(CreateDatabase("s_aaxx"), CreateDatabase("s_aa_e"))
 	mustQuery(t, d, "CREATE TABLE s_aa_x.t (id INT); INSERT INTO s_aa_x.t VALUES (1);")
 	mustQuery(t, d, "CREATE TABLE s_aaxx.t (id INT); INSERT INTO s_aaxx.t VALUES (42);")
-	must(CreateUser("aa", pwOne), AlterUserPassword("aa", pwOne), GrantAll("aa", "s_aa_x"))
+	must(CreateUser("aa"), AlterUserPassword("aa", pwOne), GrantAll("aa", "s_aa_x"))
 	// Running the user statements again changes nothing that matters.
-	must(CreateUser("aa", pwOne), AlterUserPassword("aa", pwOne), GrantAll("aa", "s_aa_x"))
+	must(CreateUser("aa"), AlterUserPassword("aa", pwOne), GrantAll("aa", "s_aa_x"))
 	for _, tcp := range []bool{false, true} {
 		if out, err := asSiteUser(t, "aa", pwOne, tcp, "SELECT id FROM s_aa_x.t"); err != nil || out != "1" {
 			t.Errorf("tcp=%v: the user's own database: %q, %v", tcp, out, err)
@@ -194,7 +194,7 @@ func TestLongDatabaseNamesAgainstRealMySQL(t *testing.T) {
 	}
 	cleanup()
 	t.Cleanup(cleanup)
-	if _, err := Exec(ctx, d, CreateUser("aa", pwOne), AlterUserPassword("aa", pwOne)); err != nil {
+	if _, err := Exec(ctx, d, CreateUser("aa"), AlterUserPassword("aa", pwOne)); err != nil {
 		t.Fatal(err)
 	}
 	for _, db := range []contract.DatabaseName{manyUnderscores, fewUnderscores} {
