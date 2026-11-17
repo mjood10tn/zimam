@@ -556,8 +556,8 @@ func TestDeployStepsInOrder(t *testing.T) {
 	// The archive and extract-tar run together; the order between them is
 	// the scheduler's.
 	got := e.opsFrom(0)
-	if len(got) > 5 && strings.HasPrefix(got[4], "extract-tar") {
-		got[4], got[5] = got[5], got[4]
+	if len(got) > 6 && strings.HasPrefix(got[5], "extract-tar") {
+		got[5], got[6] = got[6], got[5]
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("operations\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
