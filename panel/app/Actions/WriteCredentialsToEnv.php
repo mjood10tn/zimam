@@ -5,6 +5,7 @@ namespace App\Actions;
 use App\Agent\AgentClient;
 use App\Agent\Commands\SiteEnvRead;
 use App\Agent\Commands\SiteEnvWrite;
+use App\Agent\Exceptions\AgentConflict;
 use App\Agent\Exceptions\AgentException;
 use App\Agent\Exceptions\AgentNotFound;
 use App\Models\AgentJob;
@@ -47,21 +48,33 @@ final class WriteCredentialsToEnv
     /**
      * @param  array<string, string>  $values
      *
-     * @throws AgentException when the .env can't be read or the write is refused
+     * @throws AgentException when the site can't take a job now, the .env can't be read, the
+     *                        result is too big for the agent, or the write is refused
      */
     public function run(Site $site, #[SensitiveParameter] array $values): AgentJob
     {
+        // The Environment tab's rule: not while the site is being set up or deleted, or has a job
+        // that hasn't finished, since a job waiting for the agent would be overtaken.
+        if (($blocker = $site->jobBlocker()) !== null) {
+            throw new AgentConflict($blocker);
+        }
         try {
             $content = (string) $this->agent->call(new SiteEnvRead($site->name))->data['content'];
         } catch (AgentNotFound) {
             // A site without a .env gets one holding these keys.
             $content = '';
+        } catch (AgentException $e) {
+            throw new AgentConflict(__('zimam.databases.write_env.unreadable', ['reason' => $e->getMessage()]));
         }
         $env = EnvFile::parse($content);
         foreach ($values as $key => $value) {
             $env->set($key, $value);
         }
+        $merged = $env->toString();
+        if (SiteEnvWrite::contentError($merged) !== null) {
+            throw new AgentConflict(__('zimam.databases.write_env.too_big'));
+        }
 
-        return $this->submit->run(new SiteEnvWrite($site->name, $env->toString()), $site, waitWhenBusy: false);
+        return $this->submit->run(new SiteEnvWrite($site->name, $merged), $site, waitWhenBusy: false);
     }
 }

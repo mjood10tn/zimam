@@ -3,6 +3,8 @@
 namespace Tests\Unit;
 
 use App\Support\EnvFile;
+use Dotenv\Dotenv;
+use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -64,12 +66,11 @@ final class EnvFileTest extends TestCase
             'hash' => ['a#b', '"a#b"'],
             'double quote' => ['a"b', '"a\"b"'],
             'single quote' => ["a'b", '"a\'b"'],
-            'dollar' => ['pa$word', '"pa$word"'],
+            'dollar' => ['pa$word', '"pa\$word"'],
             'equals' => ['a=b', '"a=b"'],
             'trailing space' => ['ab ', '"ab "'],
             'backslash' => ['a\\b', '"a\\\\b"'],
             'both' => ['a\\"b', '"a\\\\\\"b"'],
-            'newline' => ["a\nb", "\"a\nb\""],
         ];
     }
 
@@ -77,5 +78,64 @@ final class EnvFileTest extends TestCase
     public function testEnvFileQuotesSpecialValues(string $value, string $written): void
     {
         $this->assertSame("KEY={$written}\n", EnvFile::parse('')->set('KEY', $value)->toString());
+        // What was written reads back as the value, as Laravel reads it.
+        $this->assertSame(['KEY' => $value], Dotenv::parse("KEY={$written}\n"));
+    }
+
+    /** phpdotenv replaces ${VAR} in an unescaped double-quoted value; the escaped dollar sign stays a literal one. */
+    public function testDollarSignIsNotInterpolated(): void
+    {
+        $text = EnvFile::parse("HOME_DIR=/home/s_shop\n")->set('PASS', 'a${HOME_DIR}b$HOME_DIR')->toString();
+
+        $this->assertSame("HOME_DIR=/home/s_shop\nPASS=\"a\\\${HOME_DIR}b\\\$HOME_DIR\"\n", $text);
+        $this->assertSame('a${HOME_DIR}b$HOME_DIR', Dotenv::parse($text)['PASS']);
+    }
+
+    /** @return array<string, array{string}> */
+    public static function lineBreaks(): array
+    {
+        return ['line feed' => ["a\nb"], 'carriage return' => ["a\rb"], 'nul' => ["a\0b"]];
+    }
+
+    #[DataProvider('lineBreaks')]
+    public function testSetRefusesLineBreaksAndNul(string $value): void
+    {
+        $env = EnvFile::parse("A=1\n");
+
+        try {
+            $env->set('B', $value);
+            $this->fail('a value with a line break or NUL was accepted');
+        } catch (InvalidArgumentException) {
+        }
+        $this->assertSame("A=1\n", $env->toString());
+    }
+
+    /** An existing multi-line quoted value stays as it is, and its inner lines are not keys. */
+    public function testMultiLineQuotedValueIsKeptAndNotSearched(): void
+    {
+        $text = "A=1\nCERT=\"-----BEGIN-----\nDB_HOST=inside\nDB_PORT=inside\n-----END-----\"\nDB_HOST=old\n";
+
+        $env = EnvFile::parse($text);
+
+        $this->assertSame($text, $env->toString());
+        $this->assertSame(
+            "A=1\nCERT=\"-----BEGIN-----\nDB_HOST=inside\nDB_PORT=inside\n-----END-----\"\nDB_HOST=new\nDB_USERNAME=u\n",
+            $env->set('DB_HOST', 'new')->set('DB_USERNAME', 'u')->toString(),
+        );
+    }
+
+    /** Setting the key of a multi-line value replaces all of its lines. */
+    public function testSettingAMultiLineKeyReplacesItsWholeValue(): void
+    {
+        $text = "A=1\nCERT=\"line one\nline two\"\nB=2\n";
+
+        $this->assertSame("A=1\nCERT=x\nB=2\n", EnvFile::parse($text)->set('CERT', 'x')->toString());
+    }
+
+    public function testClosedQuotesAndEscapedQuotesDoNotOpenAMultiLineValue(): void
+    {
+        $text = "A=\"one line\"\nB=\"say \\\"hi\\\"\"\nC=3\n";
+
+        $this->assertSame("A=\"one line\"\nB=\"say \\\"hi\\\"\"\nC=4\n", EnvFile::parse($text)->set('C', '4')->toString());
     }
 }

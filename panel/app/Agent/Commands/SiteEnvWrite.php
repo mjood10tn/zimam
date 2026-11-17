@@ -16,6 +16,17 @@ final class SiteEnvWrite extends AgentCommand
     /** The agent's cap, in bytes (MaxTextFileBytes). */
     public const MAX_BYTES = 65536;
 
+    /** The agent's checkTextFile, in bytes as the agent counts them: null when $content can be saved. */
+    public static function contentError(#[SensitiveParameter] string $content): ?string
+    {
+        return match (true) {
+            strlen($content) > self::MAX_BYTES => __('zimam.environment.validation.size', ['max' => self::MAX_BYTES]),
+            ! mb_check_encoding($content, 'UTF-8') => __('zimam.environment.validation.utf8'),
+            str_contains($content, "\0") => __('zimam.environment.validation.nul'),
+            default => null,
+        };
+    }
+
     public function __construct(
         public readonly string $site,
         #[SensitiveParameter] public readonly string $content,

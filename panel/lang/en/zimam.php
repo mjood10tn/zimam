@@ -335,6 +335,11 @@ return [
             'cancelled' => 'The request was cancelled before it finished.',
         ],
         'busy' => 'Wait for this site’s current job to finish.',
+        'not_ready' => [
+            'provisioning' => 'This site is still being set up. Wait until it is ready.',
+            'failed' => 'This site failed to set up or to delete. Retry or delete it from its page first.',
+            'deleting' => 'This site is being deleted.',
+        ],
     ],
 
     'security' => [
@@ -822,6 +827,7 @@ return [
             'no_database' => 'Create a database first: DB_DATABASE needs one.',
             'invalid_database' => 'Choose one of this site’s databases.',
             'expired' => 'The password confirmation has expired. Make a new password to write the .env.',
+            'mismatch' => 'That isn’t the password made here, so the .env wasn’t written.',
             'submitted' => 'Writing :name’s .env',
             'written' => 'The .env is being written. The job runs in the background.',
             'refused' => 'The .env wasn’t written',

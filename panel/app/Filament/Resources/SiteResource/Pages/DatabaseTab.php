@@ -70,6 +70,14 @@ class DatabaseTab extends Component implements HasActions, HasSchemas
     #[Locked]
     public ?int $confirmedAt = null;
 
+    /**
+     * A keyed hash of the password made here, so writeEnv() takes only that
+     * password back from the browser, not any string of the right shape. The
+     * key is the app key, so the hash of a 256-bit random value reveals nothing.
+     */
+    #[Locked]
+    public ?string $passwordProof = null;
+
     /** The .env was written with this password. */
     #[Locked]
     public bool $envWritten = false;
@@ -83,7 +91,7 @@ class DatabaseTab extends Component implements HasActions, HasSchemas
     public function mount(): void
     {
         if (app(AgentHealth::class)->isReachable()) {
-            app(SyncMysql::class)->run();
+            app(SyncMysql::class)->runForSite($this->site);
         }
         $this->envDatabase = $this->site->databases()->orderBy('name')->value('name');
     }
@@ -106,7 +114,7 @@ class DatabaseTab extends Component implements HasActions, HasSchemas
             ),
             fn (): ?string => match (true) {
                 ! $this->mysqlInstalled() => __('zimam.databases.rotate.not_installed'),
-                $this->site->hasUnfinishedJob() => __('zimam.sites.busy'),
+                ($blocker = $this->site->jobBlocker()) !== null => $blocker,
                 default => null,
             },
         );
@@ -124,8 +132,8 @@ class DatabaseTab extends Component implements HasActions, HasSchemas
      */
     private function rotate(): void
     {
-        if ($this->site->status !== Site::ACTIVE || $this->site->hasUnfinishedJob()) {
-            Notification::make()->title(__('zimam.sites.busy'))->warning()->send();
+        if (($blocker = $this->site->jobBlocker()) !== null) {
+            Notification::make()->title($blocker)->warning()->send();
 
             return;
         }
@@ -156,6 +164,7 @@ class DatabaseTab extends Component implements HasActions, HasSchemas
         $this->hadUser = $hadUser;
         $this->confirmedAt = now()->getTimestamp();
         $this->envWritten = false;
+        $this->passwordProof = self::proof($password);
         $this->password = $password;
         Notification::make()->title(__('zimam.databases.rotate.submitted', ['user' => $user]))->success()->send();
     }
@@ -185,6 +194,7 @@ class DatabaseTab extends Component implements HasActions, HasSchemas
         $this->rotationDone = false;
         $this->confirmedAt = null;
         $this->envWritten = false;
+        $this->passwordProof = null;
         $this->password = null;
     }
 
@@ -207,6 +217,11 @@ class DatabaseTab extends Component implements HasActions, HasSchemas
         }
         $this->resetErrorBag('envDatabase');
         if (! is_string($password) || ! preg_match(DbUser::PASSWORD_PATTERN, $password)) {
+            return;
+        }
+        if ($this->passwordProof === null || ! hash_equals($this->passwordProof, self::proof($password))) {
+            Notification::make()->title(__('zimam.databases.write_env.mismatch'))->warning()->send();
+
             return;
         }
         $databases = $this->site->databases()->orderBy('name')->pluck('name')->all();
@@ -240,6 +255,11 @@ class DatabaseTab extends Component implements HasActions, HasSchemas
         }
         $this->envWritten = true;
         Notification::make()->title(__('zimam.databases.write_env.submitted', ['name' => $this->site->name]))->body(__('zimam.databases.submitted_body'))->success()->send();
+    }
+
+    private static function proof(#[SensitiveParameter] string $password): string
+    {
+        return hash_hmac('sha256', $password, (string) config('app.key'));
     }
 
     public function render(): View

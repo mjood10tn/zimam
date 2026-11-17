@@ -3,10 +3,12 @@
 namespace Tests\Feature\Databases;
 
 use App\Agent\Exceptions\AgentBusy;
+use App\Agent\Exceptions\AgentConflict;
 use App\Filament\Resources\SiteResource\Pages\DatabaseTab;
 use App\Filament\Resources\SiteResource\Pages\ViewSite;
 use App\Models\AgentAction;
 use App\Models\AgentJob;
+use App\Models\Database;
 use App\Models\ServerService;
 use App\Models\Site;
 use App\Models\SiteCredential;
@@ -355,6 +357,7 @@ final class DatabaseTabTest extends DatabasesTestCase
             'rotationFailure' => ['rotationFailure', 'forged'],
             'confirmedAt' => ['confirmedAt', 9999999999],
             'envWritten' => ['envWritten', true],
+            'passwordProof' => ['passwordProof', 'forged'],
         ];
     }
 
@@ -364,5 +367,132 @@ final class DatabaseTabTest extends DatabasesTestCase
         $this->expectException(CannotUpdateLockedPropertyException::class);
 
         $this->tab($this->site())->set($property, $value);
+    }
+
+    public function testSitePageLoadMakesNoDatabaseCalls(): void
+    {
+        $this->installed();
+        $site = $this->site();
+        $this->database($site);
+
+        Livewire::test(ViewSite::class, ['record' => $site->getRouteKey()])->assertSee(__('zimam.sites.tabs.database'));
+
+        // The tab is lazy: until it is opened, nothing asks the agent about databases.
+        $this->assertSame([], $this->submitted('db.list'));
+    }
+
+    /** Opening the tab asks for this site's databases only, with the cached status, and changes only its rows. */
+    public function testTabSyncsOnlyItsOwnSite(): void
+    {
+        $this->installed();
+        $shop = $this->site();
+        $blog = $this->site('blog');
+        $this->database($shop, 'main');
+        $this->database($blog, 'main');
+        $gone = Database::create(['site_id' => $shop->id, 'name' => 's_shop_gone', 'size_bytes' => 0, 'status' => Database::ACTIVE]);
+        $otherGone = Database::create(['site_id' => $blog->id, 'name' => 's_blog_gone', 'size_bytes' => 0, 'status' => Database::ACTIVE]);
+        $this->agent->database('shop', 's_shop_new', 77);
+
+        $this->tab($shop);
+
+        $this->assertSame([['site' => 'shop']], $this->submitted('db.list'));
+        $this->assertNull(Database::where('name', $gone->name)->first());
+        $this->assertSame(77, Database::where('name', 's_shop_new')->sole()->size_bytes);
+        // The other site's rows are for its own tab and the MySQL page.
+        $this->assertTrue(Database::whereKey($otherGone->id)->exists());
+    }
+
+    /** The same checks as the Environment tab, before anything is read. */
+    #[DataProvider('blockedSites')]
+    public function testWriteToEnvIsRefusedWhileTheSiteCannotTakeAJob(string $why): void
+    {
+        $this->installed();
+        $site = $this->site();
+        $this->database($site);
+        $this->agent->env('shop', "APP_NAME=Shop\n");
+        $tab = $this->tab($site);
+        $password = $this->rotate($tab);
+        $this->trackToTheEnd(AgentJob::sole());
+        $tab->call('refreshRotation');
+
+        match ($why) {
+            'deleting' => $site->update(['status' => Site::DELETING]),
+            'waiting' => $site->jobs()->create(['command' => 'site.deploy', 'status' => AgentJob::WAITING, 'params' => []]),
+        };
+        $tab->call('writeEnv', $password)->assertNotified(__('zimam.databases.write_env.refused'));
+
+        $this->assertSame([], $this->submitted('site.env.read'));
+        $this->assertSame([], $this->submitted('site.env.write'));
+        $this->assertNoTableHolds($password);
+    }
+
+    /** @return array<string, array{string}> */
+    public static function blockedSites(): array
+    {
+        return ['a site being deleted' => ['deleting'], 'a job waiting for the agent' => ['waiting']];
+    }
+
+    /** What a refusal says matches the state: a deleting site isn't "busy". */
+    public function testRotateSaysWhyTheSiteCannotTakeItNow(): void
+    {
+        $this->installed();
+        foreach ([Site::DELETING, Site::FAILED, Site::PROVISIONING] as $i => $status) {
+            $site = $this->site("site{$i}");
+            $site->update(['status' => $status]);
+
+            $this->tab($site)->assertActionDisabled('rotate');
+            $this->assertSame(__("zimam.sites.not_ready.{$status}"), $site->refresh()->jobBlocker());
+        }
+        $this->assertSame([], $this->submitted('db.user'));
+    }
+
+    public function testWriteToEnvRefusesAnOversizedResult(): void
+    {
+        $this->installed();
+        $site = $this->site();
+        $this->database($site);
+        $this->agent->env('shop', 'PAD='.str_repeat('a', 65500)."\n");
+        $tab = $this->tab($site);
+        $password = $this->rotate($tab);
+        $this->trackToTheEnd(AgentJob::sole());
+
+        $tab->call('writeEnv', $password)
+            ->assertNotified(__('zimam.databases.write_env.refused'))
+            ->assertSet('envWritten', false);
+
+        $this->assertSame([], $this->submitted('site.env.write'));
+    }
+
+    public function testWriteToEnvSaysWhenTheEnvCannotBeRead(): void
+    {
+        $this->installed();
+        $site = $this->site();
+        $this->database($site);
+        $this->agent->respond('site.env.read', new AgentConflict('~/site/shared/.env isn’t a regular file, so it isn’t read.'));
+        $tab = $this->tab($site);
+        $password = $this->rotate($tab);
+        $this->trackToTheEnd(AgentJob::sole());
+
+        $tab->call('writeEnv', $password)->assertNotified(__('zimam.databases.write_env.refused'));
+
+        $this->assertSame([], $this->submitted('site.env.write'));
+    }
+
+    /** Only the password made here goes into the .env, not any string of the right shape. */
+    public function testWriteToEnvRefusesAPasswordThatIsNotTheOneMade(): void
+    {
+        $this->installed();
+        $site = $this->site();
+        $this->database($site);
+        $tab = $this->tab($site);
+        $password = $this->rotate($tab);
+        $this->trackToTheEnd(AgentJob::sole());
+        $forged = str_repeat('x', 43);
+        $this->assertNotSame($forged, $password);
+
+        $tab->call('writeEnv', $forged)->assertNotified(__('zimam.databases.write_env.mismatch'))->assertSet('envWritten', false);
+        $this->assertSame([], $this->submitted('site.env.write'));
+
+        $tab->call('writeEnv', $password)->assertSet('envWritten', true);
     }
 }

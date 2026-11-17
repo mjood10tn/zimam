@@ -155,7 +155,7 @@ class SiteResource extends Resource
                     Livewire::make(EnvironmentTab::class, fn (Site $record): array => ['site' => $record])->key('site-environment'),
                 ]),
                 Tab::make(__('zimam.sites.tabs.database'))->schema([
-                    Livewire::make(DatabaseTab::class, fn (Site $record): array => ['site' => $record])->key('site-database'),
+                    Livewire::make(DatabaseTab::class, fn (Site $record): array => ['site' => $record])->key('site-database')->lazy(),
                 ]),
                 Tab::make(__('zimam.sites.tabs.logs'))->schema([
                     Livewire::make(SiteLogs::class, fn (Site $record): array => ['site' => $record])->key('site-logs'),

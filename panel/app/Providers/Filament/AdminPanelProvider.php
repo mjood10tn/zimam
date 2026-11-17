@@ -7,6 +7,7 @@ use App\Filament\Auth\LongSecretAppAuthentication;
 use App\Filament\AvatarProviders\InitialAvatarProvider;
 use App\Filament\Pages\Auth\Login;
 use App\Filament\Palette;
+use App\Http\Middleware\NoStorePanelPages;
 use Filament\Auth\MultiFactor\Http\Middleware\EnsureMultiFactorAuthenticationIsEnabled;
 use Filament\FontProviders\LocalFontProvider;
 use Filament\Http\Middleware\Authenticate;
@@ -68,6 +69,7 @@ class AdminPanelProvider extends PanelProvider
                 ? ''
                 : view('filament.agent-banner', ['since' => app(AgentHealth::class)->lastAnswer()])->render())
             ->middleware([
+                NoStorePanelPages::class,
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,
                 StartSession::class,

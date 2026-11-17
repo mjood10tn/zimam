@@ -137,6 +137,24 @@ class Site extends Model
                 ->exists();
     }
 
+    /**
+     * Why the site can't take a job now, in words that match its state, or
+     * null when it can: it is active and none of its jobs is unfinished.
+     */
+    public function jobBlocker(): ?string
+    {
+        return match (true) {
+            $this->status !== self::ACTIVE => __("zimam.sites.not_ready.{$this->status}"),
+            $this->hasUnfinishedJob() => __('zimam.sites.busy'),
+            default => null,
+        };
+    }
+
+    public function canTakeJob(): bool
+    {
+        return $this->jobBlocker() === null;
+    }
+
     /** The address the site answers on: HTTPS once its certificate is issued. */
     public function url(): string
     {

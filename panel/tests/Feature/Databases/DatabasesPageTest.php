@@ -160,6 +160,20 @@ final class DatabasesPageTest extends DatabasesTestCase
         $this->assertSame(0, Database::count());
     }
 
+    /** The suffix rule on its own, not the whole-name rule behind it: $ would let a trailing newline through. */
+    public function testSuffixPatternAnchorsWithAnEndOfTextAnchor(): void
+    {
+        $this->agent->installMysql();
+        $this->site();
+
+        Livewire::test(Databases::class)
+            ->callAction('create', ['site' => 'shop', 'suffix' => "main\n"])
+            ->assertHasActionErrors(['suffix' => ['regex']]);
+
+        $this->assertSame(1, preg_match('/^[a-z0-9][a-z0-9_]*$/', "main\n"), 'the pattern with $ would pass it');
+        $this->assertSame(0, preg_match(Database::SUFFIX_PATTERN, "main\n"));
+    }
+
     public function testCreateRefusesAnExistingNameAndAnUnknownSite(): void
     {
         $shop = $this->site();

@@ -5,6 +5,7 @@ namespace Tests\Feature\Databases;
 use App\Actions\SyncMysql;
 use App\Agent\Exceptions\AgentUnavailable;
 use App\Filament\Widgets\ServiceStates;
+use App\Models\AgentJob;
 use App\Models\Database;
 use App\Models\ServerService;
 use Illuminate\Support\Carbon;
@@ -99,6 +100,52 @@ final class ServicesTest extends DatabasesTestCase
         $this->assertFalse(app(SyncMysql::class)->run());
 
         $this->assertTrue(Database::whereKey($row->id)->exists());
+    }
+
+    /** A row saved just before its job is recorded is still being created or deleted: a sync in that window leaves it. */
+    public function testSyncLeavesRowsWhoseJobIsNotRecordedYet(): void
+    {
+        $site = $this->site();
+        $creating = Database::create(['site_id' => $site->id, 'name' => 's_shop_new', 'status' => Database::CREATING]);
+        $dropping = $this->database($site, 'old');
+        $dropping->update(['status' => Database::DROPPING]);
+        // The agent lists the one being dropped and not the one being created.
+        $this->agent->database('shop', 's_shop_old');
+
+        app(SyncMysql::class)->run();
+
+        $this->assertSame(Database::CREATING, $creating->refresh()->status);
+        $this->assertSame(Database::DROPPING, $dropping->refresh()->status);
+    }
+
+    /** A row that has waited longer than the window with no job is stuck, and is reconciled. */
+    public function testSyncReconcilesAJobLessRowOnceItIsStuck(): void
+    {
+        $site = $this->site();
+        $creating = Database::create(['site_id' => $site->id, 'name' => 's_shop_new', 'status' => Database::CREATING]);
+        $this->agent->installMysql();
+        $this->travel(6)->minutes();
+
+        app(SyncMysql::class)->run();
+
+        $this->assertNull(Database::find($creating->id));
+    }
+
+    public function testSyncKeepsAnUnfinishedJobsRowAndClearsTheErrorOfOneThatIsBack(): void
+    {
+        $site = $this->site();
+        $running = $this->database($site, 'running');
+        $running->update(['status' => Database::DROPPING]);
+        $running->jobs()->create(['command' => 'db.drop', 'status' => AgentJob::RUNNING, 'params' => []]);
+        $failed = $this->database($site, 'failed');
+        $failed->update(['status' => Database::FAILED, 'last_error' => 'MySQL refused the CREATE']);
+
+        app(SyncMysql::class)->run();
+
+        $this->assertSame(Database::DROPPING, $running->refresh()->status);
+        $failed->refresh();
+        $this->assertSame(Database::ACTIVE, $failed->status);
+        $this->assertNull($failed->last_error);
     }
 
     /** A database of a site the panel doesn't know has no row to hang on. */

@@ -71,15 +71,10 @@ class EnvironmentTab extends Component implements HasActions, HasSchemas
     /** The .env as read, only in the response of the reveal request. */
     private ?string $content = null;
 
-    /** The agent's checkTextFile, in bytes as the agent counts them: null when $content can be saved. */
+    /** The agent's checks of a text file: null when $content can be saved. */
     public static function contentError(#[SensitiveParameter] string $content): ?string
     {
-        return match (true) {
-            strlen($content) > SiteEnvWrite::MAX_BYTES => __('zimam.environment.validation.size', ['max' => SiteEnvWrite::MAX_BYTES]),
-            ! mb_check_encoding($content, 'UTF-8') => __('zimam.environment.validation.utf8'),
-            str_contains($content, "\0") => __('zimam.environment.validation.nul'),
-            default => null,
-        };
+        return SiteEnvWrite::contentError($content);
     }
 
     public function revealAction(): Action
@@ -190,7 +185,7 @@ class EnvironmentTab extends Component implements HasActions, HasSchemas
 
             return false;
         }
-        if ($this->site->status !== Site::ACTIVE || $this->site->hasUnfinishedJob()) {
+        if (! $this->site->canTakeJob()) {
             Notification::make()->title(__('zimam.sites.busy'))->warning()->send();
 
             return false;
