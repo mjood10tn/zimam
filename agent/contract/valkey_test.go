@@ -46,8 +46,8 @@ func TestSystemStatusServices(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.Services = ServicesStatus{
-		MySQL:  ServiceStatus{Installed: true, Version: "8.4.13", Active: true},
-		Valkey: ServiceStatus{},
+		MySQL:  &ServiceStatus{Installed: true, Version: "8.4.13", Active: true},
+		Valkey: &ServiceStatus{},
 	}
 	b, err := json.Marshal(r)
 	if err != nil {

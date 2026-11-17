@@ -117,50 +117,60 @@
       "additionalProperties": false,
       "properties": {
         "mysql": {
-          "additionalProperties": false,
-          "properties": {
-            "active": {
-              "type": "boolean"
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "active": {
+                  "type": "boolean"
+                },
+                "installed": {
+                  "type": "boolean"
+                },
+                "version": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "active",
+                "installed",
+                "version"
+              ],
+              "type": "object"
             },
-            "installed": {
-              "type": "boolean"
-            },
-            "version": {
-              "type": "string"
+            {
+              "type": "null"
             }
-          },
-          "required": [
-            "active",
-            "installed",
-            "version"
-          ],
-          "type": "object"
+          ]
         },
         "valkey": {
-          "additionalProperties": false,
-          "properties": {
-            "active": {
-              "type": "boolean"
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "active": {
+                  "type": "boolean"
+                },
+                "installed": {
+                  "type": "boolean"
+                },
+                "version": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "active",
+                "installed",
+                "version"
+              ],
+              "type": "object"
             },
-            "installed": {
-              "type": "boolean"
-            },
-            "version": {
-              "type": "string"
+            {
+              "type": "null"
             }
-          },
-          "required": [
-            "active",
-            "installed",
-            "version"
-          ],
-          "type": "object"
+          ]
         }
       },
-      "required": [
-        "mysql",
-        "valkey"
-      ],
       "type": "object"
     },
     "updates": {

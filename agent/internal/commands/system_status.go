@@ -34,10 +34,7 @@ func systemStatus(d sysexec.Deps) Handler {
 		if err != nil {
 			return nil, err
 		}
-		svc, err := servicesStatus(ctx, d)
-		if err != nil {
-			return nil, err
-		}
+		svc := servicesStatus(ctx, d)
 		reboot, err := exists(d.Paths.RebootRequired())
 		if err != nil {
 			return nil, err
@@ -149,25 +146,28 @@ func exists(path string) (bool, error) {
 
 // servicesStatus reports MySQL and Valkey from services.json, with each
 // installed one's unit state read live. A service that was never installed
-// costs no systemctl call, and a server without the file reports neither.
-func servicesStatus(ctx context.Context, d sysexec.Deps) (contract.ServicesStatus, error) {
+// costs no systemctl call. What can't be read is left unknown, with a log
+// line, and never fails the status: a corrupt services.json leaves both
+// unknown, a unit systemctl can't answer for leaves that service unknown.
+func servicesStatus(ctx context.Context, d sysexec.Deps) contract.ServicesStatus {
 	st, err := services.Load(d.Paths)
 	if err != nil {
-		return contract.ServicesStatus{}, err
+		d.Logf("system.status: services unknown: %v", err)
+		return contract.ServicesStatus{}
 	}
-	one := func(e services.Entry, unit string) (contract.ServiceStatus, error) {
+	one := func(name string, e services.Entry, unit string) *contract.ServiceStatus {
 		if !e.Installed {
-			return contract.ServiceStatus{}, nil
+			return &contract.ServiceStatus{}
 		}
 		active, err := unitActive(ctx, d, unit)
-		return contract.ServiceStatus{Installed: true, Version: e.Version, Active: active}, err
+		if err != nil {
+			d.Logf("system.status: %s state unknown: %v", name, err)
+			return nil
+		}
+		return &contract.ServiceStatus{Installed: true, Version: e.Version, Active: active}
 	}
-	var out contract.ServicesStatus
-	if out.MySQL, err = one(st.MySQL, "mysql"); err != nil {
-		return contract.ServicesStatus{}, err
+	return contract.ServicesStatus{
+		MySQL:  one("mysql", st.MySQL, "mysql"),
+		Valkey: one("valkey", st.Valkey, "valkey-server"),
 	}
-	if out.Valkey, err = one(st.Valkey, "valkey-server"); err != nil {
-		return contract.ServicesStatus{}, err
-	}
-	return out, nil
 }

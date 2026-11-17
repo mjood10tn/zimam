@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -140,6 +141,7 @@ func TestStatusAllFields(t *testing.T) {
 		Updates:        contract.UpdateCounts{Total: new(5), Security: new(2), CheckedAt: &checked},
 		PanelDomain:    "panel.example.com",
 		ACMEDirectory:  config.DefaultACMEDirectory,
+		Services:       contract.ServicesStatus{MySQL: &contract.ServiceStatus{}, Valkey: &contract.ServiceStatus{}},
 	}
 	if got := getStatus(t, d); !reflect.DeepEqual(got, want) {
 		t.Errorf("system.status =\n%+v\nwant\n%+v", got, want)
@@ -369,8 +371,8 @@ func mysqlActive(active bool) sysexec.Script {
 func TestStatusWithoutServices(t *testing.T) {
 	run := sysexec.NewFakeRunner(nginxV(t))
 	st := getStatus(t, statusDeps(t, run))
-	if st.Services != (contract.ServicesStatus{}) {
-		t.Errorf("services = %+v, want none", st.Services)
+	if want := (contract.ServicesStatus{MySQL: &contract.ServiceStatus{}, Valkey: &contract.ServiceStatus{}}); !reflect.DeepEqual(st.Services, want) {
+		t.Errorf("services = %+v, want none installed", st.Services)
 	}
 	if n := len(run.Calls()); n != 1 {
 		t.Errorf("ran %d commands, want only nginx -v", n)
@@ -384,23 +386,60 @@ func TestStatusReportsMySQL(t *testing.T) {
 		if err := services.Update(d.Paths, func(s *services.State) { s.MySQL = services.Entry{Installed: true, Version: "8.4.13"} }); err != nil {
 			t.Fatal(err)
 		}
-		want := contract.ServicesStatus{MySQL: contract.ServiceStatus{Installed: true, Version: "8.4.13", Active: active}}
-		if got := getStatus(t, d).Services; got != want {
+		want := contract.ServicesStatus{MySQL: &contract.ServiceStatus{Installed: true, Version: "8.4.13", Active: active}, Valkey: &contract.ServiceStatus{}}
+		if got := getStatus(t, d).Services; !reflect.DeepEqual(got, want) {
 			t.Errorf("active = %v: services = %+v, want %+v", active, got, want)
 		}
 	}
 }
 
-func TestStatusRefusesACorruptServicesFile(t *testing.T) {
+// A services.json that can't be read leaves the services unknown and costs
+// the rest of the status nothing.
+func TestStatusServicesUnknownWhenTheFileIsCorrupt(t *testing.T) {
+	var logs []string
 	d := statusDeps(t, sysexec.NewFakeRunner(nginxV(t)))
+	d.Logf = func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) }
 	if err := os.MkdirAll(d.Paths.StateDir(), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(d.Paths.ServicesState(), []byte(`{"mysql":`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := statusHandler(t, d)(context.Background(), &contract.SystemStatusParams{}); err == nil {
-		t.Error("system.status ignored a corrupt services.json")
+	st := getStatus(t, d)
+	if st.Services.MySQL != nil || st.Services.Valkey != nil {
+		t.Errorf("services = %+v, want both unknown", st.Services)
+	}
+	if st.AgentVersion == "" || st.NginxVersion == "" {
+		t.Errorf("the rest of the status was lost: %+v", st)
+	}
+	if !strings.Contains(strings.Join(logs, "\n"), "services") {
+		t.Errorf("nothing logged about the services file: %q", logs)
+	}
+	b, err := json.Marshal(st.Services)
+	if err != nil || string(b) != `{}` {
+		t.Errorf("unknown services encode as %s (%v), want {}", b, err)
+	}
+}
+
+// A unit that systemctl can't be asked about is unknown; the other service
+// is still reported.
+func TestStatusServiceUnknownWhenSystemctlFails(t *testing.T) {
+	boom := sysexec.Script{Path: "/usr/bin/systemctl", Args: []string{"is-active", "--quiet", "mysql"}}
+	boom.Err = errors.New("systemctl: no such file")
+	valkey := sysexec.Script{Path: "/usr/bin/systemctl", Args: []string{"is-active", "--quiet", "valkey-server"}}
+	d := statusDeps(t, sysexec.NewFakeRunner(nginxV(t), boom, valkey))
+	if err := services.Update(d.Paths, func(s *services.State) {
+		s.MySQL = services.Entry{Installed: true, Version: "8.4.13"}
+		s.Valkey = services.Entry{Installed: true, Version: "9.0.4"}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	st := getStatus(t, d)
+	if st.Services.MySQL != nil {
+		t.Errorf("mysql = %+v, want unknown", st.Services.MySQL)
+	}
+	if v := st.Services.Valkey; v == nil || !v.Installed || !v.Active || v.Version != "9.0.4" {
+		t.Errorf("valkey = %+v, want installed and active", v)
 	}
 }
 
@@ -415,8 +454,8 @@ func TestStatusReportsValkey(t *testing.T) {
 		if err := services.Update(d.Paths, func(s *services.State) { s.Valkey = services.Entry{Installed: true, Version: "9.0.4"} }); err != nil {
 			t.Fatal(err)
 		}
-		want := contract.ServicesStatus{Valkey: contract.ServiceStatus{Installed: true, Version: "9.0.4", Active: active}}
-		if got := getStatus(t, d).Services; got != want {
+		want := contract.ServicesStatus{MySQL: &contract.ServiceStatus{}, Valkey: &contract.ServiceStatus{Installed: true, Version: "9.0.4", Active: active}}
+		if got := getStatus(t, d).Services; !reflect.DeepEqual(got, want) {
 			t.Errorf("active = %v: services = %+v, want %+v", active, got, want)
 		}
 	}

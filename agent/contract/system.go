@@ -58,10 +58,12 @@ type UpdateCounts struct {
 	CheckedAt *time.Time `json:"checked_at"`
 }
 
-// ServicesStatus is the optional services Zimam installs on request.
+// ServicesStatus is the optional services Zimam installs on request. A
+// service the agent could not read is left out (unknown), which is not the
+// same as one that is not installed.
 type ServicesStatus struct {
-	MySQL  ServiceStatus `json:"mysql"`
-	Valkey ServiceStatus `json:"valkey"`
+	MySQL  *ServiceStatus `json:"mysql,omitempty"`
+	Valkey *ServiceStatus `json:"valkey,omitempty"`
 }
 
 // ServiceStatus is one service: whether its package is installed, its
