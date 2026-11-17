@@ -129,3 +129,55 @@ func TestDbUserNamesAnUnlistedDatabaseWithTheSitesGrant(t *testing.T) {
 		t.Errorf("message %q", ae.Message)
 	}
 }
+
+// A failure while clearing other accounts' grants, with the cleanup failing
+// too, leaves a database that may still carry another account's grant. It
+// stays out of the state, so creating it again clears that grant.
+func TestCreateWhoseGrantClearingAndCleanupFailLeavesTheDatabaseUnlisted(t *testing.T) {
+	e := newDBEnv(t)
+	st := e.site(t, "blog")
+	st.DBUser = true
+	e.saveSite(t, st)
+	before := e.stateFile(t, "blog")
+	e.answer("", "")
+	e.answer("", lostConnection) // looking for grants
+	e.answer("", lostConnection) // the revoke
+	_, err := e.job(t, "db.create", create("blog", "s_blog_a"))
+	ae := wantCode(t, err, contract.ErrConflict)
+	for _, want := range []string{"s_blog_a was left in MySQL", "take it over"} {
+		if !strings.Contains(ae.Message, want) {
+			t.Errorf("message %q lacks %q", ae.Message, want)
+		}
+	}
+	if strings.Contains(ae.Message, "kept") || e.stateFile(t, "blog") != before {
+		t.Errorf("the database was listed: message %q", ae.Message)
+	}
+	if err := e.precheck(t, "db.create", create("blog", "s_blog_a")); err != nil {
+		t.Errorf("a second create is refused: %v", err)
+	}
+}
+
+// The hint to run db.create applies only to a name that belongs to the
+// site under the longest-prefix rule: s_shop_x_main is shop-x's, so shop's
+// account holding a grant on it is the old refusal.
+func TestDbUserHintsAtDbCreateOnlyForTheOwnersNames(t *testing.T) {
+	e := shopWithUser(t)
+	e.answer("", "")
+	e.answer(privRow("database", "s_shop", "localhost", `s\_shop\_x\_main`), "")
+	_, err := e.job(t, "db.user", userParams("shop", pwOne))
+	ae := wantCode(t, err, contract.ErrConflict)
+	if !strings.Contains(ae.Message, "did not give") || strings.Contains(ae.Message, "db.create") {
+		t.Errorf("message %q", ae.Message)
+	}
+	// A name another site lists is the old refusal too.
+	e = shopWithUser(t)
+	st := e.site(t, "shop-x")
+	st.Databases = []contract.DatabaseName{"s_shop_x_main"}
+	e.saveSite(t, st)
+	e.answer("", "")
+	e.answer(privRow("database", "s_shop", "localhost", `s\_shop\_x\_main`), "")
+	_, err = e.job(t, "db.user", userParams("shop", pwOne))
+	if ae := wantCode(t, err, contract.ErrConflict); !strings.Contains(ae.Message, "did not give") {
+		t.Errorf("message %q", ae.Message)
+	}
+}

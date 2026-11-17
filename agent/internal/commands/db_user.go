@@ -128,7 +128,7 @@ func requireOnlyOwnPrivileges(ctx context.Context, d sysexec.Deps, site contract
 			}
 			// The site's own grant, in Zimam's form, on a database its state
 			// doesn't list: a create that didn't finish.
-			if name := unescapedGrant(p.Object); name != "" && name.BelongsTo(site) {
+			if name := unescapedGrant(p.Object); name != "" && ownsUnlisted(d, site, name) {
 				return conflict("The MySQL account '%s'@'%s' holds a grant on the database %s, which site %s doesn't list: an earlier db.create didn't finish. Run db.create for %s to finish it.", p.User, p.Host, name, site, name)
 			}
 		case mysql.PrivTable, mysql.PrivRoutine, mysql.PrivColumn:
@@ -154,4 +154,23 @@ func unescapedGrant(pattern string) contract.DatabaseName {
 		return ""
 	}
 	return name
+}
+
+// ownsUnlisted reports whether the database name belongs to the site under
+// the longest-prefix rule and no site lists it: what a create that did not
+// finish leaves, and what running db.create for the name finishes.
+func ownsUnlisted(d sysexec.Deps, site contract.SiteName, name contract.DatabaseName) bool {
+	all, err := sites.All(d.Paths)
+	if err != nil {
+		return false
+	}
+	if owner, ok := name.OwnerAmong(siteNames(all)); !ok || owner != site {
+		return false
+	}
+	for _, s := range all {
+		if s.HasDatabase(name) {
+			return false
+		}
+	}
+	return true
 }

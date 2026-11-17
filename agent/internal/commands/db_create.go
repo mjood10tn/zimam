@@ -105,7 +105,7 @@ func dbCreate(ctx context.Context, j *jobs.Context, p contract.Params) (any, err
 	} else {
 		d.Logf("Created database %s", db)
 	}
-	undo := func(cause error) error {
+	undo := func(cause error, cleared bool) error {
 		uctx, cancel := undoCtx(ctx)
 		defer cancel()
 		statements := []mysql.Statement{mysql.RevokeAll(params.Site, db)}
@@ -126,11 +126,15 @@ func dbCreate(ctx context.Context, j *jobs.Context, p contract.Params) (any, err
 		} else {
 			d.Logf("Could not revoke the grant on %s again: %v", db, uerr)
 		}
-		// The database is in MySQL, and may hold the site's grant. Listing it in
-		// the state makes it the site's: db.list shows it, db.user accepts its
-		// grant and db.drop removes it.
+		// Past the grant clearing, the database holds only the site's own
+		// grant: listing it in the state makes it the site's (db.list shows
+		// it, db.user accepts its grant, db.drop removes it). Before that, it
+		// may still carry another account's grant, so it stays unlisted and a
+		// new create clears that grant again.
 		var extra string
-		if serr := keepDatabase(d, st, db); serr == nil {
+		if !cleared {
+			extra = fmt.Sprintf("The empty database %s was left in MySQL (cleaning up failed: %v); creating it again will take it over.", db, uerr)
+		} else if serr := keepDatabase(d, st, db); serr == nil {
 			d.Logf("Listed %s in site %s's state, since cleaning up failed", db, params.Site)
 			extra = fmt.Sprintf("The database %s was kept (cleaning up failed: %v) and is listed under the site; drop it with db.drop if it isn't wanted.", db, uerr)
 		} else {
@@ -147,20 +151,20 @@ func dbCreate(ctx context.Context, j *jobs.Context, p contract.Params) (any, err
 	}
 	if err := clearStaleGrants(ctx, d, db); err != nil {
 		if created {
-			return nil, undo(err)
+			return nil, undo(err, false)
 		}
 		return nil, err
 	}
 	if st.DBUser {
 		if _, err := mysql.Exec(ctx, d, mysql.GrantAll(params.Site, db)); err != nil {
-			return nil, undo(dbError(err))
+			return nil, undo(dbError(err), true)
 		}
 		d.Logf("Granted %s to the site's user", db)
 	}
 	st.Databases = append(slices.Clone(st.Databases), db)
 	slices.Sort(st.Databases)
 	if err := sites.Save(d.Paths, st); err != nil {
-		return nil, undo(fmt.Errorf("saving site %s's state: %w", params.Site, err))
+		return nil, undo(fmt.Errorf("saving site %s's state: %w", params.Site, err), true)
 	}
 	return contract.DatabaseResult{Site: params.Site, Database: db}, nil
 }

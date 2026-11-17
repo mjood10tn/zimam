@@ -173,6 +173,12 @@ func siteDestroy(ctx context.Context, j *jobs.Context, p contract.Params) (any, 
 	if err == nil {
 		return res, nil
 	}
+	// A stop or a timeout stays what it is: the job ends cancelled or timed
+	// out, and the panel, with no result, forgets the credentials as it does
+	// for any run that can't say how far it got.
+	if ctx.Err() != nil {
+		return nil, err
+	}
 	name := p.(*contract.SiteDestroyParams).Name
 	removed, ok := removedUsers(j.Deps(), name)
 	if !ok {

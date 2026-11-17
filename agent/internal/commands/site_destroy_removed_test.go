@@ -1,13 +1,17 @@
 package commands_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"zimam/agent/contract"
+	"zimam/agent/internal/commands"
 	"zimam/agent/internal/jobs"
+	"zimam/agent/internal/sysexec"
 	"zimam/agent/internal/valkey"
 )
 
@@ -135,5 +139,71 @@ func TestDestroyOfAGoneSiteReportsBothGone(t *testing.T) {
 	wantCode(t, err, contract.ErrNotFound)
 	if got := removedOf(t, res, err); !got.MySQLUser || !got.ValkeyUser {
 		t.Errorf("removed = %+v", got)
+	}
+}
+
+// Both users removed, then a later step fails: both are reported gone.
+func TestFailedDestroyAfterBothUsersLaterStepFails(t *testing.T) {
+	e := shopWithCache(t)
+	st := e.site(t, "shop")
+	st.DBUser = true
+	e.saveSite(t, st)
+	e.run.Add(cliLoad)
+	e.answer("", "") // MySQL ping
+	e.answer("", "") // drop user
+	if err := os.MkdirAll(filepath.Join(e.p.NginxSiteAvailable("shop"), "x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res, err := e.job(t, "site.destroy", destroyParams(false))
+	if err == nil {
+		t.Fatal("the destroy passed")
+	}
+	if got := removedOf(t, res, err); !got.MySQLUser || !got.ValkeyUser {
+		t.Errorf("removed = %+v, want both gone", got)
+	}
+}
+
+// stoppingRunner cancels or outlasts the job's context at its first run.
+type stoppingRunner struct {
+	inner  sysexec.Runner
+	cancel context.CancelFunc
+}
+
+func (r stoppingRunner) Run(ctx context.Context, c sysexec.Cmd) (sysexec.Result, error) {
+	if r.cancel != nil {
+		r.cancel()
+	} else {
+		<-ctx.Done()
+	}
+	return sysexec.Result{}, ctx.Err()
+}
+
+// A stop or a timeout is not wrapped: the job must end cancelled or timed
+// out, not failed with a result.
+func TestStoppedDestroyIsNotAFailureThatLanded(t *testing.T) {
+	for name, mk := range map[string]func() (context.Context, stoppingRunner){
+		"cancelled": func() (context.Context, stoppingRunner) {
+			ctx, cancel := context.WithCancel(context.Background())
+			return ctx, stoppingRunner{cancel: cancel}
+		},
+		"timed out": func() (context.Context, stoppingRunner) {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+			_ = cancel
+			return ctx, stoppingRunner{}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := shopWithUser(t, "s_shop_a")
+			ctx, r := mk()
+			j := &jobs.Context{ID: "01JBX7Q3A1B2C3D4E5F6G7H8J9", Logf: t.Logf, Paths: e.p, Run: r}
+			res, err := commands.JobHandlers()["site.destroy"](ctx, j, destroyParams(true))
+			if err == nil || ctx.Err() == nil {
+				t.Fatalf("err = %v, ctx.Err = %v", err, ctx.Err())
+			}
+			var landed *jobs.Landed
+			if errors.As(err, &landed) || res != nil {
+				t.Errorf("a stopped destroy returned %#v with %v; the job would end failed", res, err)
+			}
+		})
 	}
 }
