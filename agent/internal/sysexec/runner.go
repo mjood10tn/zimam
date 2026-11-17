@@ -24,7 +24,9 @@ import (
 var baseEnv = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C.UTF-8"}
 
 // Cmd is one program to run. It never goes through a shell; Path must be
-// absolute; secrets travel only in Stdin, never in Args or Env.
+// absolute; secrets travel only in Stdin, never in Args. The one secret in Env
+// is REDISCLI_AUTH, the Valkey admin password, since valkey-cli reads it from
+// there and from no other place that keeps it out of argv.
 type Cmd struct {
 	Path  string
 	Args  []string

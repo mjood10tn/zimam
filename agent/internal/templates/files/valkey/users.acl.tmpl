@@ -1,0 +1,5 @@
+user default off
+user zimam-admin on #{{sha256hex .AdminHash}} ~* &* +@all
+{{- range .Sites}}
+user s_{{safe .Name}} on #{{sha256hex .Hash}} resetkeys ~s_{{safe .Name}}:* resetchannels &s_{{safe .Name}}:* +@all -@admin -@dangerous -function
+{{- end}}

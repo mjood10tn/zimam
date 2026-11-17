@@ -238,3 +238,67 @@ func TestServicesRefusesACorruptServicesFile(t *testing.T) {
 		t.Error("Services ignored a corrupt services.json")
 	}
 }
+
+// Valkey is monitored once valkey.install has recorded it, after MySQL and
+// not before: a server without it has no valkey-server unit to report.
+func TestServicesIncludeValkeyOnceInstalled(t *testing.T) {
+	for name, installed := range map[string]bool{"installed": true, "not installed": false} {
+		t.Run(name, func(t *testing.T) {
+			units := []string{"nginx.service"}
+			blocks := [][3]string{{"nginx.service", "active", "enabled"}}
+			if installed {
+				units = append(units, "mysql.service", "valkey-server.service")
+				blocks = append(blocks, [3]string{"mysql.service", "active", "enabled"}, [3]string{"valkey-server.service", "failed", "enabled"})
+			}
+			units = append(units, alwaysUnits...)
+			blocks = append(blocks, fixedBlocks()...)
+			run := sysexec.NewFakeRunner(sysexec.Script{Path: "/usr/bin/systemctl", Args: showArgs(units...), Result: sysexec.Result{Stdout: show(blocks...)}})
+			d := testDeps(t, run)
+			if installed {
+				if err := services.Update(d.Paths, func(s *services.State) {
+					s.MySQL = services.Entry{Installed: true, Version: "8.4.13"}
+					s.Valkey = services.Entry{Installed: true, Version: "9.0.4"}
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := Services(context.Background(), d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var valkey []contract.ServiceState
+			for _, s := range got {
+				if s.Unit == "valkey-server.service" {
+					valkey = append(valkey, s)
+				}
+			}
+			var want []contract.ServiceState
+			if installed {
+				want = []contract.ServiceState{{Unit: "valkey-server.service", ActiveState: "failed", UnitFileState: "enabled"}}
+			}
+			if !reflect.DeepEqual(valkey, want) {
+				t.Errorf("valkey units = %+v, want %+v", valkey, want)
+			}
+		})
+	}
+}
+
+func TestMemTotal(t *testing.T) {
+	d := testDeps(t, sysexec.NewFakeRunner())
+	if _, err := MemTotal(d.Paths); err == nil {
+		t.Error("MemTotal read a /proc/meminfo that doesn't exist")
+	}
+	touch(t, d.Paths.ProcMeminfo())
+	if err := os.WriteFile(d.Paths.ProcMeminfo(), []byte("MemTotal: 1024 kB\nMemAvailable: 1 kB\nSwapTotal: 0 kB\nSwapFree: 0 kB\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := MemTotal(d.Paths); err != nil || got != 1<<20 {
+		t.Errorf("MemTotal = %d, %v; want 1048576", got, err)
+	}
+	if err := os.WriteFile(d.Paths.ProcMeminfo(), []byte("MemTotal: lots\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := MemTotal(d.Paths); err == nil {
+		t.Error("MemTotal accepted a size it can't read")
+	}
+}

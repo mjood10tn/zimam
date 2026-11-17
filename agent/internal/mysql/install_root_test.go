@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"zimam/agent/internal/metrics"
 	"zimam/agent/internal/paths"
 	"zimam/agent/internal/services"
 	"zimam/agent/internal/sysexec"
@@ -271,7 +272,7 @@ func mainPID(t *testing.T) string {
 
 func mustMem(t *testing.T, d sysexec.Deps) uint64 {
 	t.Helper()
-	m, err := memTotal(d)
+	m, err := metrics.MemTotal(d.Paths)
 	if err != nil {
 		t.Fatal(err)
 	}

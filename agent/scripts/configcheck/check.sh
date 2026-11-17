@@ -138,6 +138,55 @@ if [ -f "$src/etc/mysql/mysql.conf.d/zz-zimam.cnf" ]; then
 	fi
 fi
 
+# Valkey has no option that only checks a config, so its files are tested the
+# way the agent tests them: a server started from them as user valkey, with
+# no port, which exits at once on a bad file. It must also refuse an
+# unauthenticated PING, which shows the ACL file loaded with the default user
+# off. A case with only an ACL file runs it on the package's own config.
+if [ -f "$src/etc/zimam/valkey/valkey.conf" ] || [ -f "$src/etc/zimam/valkey/users.acl" ]; then
+	conf=/etc/zimam/valkey/valkey.conf
+	[ -f "$conf" ] || conf=/etc/valkey/valkey.conf
+	acl=()
+	[ ! -f /etc/zimam/valkey/users.acl ] || acl=(--aclfile /etc/zimam/valkey/users.acl)
+	tmp=$(mktemp -d /run/valkey-check.XXXXXX)
+	chown valkey:valkey "$tmp"
+	echo "== valkey-server $conf"
+	runuser -u valkey -- valkey-server "$conf" "${acl[@]}" --port 0 --unixsocket "$tmp/s.sock" \
+		--daemonize no --supervised no --pidfile "$tmp/p" --logfile '' --dir "$tmp" --save '' --appendonly no \
+		>"$tmp/out" 2>&1 &
+	runner=$!
+	for _ in $(seq 100); do
+		[ ! -S "$tmp/s.sock" ] || break
+		kill -0 "$runner" 2>/dev/null || break
+		sleep 0.1
+	done
+	if [ ! -S "$tmp/s.sock" ]; then
+		cat "$tmp/out"
+		fail "a Valkey server started from the files didn't come up"
+	fi
+	reply=$(valkey-cli -s "$tmp/s.sock" PING 2>&1 || true)
+	pkill -u valkey -x valkey-server || true
+	wait "$runner" 2>/dev/null || true
+	case "$reply" in
+	NOAUTH*) echo "the server started and refuses an unauthenticated PING" ;;
+	*) fail "an unauthenticated PING was answered with: $reply" ;;
+	esac
+fi
+
+if [ -f "$src/etc/systemd/system/valkey-server.service.d/50-zimam.conf" ]; then
+	echo "== systemd-analyze verify valkey-server.service"
+	out=$(systemd-analyze verify valkey-server.service 2>&1) || {
+		printf '%s\n' "$out"
+		fail "systemd-analyze verify failed"
+	}
+	printf '%s\n' "$out"
+	# The package's unit draws warnings that are not ours, such as one about
+	# xfs_scrub; only a line about the Valkey unit is a problem.
+	if grep -qi valkey <<<"$out"; then
+		fail "systemd-analyze verify reported problems with valkey-server.service"
+	fi
+fi
+
 # The image keeps each version's stock www.conf, so a version whose case
 # holds no pool (only ini files or the global config) still has one, and
 # php-fpm -t can run.

@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"zimam/agent/contract"
+	"zimam/agent/internal/paths"
 	"zimam/agent/internal/sysexec"
 )
 
@@ -185,4 +186,17 @@ func ParseNetDev(b []byte) (contract.NetworkCounters, error) {
 		n.TxBytes += tx
 	}
 	return n, nil
+}
+
+// MemTotal is the server's memory in bytes, as /proc/meminfo reports it.
+func MemTotal(p paths.Paths) (uint64, error) {
+	b, err := os.ReadFile(p.ProcMeminfo())
+	if err != nil {
+		return 0, err
+	}
+	m, err := ParseMeminfo(b)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", p.ProcMeminfo(), err)
+	}
+	return m.TotalBytes, nil
 }

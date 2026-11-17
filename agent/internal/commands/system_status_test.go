@@ -403,3 +403,21 @@ func TestStatusRefusesACorruptServicesFile(t *testing.T) {
 		t.Error("system.status ignored a corrupt services.json")
 	}
 }
+
+func TestStatusReportsValkey(t *testing.T) {
+	for _, active := range []bool{true, false} {
+		s := sysexec.Script{Path: "/usr/bin/systemctl", Args: []string{"is-active", "--quiet", "valkey-server"}}
+		if !active {
+			s.Result.ExitCode = 3
+		}
+		run := sysexec.NewFakeRunner(nginxV(t), s)
+		d := statusDeps(t, run)
+		if err := services.Update(d.Paths, func(s *services.State) { s.Valkey = services.Entry{Installed: true, Version: "9.0.4"} }); err != nil {
+			t.Fatal(err)
+		}
+		want := contract.ServicesStatus{Valkey: contract.ServiceStatus{Installed: true, Version: "9.0.4", Active: active}}
+		if got := getStatus(t, d).Services; got != want {
+			t.Errorf("active = %v: services = %+v, want %+v", active, got, want)
+		}
+	}
+}

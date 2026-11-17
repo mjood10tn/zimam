@@ -1,6 +1,7 @@
 package templates
 
 import (
+	"crypto/sha256"
 	"net/netip"
 
 	"zimam/agent/contract"
@@ -87,3 +88,21 @@ type SitePlaceholder struct {
 // MySQLConf fills mysql/zz-zimam.cnf. The buffer pool is a whole number of
 // MiB, which the agent works out from the server's memory.
 type MySQLConf struct{ BufferPoolMiB int }
+
+// ValkeyConf fills valkey/valkey.conf. The memory limit is a whole number of
+// MiB, which the agent works out from the server's memory.
+type ValkeyConf struct{ MaxMemoryMiB int }
+
+// ValkeyACL fills valkey/users.acl: the admin user and one user per site
+// that has a cache user. Passwords never reach the file, only the SHA-256 of
+// each, which Valkey accepts as "#<hex>".
+type ValkeyACL struct {
+	AdminHash [sha256.Size]byte
+	Sites     []ValkeySite // sorted by name
+}
+
+// ValkeySite is one site's Valkey user, s_<name>.
+type ValkeySite struct {
+	Name contract.SiteName
+	Hash [sha256.Size]byte
+}

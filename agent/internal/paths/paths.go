@@ -266,6 +266,23 @@ func (p Paths) PHPWwwPool(v contract.PHPVersion) string {
 // later one wins, so the name starts with zz to sort after mysqld.cnf.
 func (p Paths) MySQLConf() string { return p.at("etc/mysql/mysql.conf.d/zz-zimam.cnf") }
 
+// Valkey: Zimam's own config directory (root:valkey 0750), which holds the
+// rendered config and ACL file (root:valkey 0640) and the admin password
+// (root 0600), and a systemd drop-in beside the package's unit, which is
+// never edited (§11.3). The ACL lock keeps two writers of the ACL file apart.
+// A candidate server for the config test runs in ValkeyTestDir, a fixed
+// directory so a stale one is found and removed.
+func (p Paths) ValkeyDir() string       { return p.at("etc/zimam/valkey") }
+func (p Paths) ValkeyConf() string      { return p.at("etc/zimam/valkey/valkey.conf") }
+func (p Paths) ValkeyACL() string       { return p.at("etc/zimam/valkey/users.acl") }
+func (p Paths) ValkeyAdminPass() string { return p.at("etc/zimam/valkey/admin.pass") }
+func (p Paths) ValkeyDropInDir() string { return p.at("etc/systemd/system/valkey-server.service.d") }
+func (p Paths) ValkeyDropIn() string {
+	return p.at("etc/systemd/system/valkey-server.service.d/50-zimam.conf")
+}
+func (p Paths) ValkeyACLLock() string { return p.at("run/zimam/locks/valkey-acl.lock") }
+func (p Paths) ValkeyTestDir() string { return p.at("run/zimam-valkey-test") }
+
 // systemd: Zimam's own units (§7.1) and the journal's limits (§11.3)
 
 func (p Paths) SystemdUnit(name string) string { return p.at("etc/systemd/system", name) }

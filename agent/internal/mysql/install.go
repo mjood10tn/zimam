@@ -58,7 +58,7 @@ const notApplied = "MySQL is installed with the package's own settings and is no
 // again converges: installed packages are no error, and the file is
 // rendered, tested and loaded again.
 func Install(ctx context.Context, d sysexec.Deps) (string, error) {
-	mem, err := memTotal(d)
+	mem, err := metrics.MemTotal(d.Paths)
 	if err != nil {
 		return "", err
 	}
@@ -95,18 +95,6 @@ func Install(ctx context.Context, d sysexec.Deps) (string, error) {
 // memory: a quarter of it in whole MiB, at least 128 and at most 4096.
 func BufferPoolMiB(memTotalBytes uint64) int {
 	return int(min(max(memTotalBytes/4>>20, 128), 4096))
-}
-
-func memTotal(d sysexec.Deps) (uint64, error) {
-	b, err := os.ReadFile(d.Paths.ProcMeminfo())
-	if err != nil {
-		return 0, err
-	}
-	m, err := metrics.ParseMeminfo(b)
-	if err != nil {
-		return 0, fmt.Errorf("%s: %w", d.Paths.ProcMeminfo(), err)
-	}
-	return m.TotalBytes, nil
 }
 
 // liveValues are what the running server reports.

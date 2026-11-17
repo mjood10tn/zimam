@@ -28,3 +28,12 @@ func TestMySQLInstallHasAHandlerAndNoPrecheck(t *testing.T) {
 		t.Error("mysql.install has a precheck: running it again must converge, not conflict")
 	}
 }
+
+func TestValkeyInstallHasAHandlerAndNoPrecheck(t *testing.T) {
+	if JobHandlers()["valkey.install"] == nil {
+		t.Error("JobHandlers has no valkey.install")
+	}
+	if _, ok := Prechecks(sysexec.Deps{})["valkey.install"]; ok {
+		t.Error("valkey.install has a precheck: running it again must converge, not conflict")
+	}
+}

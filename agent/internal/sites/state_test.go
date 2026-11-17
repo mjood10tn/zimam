@@ -215,3 +215,57 @@ func TestStateDatabases(t *testing.T) {
 		}
 	}
 }
+
+// A state file written before cache users existed loads and saves again
+// without one changed byte, and a site with a cache user keeps its hash.
+func TestStateCacheUserHash(t *testing.T) {
+	p := paths.Paths{Root: t.TempDir()}
+	base := State{Name: "my-shop", Domain: "shop.example.com", Type: contract.SiteStatic, TemplateVersion: 1, Security: DefaultSecurity()}
+	if err := Save(p, base); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(p.SiteState("my-shop"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(before), "cache_user_hash") {
+		t.Fatalf("a site without a cache user writes the field:\n%s", before)
+	}
+	st, err := Load(p, "my-shop")
+	if err != nil || st.CacheUserHash != "" {
+		t.Fatalf("Load = %+v, %v", st, err)
+	}
+	if err := Save(p, st); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := os.ReadFile(p.SiteState("my-shop")); string(after) != string(before) {
+		t.Errorf("saving a state without a cache user changed its bytes:\n%s\nwas\n%s", after, before)
+	}
+
+	withHash := base
+	withHash.CacheUserHash = strings.Repeat("ab", 32)
+	if err := Save(p, withHash); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(p, "my-shop")
+	if err != nil || got.CacheUserHash != withHash.CacheUserHash {
+		t.Fatalf("Load = %+v, %v; want the hash back", got, err)
+	}
+	if data, _ := os.ReadFile(p.SiteState("my-shop")); !strings.Contains(string(data), `"cache_user_hash": "`+withHash.CacheUserHash+`"`) {
+		t.Errorf("state file lacks the field:\n%s", data)
+	}
+
+	for name, hash := range map[string]string{
+		"too short":  strings.Repeat("ab", 31),
+		"too long":   strings.Repeat("ab", 33),
+		"upper case": strings.Repeat("AB", 32),
+		"not hex":    strings.Repeat("xy", 32),
+		"a newline":  strings.Repeat("ab", 31) + "a\n",
+	} {
+		bad := base
+		bad.CacheUserHash = hash
+		if err := Save(p, bad); err == nil {
+			t.Errorf("%s: Save accepted %q", name, hash)
+		}
+	}
+}

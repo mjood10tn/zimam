@@ -42,12 +42,20 @@ type State struct {
 	// on the new database. A site that never had a database leaves both out.
 	Databases []contract.DatabaseName `json:"databases,omitempty"`
 	DBUser    bool                    `json:"db_user,omitempty"`
+	// CacheUserHash is the SHA-256 (64 lowercase hex digits) of the password of
+	// the site's Valkey user, set by cache.user. Valkey's ACL file is rendered
+	// from it, so it is the only record of that password the agent keeps.
+	CacheUserHash string `json:"cache_user_hash,omitempty"`
 }
 
 // KeyFingerprint is the shape of an OpenSSH SHA-256 key fingerprint:
 // "SHA256:" and 32 bytes in unpadded base64. A site's deploy key
 // fingerprint must have it, in the state file and in site.repo's result.
 var KeyFingerprint = regexp.MustCompile(`^SHA256:[A-Za-z0-9+/]{43}$`)
+
+// cacheUserHashRe is a SHA-256 in lowercase hex, the form Valkey's ACL file
+// takes after "#".
+var cacheUserHashRe = regexp.MustCompile(`^[0-9a-f]{64}\z`)
 
 // Security is a site's security settings (§9.6). site.security changes
 // them from Task 33 on; until then every site has the defaults. Password
@@ -93,6 +101,9 @@ func (s State) validate() error {
 	}
 	if msg := s.checkDatabases(); msg != "" {
 		f["databases"] = msg
+	}
+	if s.CacheUserHash != "" && !cacheUserHashRe.MatchString(s.CacheUserHash) {
+		f["cache_user_hash"] = "must be 64 lowercase hex digits"
 	}
 	return f.Err()
 }

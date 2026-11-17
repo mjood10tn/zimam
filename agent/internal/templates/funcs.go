@@ -1,6 +1,8 @@
 package templates
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/netip"
 	"reflect"
@@ -15,6 +17,7 @@ var funcs = template.FuncMap{
 	"prefix":       prefix,
 	"htpasswdLine": htpasswdLine,
 	"laravelKey":   laravelKey,
+	"sha256hex":    sha256hex,
 }
 
 // safeRe is all a string may contain on its way into a config file. Without
@@ -66,3 +69,8 @@ func laravelKey(k string) (string, error) {
 	}
 	return k, nil
 }
+
+// sha256hex renders a SHA-256 sum as the 64 lowercase hex digits Valkey's ACL
+// file takes after "#". A sum is bytes, so it can't carry anything else into
+// the file.
+func sha256hex(sum [sha256.Size]byte) string { return hex.EncodeToString(sum[:]) }

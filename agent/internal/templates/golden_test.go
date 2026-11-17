@@ -2,6 +2,7 @@ package templates
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -58,8 +59,18 @@ var goldenCases = map[string][]goldenFile{
 	},
 	// The panel's vhost and pool (§7.1, §9.3), before and after its
 	// certificate exists.
-	"panel-http":  panel(false),
-	"panel-https": panel(true),
+	// What valkey.install writes: the config with the file it names, the ACL
+	// file with and without site users, and the systemd drop-in that starts
+	// the server on the config.
+	"valkey-conf":      {valkeyConfFile(), valkeyACLFile(nil)},
+	"valkey-acl-empty": {valkeyACLFile(nil)},
+	"valkey-acl-sites": {valkeyACLFile([]ValkeySite{
+		{Name: "blog", Hash: sha256.Sum256([]byte("blog password"))},
+		{Name: "my-shop", Hash: sha256.Sum256([]byte("shop password"))},
+	})},
+	"valkey-dropin": {{path: paths.Paths{}.ValkeyDropIn(), tmpl: "valkey/valkey-server-dropin.conf"}},
+	"panel-http":    panel(false),
+	"panel-https":   panel(true),
 	// Zimam's own units (§7.1, §11.3).
 	"units": units(),
 	// The log policy (§11.3): Zimam's own rules, one site's, and the journal's.
@@ -123,6 +134,16 @@ func secured(sec SiteSecurity, pool SitePool) []goldenFile {
 		files = append(files, goldenFile{path: p.SiteHtpasswd("shop"), tmpl: "nginx/htpasswd", data: func() any { return Htpasswd{Users: testUsers} }})
 	}
 	return files
+}
+
+func valkeyConfFile() goldenFile {
+	return goldenFile{path: paths.Paths{}.ValkeyConf(), tmpl: "valkey/valkey.conf", data: func() any { return ValkeyConf{MaxMemoryMiB: 204} }}
+}
+
+func valkeyACLFile(sites []ValkeySite) goldenFile {
+	return goldenFile{path: paths.Paths{}.ValkeyACL(), tmpl: "valkey/users.acl", data: func() any {
+		return ValkeyACL{AdminHash: sha256.Sum256([]byte("admin password")), Sites: sites}
+	}}
 }
 
 func site(v SiteVhost) []goldenFile {
