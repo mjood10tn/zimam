@@ -198,3 +198,9 @@ func quote(name string) string { return "`" + name + "`" }
 func grantTarget(name contract.DatabaseName) string {
 	return quote(strings.ReplaceAll(string(name), "_", `\_`)) + ".*"
 }
+
+// Ping is a statement that does nothing but show that MySQL answers, for a
+// caller that must know before it changes something else.
+func Ping() Statement {
+	return Statement{kind: "ping", sql: "SELECT 1;"}
+}

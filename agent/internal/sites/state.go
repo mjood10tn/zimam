@@ -46,12 +46,26 @@ type State struct {
 	// the site's Valkey user, set by cache.user. Valkey's ACL file is rendered
 	// from it, so it is the only record of that password the agent keeps.
 	CacheUserHash string `json:"cache_user_hash,omitempty"`
+	// CachePurge is how far site.destroy got removing the site's Valkey keys when it
+	// ran out of time or failed: which of its two passes, and the SCAN cursor to
+	// continue from, so that running the command again makes progress however
+	// large the keyspace is. It is cleared when the keys are gone, and by
+	// cache.user, which starts the site's keys afresh.
+	CachePurge *CachePurge `json:"cache_purge,omitempty"`
 }
 
 // KeyFingerprint is the shape of an OpenSSH SHA-256 key fingerprint:
 // "SHA256:" and 32 bytes in unpadded base64. A site's deploy key
 // fingerprint must have it, in the state file and in site.repo's result.
 var KeyFingerprint = regexp.MustCompile(`^SHA256:[A-Za-z0-9+/]{43}$`)
+
+// CachePurge is the saved progress of removing a site's Valkey keys.
+type CachePurge struct {
+	Pass   int    `json:"pass"`   // 1: before the user is removed, 2: after
+	Cursor string `json:"cursor"` // the SCAN cursor to continue from, in digits
+}
+
+var purgeCursorRe = regexp.MustCompile(`^[0-9]{1,20}\z`)
 
 // cacheUserHashRe is a SHA-256 in lowercase hex, the form Valkey's ACL file
 // takes after "#".
@@ -104,6 +118,16 @@ func (s State) validate() error {
 	}
 	if s.CacheUserHash != "" && !cacheUserHashRe.MatchString(s.CacheUserHash) {
 		f["cache_user_hash"] = "must be 64 lowercase hex digits"
+	}
+	if c := s.CachePurge; c != nil {
+		switch {
+		case c.Pass != 1 && c.Pass != 2:
+			f["cache_purge"] = "pass must be 1 or 2"
+		case !purgeCursorRe.MatchString(c.Cursor):
+			f["cache_purge"] = "cursor must be digits"
+		case s.CacheUserHash == "":
+			f["cache_purge"] = "needs a cache user hash"
+		}
 	}
 	return f.Err()
 }

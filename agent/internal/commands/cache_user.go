@@ -62,29 +62,30 @@ func requireValkeyRunning(ctx context.Context, d sysexec.Deps) error {
 
 // cacheHashChange is the state change valkey.ApplyUsers runs under the lock
 // on Valkey's users: it sets the site's cache user hash, or clears it when
-// hash is empty, and records the hash it replaced in previous. The state is
+// hash is empty, and records the hash it replaced in previous. Progress of removing the
+// site's keys is dropped with it: a site given a user afresh starts afresh. The state is
 // read again here, under the lock, so the change never overwrites a field
 // another command saved since the job began. Its revert puts the old hash back.
 func cacheHashChange(d sysexec.Deps, site contract.SiteName, hash string, previous *string) func() (func() error, error) {
-	set := func(h string) error {
-		st, err := loadDBSite(d, site)
-		if err != nil {
-			return err
-		}
-		st.CacheUserHash = h
-		return sites.Save(d.Paths, st)
-	}
 	return func() (func() error, error) {
 		st, err := loadDBSite(d, site)
 		if err != nil {
 			return nil, err
 		}
 		*previous = st.CacheUserHash
-		if err := set(hash); err != nil {
+		oldHash, oldPurge := st.CacheUserHash, st.CachePurge
+		st.CacheUserHash, st.CachePurge = hash, nil
+		if err := sites.Save(d.Paths, st); err != nil {
 			return nil, fmt.Errorf("the state of site %s could not be saved: %w", site, err)
 		}
-		old := *previous
-		return func() error { return set(old) }, nil
+		return func() error {
+			st, err := loadDBSite(d, site)
+			if err != nil {
+				return err
+			}
+			st.CacheUserHash, st.CachePurge = oldHash, oldPurge
+			return sites.Save(d.Paths, st)
+		}, nil
 	}
 }
 
@@ -137,4 +138,39 @@ func cacheUser(ctx context.Context, j *jobs.Context, p contract.Params) (any, er
 		d.Logf("Closed %d connection(s) of the site's Valkey user that were opened with the old password", n)
 	}
 	return contract.ServiceUserResult{Site: params.Site}, nil
+}
+
+// cachePurgeState is what site.destroy's removal of a site's Valkey user and
+// keys keeps in the site's state: the progress of the purge, and, at the end,
+// the removal of the hash. Each call reads the state again, under the lock on
+// Valkey's users, so it never overwrites a field saved since.
+func cachePurgeState(d sysexec.Deps, site contract.SiteName) valkey.Removal {
+	update := func(change func(*sites.State)) error {
+		st, err := loadDBSite(d, site)
+		if err != nil {
+			return err
+		}
+		change(&st)
+		return sites.Save(d.Paths, st)
+	}
+	return valkey.Removal{
+		Load: func() (valkey.Progress, error) {
+			st, err := loadDBSite(d, site)
+			if err != nil || st.CachePurge == nil {
+				return valkey.Progress{}, err
+			}
+			return valkey.Progress{Pass: st.CachePurge.Pass, Cursor: st.CachePurge.Cursor}, nil
+		},
+		Save: func(p valkey.Progress) error {
+			return update(func(st *sites.State) {
+				st.CachePurge = nil
+				if p.Pass != 0 {
+					st.CachePurge = &sites.CachePurge{Pass: p.Pass, Cursor: p.Cursor}
+				}
+			})
+		},
+		Clear: func() error {
+			return update(func(st *sites.State) { st.CacheUserHash, st.CachePurge = "", nil })
+		},
+	}
 }

@@ -64,7 +64,7 @@ func KillUserConnections(ctx context.Context, d sysexec.Deps, site contract.Site
 	}
 	out, err := cliAdmin(ctx, d, "CLIENT", "KILL", "USER", "s_"+string(site))
 	if err != nil {
-		if strings.Contains(err.Error(), "No such user") {
+		if strings.HasPrefix(err.Error(), "valkey-cli: ERR No such user") {
 			return 0, nil
 		}
 		return 0, err
@@ -113,7 +113,7 @@ func lockUsers(ctx context.Context, d sysexec.Deps) (func(), error) {
 	cancel()
 	if err != nil {
 		if timedOut {
-			return nil, fmt.Errorf("Valkey's users are being changed by another job, which can take several minutes after an install; try again shortly: %w", err)
+			return nil, fmt.Errorf("another job is changing Valkey's users (an install or a site's removal can take several minutes); try again shortly: %w", err)
 		}
 		return nil, fmt.Errorf("waiting for the lock on Valkey's users: %w", err)
 	}

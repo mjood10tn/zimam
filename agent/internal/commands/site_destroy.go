@@ -123,21 +123,21 @@ func siteDestroy(ctx context.Context, j *jobs.Context, p contract.Params) (any, 
 		if err := requireValkeyRunning(ctx, d); err != nil {
 			return nil, err
 		}
-		clear := func() error {
-			st, err := loadDBSite(d, params.Name)
-			if err != nil {
-				return err
+		if work == requiredMySQL {
+			// The Valkey steps can't be undone; MySQL, which comes after them, must
+			// be known to answer first.
+			if _, err := mysql.Exec(ctx, d, mysql.Ping()); err != nil {
+				return nil, dbError(err)
 			}
-			st.CacheUserHash = ""
-			return sites.Save(d.Paths, st)
 		}
-		if err := valkey.RemoveSiteUser(ctx, d, cacheUsers(d.Paths), params.Name, clear); err != nil {
+		if err := valkey.RemoveSiteUser(ctx, d, cacheUsers(d.Paths), params.Name, cachePurgeState(d, params.Name)); err != nil {
 			return nil, err
 		}
 		d.Logf("Removed the Valkey user of site %s and its keys", params.Name)
-		// The state on disk no longer has the hash; the copy in hand must not
+		// The state on disk no longer has the hash or the purge progress; the copy in hand must not
 		// write it back when a MySQL step saves it.
 		st.CacheUserHash = ""
+		st.CachePurge = nil
 	}
 	switch work {
 	case requiredMySQL:

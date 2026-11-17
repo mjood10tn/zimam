@@ -348,7 +348,7 @@ func TestCacheUserRunsOnlyValkeyCli(t *testing.T) {
 // admin: each a single page that ends the scan.
 func cliPurge(site string, first, second int) []sysexec.Script {
 	step := func(n int) sysexec.Script {
-		return cli(fmt.Sprintf("0 %d\n", n), 0, "EVAL", valkey.PurgeScript, "0", "0", "s_"+site+":*")
+		return cli(fmt.Sprintf("0 %d\n", n), 0, valkey.PurgeArgs("0", contract.SiteName(site))...)
 	}
 	return []sysexec.Script{step(first), step(second)}
 }
@@ -363,8 +363,8 @@ func (e *dbEnv) addPurge(site string) {
 // options, with the purge script shortened to PURGE and its pattern.
 func valkeyWords(c sysexec.Call) []string {
 	words := c.Args[8:]
-	if words[0] == "EVAL" && words[1] == valkey.PurgeScript {
-		return []string{"PURGE", words[4]}
+	if words[0] == "EVAL" {
+		return []string{"PURGE", words[4], "@" + words[3]}
 	}
 	return words
 }

@@ -269,3 +269,52 @@ func TestStateCacheUserHash(t *testing.T) {
 		}
 	}
 }
+
+// The saved progress of removing a site's Valkey keys is left out of a state
+// that has none, round-trips when set, and is refused when malformed.
+func TestStateCachePurge(t *testing.T) {
+	p := paths.Paths{Root: t.TempDir()}
+	base := State{Name: "my-shop", Domain: "shop.example.com", Type: contract.SiteStatic, TemplateVersion: 1, Security: DefaultSecurity(), CacheUserHash: strings.Repeat("ab", 32)}
+	if err := Save(p, base); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(p.SiteState("my-shop"))
+	if strings.Contains(string(before), "cache_purge") {
+		t.Fatalf("a state without progress writes the field:\n%s", before)
+	}
+	st, err := Load(p, "my-shop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(p, st); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := os.ReadFile(p.SiteState("my-shop")); string(after) != string(before) {
+		t.Errorf("the bytes changed:\n%s\nwas\n%s", after, before)
+	}
+	withPurge := base
+	withPurge.CachePurge = &CachePurge{Pass: 2, Cursor: "18446744073709551615"}
+	if err := Save(p, withPurge); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(p, "my-shop")
+	if err != nil || got.CachePurge == nil || *got.CachePurge != *withPurge.CachePurge {
+		t.Fatalf("Load = %+v, %v", got, err)
+	}
+	for name, c := range map[string]*CachePurge{
+		"pass 0": {Pass: 0, Cursor: "1"}, "pass 3": {Pass: 3, Cursor: "1"},
+		"no cursor": {Pass: 1}, "letters": {Pass: 1, Cursor: "1a"}, "negative": {Pass: 1, Cursor: "-1"},
+		"too long": {Pass: 1, Cursor: strings.Repeat("9", 21)}, "a newline": {Pass: 1, Cursor: "1\n"},
+	} {
+		bad := base
+		bad.CachePurge = c
+		if err := Save(p, bad); err == nil {
+			t.Errorf("%s: Save accepted %+v", name, c)
+		}
+	}
+	noHash := withPurge
+	noHash.CacheUserHash = ""
+	if err := Save(p, noHash); err == nil {
+		t.Error("Save accepted progress for a site with no cache user")
+	}
+}

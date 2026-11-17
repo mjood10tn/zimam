@@ -266,8 +266,8 @@ func TestRootSiteUsers(t *testing.T) {
 		if out := asUser("s_beta", passA3, "PING"); out != "PONG" {
 			t.Errorf("the new user: %q", out)
 		}
-		// What the destroyed site left in Valkey is still there; nothing removes a
-		// site's keys.
+		// ApplyUsers removes only the user: a site's keys are removed by
+		// RemoveSiteUser, which site.destroy uses (see TestRootDestroyPurgesKeys).
 		t.Logf("a site made again under a removed name sees its old key s_beta:x: %q", asUser("s_beta", passA3, "GET", "s_beta:x"))
 	})
 
@@ -354,14 +354,12 @@ func TestRootDestroyPurgesKeys(t *testing.T) {
 		admin("SET", "s_shop:written-by-site", "1")
 	})
 
-	cleared := false
-	err := RemoveSiteUser(ctx, d, st.users, "shop", func() error {
-		delete(st.hash, "shop")
-		cleared = true
-		return nil
-	})
-	if err != nil || !cleared {
-		t.Fatalf("RemoveSiteUser = %v (cleared %v)", err, cleared)
+	var prog Progress
+	if err := RemoveSiteUser(ctx, d, st.users, "shop", memRemoval(&st, "shop", &prog)); err != nil {
+		t.Fatalf("RemoveSiteUser = %v", err)
+	}
+	if _, has := st.hash["shop"]; has || prog != (Progress{}) {
+		t.Errorf("the hash was not cleared: %v, progress %v", has, prog)
 	}
 	if got := admin("EVAL", "return #redis.call('KEYS', ARGV[1])", "0", "s_shop:*"); got != "0" {
 		t.Errorf("%s keys s_shop:* remain", got)
