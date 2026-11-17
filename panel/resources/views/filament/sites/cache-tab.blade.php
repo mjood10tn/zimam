@@ -1,6 +1,7 @@
 {{-- A site's Cache tab: its Valkey user and the limits of sharing one Valkey. The new password is in no request but the one that made it, and the one that writes it to .env. --}}
 <div class="zimam-stack">
-    @if (! $installed)
+    {{-- An open password block stays whatever the cached status says: replacing it would lose the password. --}}
+    @if (! $installed && $rotationKey === null)
         <x-filament::section :heading="__('zimam.cache.tab.heading')">
             <p class="text-sm text-gray-500 dark:text-gray-400">{{ __('zimam.cache.tab.not_installed') }}</p>
             <p class="mt-3 text-sm">

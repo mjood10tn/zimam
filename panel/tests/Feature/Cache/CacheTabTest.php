@@ -10,10 +10,12 @@ use App\Filament\Resources\SiteResource\Pages\CacheTab;
 use App\Filament\Resources\SiteResource\Pages\ViewSite;
 use App\Models\AgentAction;
 use App\Models\AgentJob;
+use App\Models\ServerService;
 use App\Models\Site;
 use App\Models\SiteCredential;
 use Filament\Notifications\Notification;
 use Illuminate\Log\Events\MessageLogged;
+use Illuminate\Support\Facades\Cache as CacheStore;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
@@ -75,6 +77,41 @@ final class CacheTabTest extends DatabasesTestCase
         $this->travel(11)->seconds();
 
         $this->tab($site)->assertDontSee(__('zimam.cache.tab.not_installed'))->assertSee(__('zimam.cache.rotate.label_first'));
+    }
+
+    /** With no status cached the tab asks the service row, as the Cache page does. */
+    public function testInstalledFallsBackToTheServiceRowWhenNoStatusIsCached(): void
+    {
+        $site = $this->site();
+        ServerService::create(['name' => ServerService::VALKEY, 'status' => ServerService::INSTALLED, 'version' => '9.0.4']);
+        // Neither reachable nor cached: only the row is left to go by.
+        $this->agent->respond('system.status', new AgentUnavailable('down'), new AgentUnavailable('down'));
+        CacheStore::forget('zimam.system_status');
+
+        $tab = $this->tab($site);
+
+        $tab->assertDontSee(__('zimam.cache.tab.not_installed'))->assertSee(__('zimam.cache.tab.limits_heading'));
+    }
+
+    /** The status going stale or empty while a password is on screen must not replace its block. */
+    public function testOpenPasswordSurvivesTheStatusGoingAway(): void
+    {
+        $this->agent->installValkey();
+        $tab = $this->tab($this->site());
+        $password = $this->rotate($tab);
+        $this->agent->changeServer(function (array $status): array {
+            $status['services']['valkey']['installed'] = false;
+
+            return $status;
+        });
+        $this->travel(11)->seconds();
+
+        $tab->call('refreshRotation')
+            ->assertSet('rotationKey', fn ($key) => $key !== null)
+            ->assertSee(__('zimam.cache.rotate.pending').'')
+            ->assertDontSee(__('zimam.cache.tab.not_installed'));
+        $this->assertStringContainsString('service-password-', $tab->html());
+        $this->assertNotInState($tab, $password);
     }
 
     public function testTabOnTheSitePage(): void
@@ -175,7 +212,8 @@ final class CacheTabTest extends DatabasesTestCase
         $this->rotate($tab);
 
         $this->trackToTheEnd(AgentJob::sole());
-        $tab->call('refreshRotation')->assertSee(__('zimam.cache.rotate.ready'))->assertSee('restart');
+        $tab->assertDontSee('restart the site’s running workers');
+        $tab->call('refreshRotation')->assertSee(__('zimam.cache.rotate.ready'))->assertSee('restart the site’s running workers');
     }
 
     /** A second rotation of the same user makes a different password, and a user that exists keeps its row. */

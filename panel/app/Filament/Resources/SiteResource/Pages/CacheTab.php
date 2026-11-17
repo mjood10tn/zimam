@@ -7,6 +7,7 @@ use App\Agent\Commands\CacheUser;
 use App\Agent\Commands\ServiceUserCommand;
 use App\Agent\ServerStatus;
 use App\Filament\Concerns\RotatesServicePassword;
+use App\Models\ServerService;
 use App\Models\Site;
 use App\Models\SiteCredential;
 use Filament\Actions\Concerns\InteractsWithActions;
@@ -36,7 +37,11 @@ class CacheTab extends Component implements HasActions, HasSchemas
     /** Whether the agent last said Valkey is installed (system.status, cached for a few seconds). */
     public function valkeyInstalled(): bool
     {
-        return (bool) (ServerStatus::current()?->data['services']['valkey']['installed'] ?? false);
+        $status = ServerStatus::current();
+
+        return $status !== null
+            ? $status->data['services']['valkey']['installed']
+            : ServerService::named(ServerService::VALKEY)?->status === ServerService::INSTALLED;
     }
 
     protected function credentialKind(): string
