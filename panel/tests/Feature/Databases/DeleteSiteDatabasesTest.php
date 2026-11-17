@@ -108,11 +108,10 @@ final class DeleteSiteDatabasesTest extends DatabasesTestCase
     }
 
     /**
-     * A destroy that failed may already have removed the MySQL and Valkey
-     * users, so no credential row is left to offer a rotation for a user that
-     * may be gone.
+     * Two sites with both service users and a rotation date each; the first is
+     * the one deleted. Returns it.
      */
-    public function testFailedDestroyForgetsTheCredentialRows(): void
+    private function sitesWithCredentials(): Site
     {
         $site = $this->site();
         $other = $this->site('blog');
@@ -121,13 +120,85 @@ final class DeleteSiteDatabasesTest extends DatabasesTestCase
                 SiteCredential::create(['site_id' => $s->id, 'kind' => $kind, 'username' => "s_{$s->name}", 'rotated_at' => now()]);
             }
         }
-        $this->agent->scriptJob('site.destroy', ['running', 'failed'], errorCode: 'internal', message: 'removing the site failed');
-        $this->siteView($site)->callAction('delete', ['current_password' => self::PASSWORD]);
 
+        return $site;
+    }
+
+    /**
+     * @param  list<string>  $states
+     * @return list<string> the kinds of credential the site still has
+     */
+    private function destroyEnding(Site $site, array $states, mixed $result): array
+    {
+        $this->agent->scriptJob('site.destroy', $states, result: $result, errorCode: 'internal', message: 'removing the site failed');
+        $this->siteView($site)->callAction('delete', ['current_password' => self::PASSWORD]);
         $this->trackToTheEnd(AgentJob::sole());
 
         $this->assertSame(Site::FAILED, $site->refresh()->status);
+        $this->assertSame(2, SiteCredential::where('site_id', Site::where('name', 'blog')->value('id'))->count(), 'another site\'s rows are kept');
+
+        return SiteCredential::where('site_id', $site->id)->orderBy('kind')->pluck('kind')->all();
+    }
+
+    /** The agent says which users a failed destroy removed; only those rows go. */
+    public function testFailedDestroyForgetsOnlyTheUsersTheAgentRemoved(): void
+    {
+        $site = $this->sitesWithCredentials();
+
+        $left = $this->destroyEnding($site, ['running', 'failed'], ['name' => 'shop', 'removed' => ['mysql_user' => false, 'valkey_user' => true]]);
+
+        $this->assertSame([SiteCredential::MYSQL], $left);
+        $this->assertNotNull(SiteCredential::where('site_id', $site->id)->where('kind', SiteCredential::MYSQL)->sole()->rotated_at, 'the user that stayed keeps its date');
+    }
+
+    public function testFailedDestroyBeforeAnyUserWasRemovedKeepsBothRows(): void
+    {
+        $site = $this->sitesWithCredentials();
+
+        $left = $this->destroyEnding($site, ['running', 'failed'], ['name' => 'shop', 'removed' => ['mysql_user' => false, 'valkey_user' => false]]);
+
+        $this->assertSame([SiteCredential::MYSQL, SiteCredential::VALKEY], $left);
+    }
+
+    public function testFailedDestroyAfterBothUsersWereRemovedForgetsBothRows(): void
+    {
+        $site = $this->sitesWithCredentials();
+
+        $left = $this->destroyEnding($site, ['running', 'failed'], ['name' => 'shop', 'removed' => ['mysql_user' => true, 'valkey_user' => true]]);
+
+        $this->assertSame([], $left);
+    }
+
+    /** An agent that doesn't say (one from before the field) is answered as before: the users may be gone. */
+    public function testFailedDestroyWithoutAnAnswerForgetsTheRows(): void
+    {
+        $site = $this->sitesWithCredentials();
+
+        $left = $this->destroyEnding($site, ['running', 'failed'], null);
+
+        $this->assertSame([], $left);
+    }
+
+    /** A destroy cancelled while it was still queued never ran: nothing is forgotten. */
+    public function testDestroyCancelledBeforeItRanForgetsNothing(): void
+    {
+        $site = $this->sitesWithCredentials();
+        $this->agent->scriptJob('site.destroy', ['cancelled']);
+        $this->siteView($site)->callAction('delete', ['current_password' => self::PASSWORD]);
+        $this->trackToTheEnd(AgentJob::sole());
+
+        $this->assertSame(Site::FAILED, $site->refresh()->status);
+        $this->assertSame(2, SiteCredential::where('site_id', $site->id)->count());
+    }
+
+    /** One cancelled after it started may have got anywhere, and says nothing. */
+    public function testDestroyCancelledAfterItStartedForgetsTheRows(): void
+    {
+        $site = $this->sitesWithCredentials();
+        $this->agent->scriptJob('site.destroy', ['running', 'cancelled']);
+        $this->siteView($site)->callAction('delete', ['current_password' => self::PASSWORD]);
+        $this->trackToTheEnd(AgentJob::sole());
+
         $this->assertSame(0, SiteCredential::where('site_id', $site->id)->count());
-        $this->assertSame(2, SiteCredential::where('site_id', $other->id)->count(), 'another site\'s rows are kept');
     }
 }

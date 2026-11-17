@@ -1031,7 +1031,9 @@ final class FakeAgentClient implements AgentClient
             'status' => $job['status'],
             'error_code' => $failed ? ($job['error_code'] ?? 'internal') : null,
             'message' => $failed ? $job['message'] : '',
-            'result' => $job['status'] === 'succeeded' ? $job['result'] : null,
+            // A failed job keeps the result the agent stored with it (a failure that
+            // landed part of its work); only a scripted one has any.
+            'result' => in_array($job['status'], ['succeeded', 'failed'], true) ? $job['result'] : null,
             'started_at' => $job['started_at'] ? self::goTime($job['started_at']) : null,
             'finished_at' => $job['finished_at'] ? self::goTime($job['finished_at']) : null,
             'log_size' => $job['status'] === 'queued' ? 0 : array_sum(array_map(fn (string $line): int => strlen($line) + 1, $job['log'])),

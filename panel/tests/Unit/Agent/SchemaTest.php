@@ -173,6 +173,14 @@ final class SchemaTest extends TestCase
         $this->assertValid(self::wire($repo->jsonParams()), file_get_contents($this->schemaPath('site.repo.params')), 'site.repo params without rotate_key');
     }
 
+    /** What a failed site.destroy's result may carry, and what the panel reads from it, match the schema. */
+    public function testSiteDestroyResultWithRemovedMatchesSchema(): void
+    {
+        $schema = file_get_contents($this->schemaPath('site.destroy.result'));
+        $this->assertValid(self::wire(['name' => 'shop']), $schema, 'site.destroy result without removed');
+        $this->assertValid(self::wire(['name' => 'shop', 'removed' => ['mysql_user' => false, 'valkey_user' => true]]), $schema, 'site.destroy result with removed');
+    }
+
     /** Optional params are left out when unset; the fake's database answers match the result schemas. */
     public function testDatabaseParamsAndFakeResultsMatchSchemas(): void
     {

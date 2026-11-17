@@ -93,16 +93,38 @@ final class SiteOutcomes
                 'status' => Site::FAILED,
                 'last_error' => $status->status === AgentJob::CANCELLED ? __('zimam.sites.delete.cancelled') : $status->message,
             ]);
-            // The agent removes the Valkey and MySQL users before anything else
-            // and a failed run can't say how far it got, so the panel can't
-            // tell whether they are still there. A password change would
-            // create the user again, so no row is kept that could offer to
-            // rotate the password of a user that may be gone.
-            SiteCredential::where('site_id', $site->id)->delete();
+            self::forgetRemovedUsers($site, $status);
             // Some of its databases may be gone already.
             if ($job->params['drop_databases'] ?? false) {
                 DB::afterCommit(fn () => app(SyncMysql::class)->run());
             }
         });
+    }
+
+    /**
+     * Drops the credential rows of the users a failed destroy removed. The
+     * agent's result says which of the two are gone; a user that is still
+     * there keeps its row, its date and its Rotate button. A destroy that was
+     * cancelled before it started touched nothing. Any other answer (an agent
+     * from before the field, or a run stopped without a result) can't say how
+     * far the agent got, so the rows go, as they always did: a password
+     * change would create the user again, and no row may offer to rotate the
+     * password of a user that may be gone.
+     */
+    private static function forgetRemovedUsers(Site $site, AgentJobStatus $status): void
+    {
+        if ($status->status === AgentJob::CANCELLED && $status->startedAt === null) {
+            return;
+        }
+        $removed = is_array($status->result) ? ($status->result['removed'] ?? null) : null;
+        $query = SiteCredential::where('site_id', $site->id);
+        if (is_array($removed)) {
+            $gone = array_keys(array_filter([
+                SiteCredential::MYSQL => ($removed['mysql_user'] ?? null) === true,
+                SiteCredential::VALKEY => ($removed['valkey_user'] ?? null) === true,
+            ]));
+            $query->whereIn('kind', $gone);
+        }
+        $query->delete();
     }
 }
