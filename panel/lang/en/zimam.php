@@ -832,6 +832,7 @@ return [
             'written' => 'The .env is being written. The job runs in the background.',
             'refused' => 'The .env wasn’t written',
             'unreadable' => 'The .env couldn’t be read: :reason',
+            'malformed' => 'The .env has a double quote that is never closed at :key, line :line, so nothing was written. Fix it in the Environment tab first.',
             'too_big' => 'The .env would be larger than the agent accepts.',
         ],
     ],

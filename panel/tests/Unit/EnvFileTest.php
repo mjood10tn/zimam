@@ -3,6 +3,7 @@
 namespace Tests\Unit;
 
 use App\Support\EnvFile;
+use App\Support\MalformedEnvFile;
 use Dotenv\Dotenv;
 use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -137,5 +138,38 @@ final class EnvFileTest extends TestCase
         $text = "A=\"one line\"\nB=\"say \\\"hi\\\"\"\nC=3\n";
 
         $this->assertSame("A=\"one line\"\nB=\"say \\\"hi\\\"\"\nC=4\n", EnvFile::parse($text)->set('C', '4')->toString());
+    }
+
+    /** A quote that is never closed swallows the rest of the file, so setting a key would lose it: nothing is written. */
+    public function testUnterminatedQuoteIsRefusedAndTheFileIsLeftAlone(): void
+    {
+        $text = "A=1\nDB_PASSWORD=\"old\nAPP_KEY=base64:k\nAPP_NAME=Shop\n";
+        $env = EnvFile::parse($text);
+
+        try {
+            $env->set('DB_PASSWORD', 'new');
+            $this->fail('a file with an open quote was edited');
+        } catch (MalformedEnvFile $e) {
+            $this->assertSame('DB_PASSWORD', $e->key);
+            $this->assertSame(2, $e->envLine);
+        }
+        $this->expectException(MalformedEnvFile::class);
+        $env->toString();
+    }
+
+    /** The whole file is suspect, so a key the writer does not set is refused too. */
+    public function testUnterminatedQuoteOnAnotherKeyIsRefusedToo(): void
+    {
+        $env = EnvFile::parse("A=\"never closed\nB=2\n");
+
+        $this->expectException(MalformedEnvFile::class);
+        $env->set('DB_HOST', '127.0.0.1');
+    }
+
+    public function testClosedMultiLineValueIsNotMalformed(): void
+    {
+        $text = "A=\"one\ntwo\"\nB=2\n";
+
+        $this->assertSame("A=\"one\ntwo\"\nB=2\nC=3\n", EnvFile::parse($text)->set('C', '3')->toString());
     }
 }

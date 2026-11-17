@@ -157,4 +157,24 @@ final class ServicesTest extends DatabasesTestCase
 
         $this->assertSame(0, Database::count());
     }
+
+    /** A sync that only changes a size doesn't restart the wait of a row that has no job. */
+    public function testSyncOfASizeDoesNotRestartTheJobLessWait(): void
+    {
+        $site = $this->site();
+        $row = $this->database($site, 'old');
+        $row->update(['status' => Database::DROPPING]);
+
+        $this->travel(4)->minutes();
+        $this->agent->database('shop', 's_shop_old', 100);
+        app(SyncMysql::class)->run();
+        $this->assertSame(Database::DROPPING, $row->refresh()->status);
+        $this->assertSame(100, $row->size_bytes);
+
+        $this->travel(2)->minutes();
+        $this->agent->database('shop', 's_shop_old', 200);
+        app(SyncMysql::class)->run();
+
+        $this->assertSame(Database::ACTIVE, $row->refresh()->status);
+    }
 }

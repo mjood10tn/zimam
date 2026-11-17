@@ -5,13 +5,16 @@ namespace App\Actions;
 use App\Agent\AgentClient;
 use App\Agent\Commands\SiteEnvRead;
 use App\Agent\Commands\SiteEnvWrite;
+use App\Agent\Exceptions\AgentBusy;
 use App\Agent\Exceptions\AgentConflict;
 use App\Agent\Exceptions\AgentException;
 use App\Agent\Exceptions\AgentNotFound;
+use App\Agent\Exceptions\AgentUnavailable;
 use App\Models\AgentJob;
 use App\Models\Site;
 use App\Models\SiteCredential;
 use App\Support\EnvFile;
+use App\Support\MalformedEnvFile;
 use SensitiveParameter;
 
 /**
@@ -63,14 +66,22 @@ final class WriteCredentialsToEnv
         } catch (AgentNotFound) {
             // A site without a .env gets one holding these keys.
             $content = '';
+        } catch (AgentBusy|AgentUnavailable $e) {
+            // The callers already say the site is busy or the agent doesn't answer.
+            throw $e;
         } catch (AgentException $e) {
             throw new AgentConflict(__('zimam.databases.write_env.unreadable', ['reason' => $e->getMessage()]));
         }
-        $env = EnvFile::parse($content);
-        foreach ($values as $key => $value) {
-            $env->set($key, $value);
+        try {
+            $env = EnvFile::parse($content);
+            foreach ($values as $key => $value) {
+                $env->set($key, $value);
+            }
+            $merged = $env->toString();
+        } catch (MalformedEnvFile $e) {
+            // Nothing is written: setting a key would lose the lines the open quote swallows.
+            throw new AgentConflict(__('zimam.databases.write_env.malformed', ['key' => $e->key, 'line' => $e->envLine]));
         }
-        $merged = $env->toString();
         if (SiteEnvWrite::contentError($merged) !== null) {
             throw new AgentConflict(__('zimam.databases.write_env.too_big'));
         }

@@ -9,6 +9,7 @@ use App\Agent\AgentHealth;
 use App\Agent\Commands\DbUser;
 use App\Agent\Exceptions\AgentBusy;
 use App\Agent\Exceptions\AgentException;
+use App\Agent\Exceptions\AgentUnavailable;
 use App\Agent\Exceptions\AgentValidationFailed;
 use App\Filament\Actions\ConfirmsPassword;
 use App\Models\AgentJob;
@@ -246,6 +247,10 @@ class DatabaseTab extends Component implements HasActions, HasSchemas
             return;
         } catch (AgentBusy) {
             Notification::make()->title(__('zimam.databases.rotate.busy'))->warning()->send();
+
+            return;
+        } catch (AgentUnavailable) {
+            Notification::make()->title(__('zimam.agent.paused'))->warning()->send();
 
             return;
         } catch (AgentException $e) {

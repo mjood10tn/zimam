@@ -106,6 +106,8 @@ final class SyncMysql
                     $row->status = Database::ACTIVE;
                     $row->last_error = null;
                 }
+                // The sync's own save mustn't restart the wait of a row that has no job.
+                $row->timestamps = false;
                 $row->save();
             }
             foreach ($rows as $name => $row) {

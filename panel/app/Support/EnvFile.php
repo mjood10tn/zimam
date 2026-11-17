@@ -20,6 +20,7 @@ final class EnvFile
         private array $entries,
         private readonly string $eol,
         private bool $finalNewline,
+        private readonly ?MalformedEnvFile $malformed = null,
     ) {}
 
     public static function parse(string $text): self
@@ -34,7 +35,8 @@ final class EnvFile
 
         $entries = [];
         $open = null;
-        foreach ($lines as $line) {
+        $openLine = 0;
+        foreach ($lines as $number => $line) {
             if ($open !== null) {
                 $open[] = $line;
                 if (self::quoteCount($line) >= 1) {
@@ -46,24 +48,33 @@ final class EnvFile
             }
             if (self::opensQuotedValue($line)) {
                 $open = [$line];
+                $openLine = $number + 1;
 
                 continue;
             }
             $entries[] = [$line];
         }
+        // A quote that is never closed swallows the rest of the file.
+        $malformed = null;
         if ($open !== null) {
             $entries[] = $open;
+            preg_match('/^\s*(?:export\s+)?([^=\s]+)\s*=/', $open[0], $m);
+            $malformed = new MalformedEnvFile($m[1] ?? '?', $openLine);
         }
 
-        return new self($entries, $eol, $finalNewline);
+        return new self($entries, $eol, $finalNewline, $malformed);
     }
 
     /**
      * @throws InvalidArgumentException for a value with a line break or NUL, which no line of a
      *                                  .env can hold safely
+     * @throws MalformedEnvFile when the file has an unterminated double quote
      */
     public function set(string $key, string $value): self
     {
+        if ($this->malformed !== null) {
+            throw $this->malformed;
+        }
         if (preg_match('/[\r\n\0]/', $value) === 1) {
             throw new InvalidArgumentException("The value of {$key} must not contain a line break or NUL.");
         }
@@ -90,8 +101,12 @@ final class EnvFile
         return $this;
     }
 
+    /** @throws MalformedEnvFile when the file has an unterminated double quote */
     public function toString(): string
     {
+        if ($this->malformed !== null) {
+            throw $this->malformed;
+        }
         $lines = array_merge(...$this->entries ?: [[]]);
 
         return implode($this->eol, $lines).($lines !== [] && $this->finalNewline ? $this->eol : '');

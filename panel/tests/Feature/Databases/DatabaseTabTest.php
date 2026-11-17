@@ -4,6 +4,7 @@ namespace Tests\Feature\Databases;
 
 use App\Agent\Exceptions\AgentBusy;
 use App\Agent\Exceptions\AgentConflict;
+use App\Agent\Exceptions\AgentUnavailable;
 use App\Filament\Resources\SiteResource\Pages\DatabaseTab;
 use App\Filament\Resources\SiteResource\Pages\ViewSite;
 use App\Models\AgentAction;
@@ -12,6 +13,7 @@ use App\Models\Database;
 use App\Models\ServerService;
 use App\Models\Site;
 use App\Models\SiteCredential;
+use Filament\Notifications\Notification;
 use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -494,5 +496,42 @@ final class DatabaseTabTest extends DatabasesTestCase
         $this->assertSame([], $this->submitted('site.env.write'));
 
         $tab->call('writeEnv', $password)->assertSet('envWritten', true);
+    }
+
+    /** An .env with an unterminated quote is not touched, and the message names the key and line. */
+    public function testWriteToEnvRefusesAnUnterminatedQuote(): void
+    {
+        $this->installed();
+        $site = $this->site();
+        $this->database($site);
+        $this->agent->env('shop', "A=1\nDB_PASSWORD=\"old\nAPP_KEY=base64:k\n");
+        $tab = $this->tab($site);
+        $password = $this->rotate($tab);
+        $this->trackToTheEnd(AgentJob::sole());
+
+        $tab->call('writeEnv', $password)
+            ->assertNotified(Notification::make()->title(__('zimam.databases.write_env.refused'))->body(__('zimam.databases.write_env.malformed', ['key' => 'DB_PASSWORD', 'line' => 2]))->danger())
+            ->assertSet('envWritten', false);
+
+        $this->assertSame([], $this->submitted('site.env.write'));
+        $this->assertSame("A=1\nDB_PASSWORD=\"old\nAPP_KEY=base64:k\n", $this->agent->envOf('shop'));
+    }
+
+    public function testWriteToEnvLetsBusyAndUnavailableReadsSayTheirOwnThing(): void
+    {
+        $this->installed();
+        $site = $this->site();
+        $this->database($site);
+        $tab = $this->tab($site);
+        $password = $this->rotate($tab);
+        $this->trackToTheEnd(AgentJob::sole());
+
+        $this->agent->respond('site.env.read', new AgentBusy('busy'));
+        $tab->call('writeEnv', $password)->assertNotified(__('zimam.databases.rotate.busy'));
+
+        $this->agent->respond('site.env.read', new AgentUnavailable('down'));
+        $tab->call('writeEnv', $password)->assertNotified(__('zimam.agent.paused'));
+
+        $this->assertSame([], $this->submitted('site.env.write'));
     }
 }
