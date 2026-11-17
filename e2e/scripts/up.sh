@@ -36,10 +36,10 @@ bridge=$(lxc network get lxdbr0 ipv4.address)
 bridge=${bridge%/*}
 
 log "the container $E2E_CONTAINER from $E2E_IMAGE"
-lxc profile show zimam-e2e >/dev/null 2>&1 || lxc profile create zimam-e2e
-lxc profile edit zimam-e2e <"$E2E_ROOT/e2e/lxd/profile.yaml"
+lxc profile show "$E2E_PROFILE" >/dev/null 2>&1 || lxc profile create "$E2E_PROFILE"
+lxc profile edit "$E2E_PROFILE" <"$E2E_ROOT/e2e/lxd/profile.yaml"
 lxc delete --force "$E2E_CONTAINER" >/dev/null 2>&1 || true
-lxc launch -q "$E2E_IMAGE" "$E2E_CONTAINER" --profile default --profile zimam-e2e
+lxc launch -q "$E2E_IMAGE" "$E2E_CONTAINER" --profile default --profile "$E2E_PROFILE"
 cip=
 for _ in $(seq 60); do
 	cip=$(lxc list "$E2E_CONTAINER" -c 4 -f csv | grep -oE '^[0-9.]+' || true)
@@ -74,22 +74,24 @@ openssl x509 -req -in "$p/api.csr" -CA "$p/ca.pem" -CAkey "$p/ca.key" -CAcreates
 	-extfile <(printf '%s\n' "subjectAltName=DNS:pebble,DNS:localhost,IP:127.0.0.1" "basicConstraints=critical,CA:FALSE" \
 		"keyUsage=critical,digitalSignature" "extendedKeyUsage=serverAuth" \
 		"subjectKeyIdentifier=hash" "authorityKeyIdentifier=keyid:always") 2>/dev/null
-for unit in zimam-e2e-pebble zimam-e2e-challtestsrv; do
+for unit in "$E2E_UNIT-pebble" "$E2E_UNIT-challtestsrv"; do
 	as_root systemctl stop "$unit" 2>/dev/null || true
 	as_root systemctl reset-failed "$unit" 2>/dev/null || true
 done
 # challtestsrv answers only Pebble's validation lookups: the names the
 # harness adds (hosts.sh), and nothing by default.
-as_root systemd-run -q --unit=zimam-e2e-challtestsrv --working-directory="$p" "$p/pebble-challtestsrv" \
-	-dnsserver :8053 -management :8055 -defaultIPv4 "" -defaultIPv6 "" -http01 "" -https01 "" -tlsalpn01 "" -doh ""
-as_root systemd-run -q --unit=zimam-e2e-pebble --working-directory="$p" -E PEBBLE_VA_NOSLEEP=1 -E PEBBLE_WFE_NONCEREJECT=0 \
-	"$p/pebble" -config "$E2E_ROOT/e2e/pebble/pebble-config.json" -dnsserver 127.0.0.1:8053
+as_root systemd-run -q --unit="$E2E_UNIT-challtestsrv" --working-directory="$p" "$p/pebble-challtestsrv" \
+	-dnsserver ":$E2E_DNS_PORT" -management ":$E2E_CHALL_PORT" -defaultIPv4 "" -defaultIPv6 "" -http01 "" -https01 "" -tlsalpn01 "" -doh ""
+# The committed config has the default ports; this run's copy has its own.
+sed -e "s/:14000\"/:$E2E_PEBBLE_PORT\"/" -e "s/:15000\"/:$E2E_PEBBLE_MGMT_PORT\"/" "$E2E_ROOT/e2e/pebble/pebble-config.json" >"$p/pebble-config.json"
+as_root systemd-run -q --unit="$E2E_UNIT-pebble" --working-directory="$p" -E PEBBLE_VA_NOSLEEP=1 -E PEBBLE_WFE_NONCEREJECT=0 \
+	"$p/pebble" -config "$p/pebble-config.json" -dnsserver "127.0.0.1:$E2E_DNS_PORT"
 for _ in $(seq 30); do
-	curl -fsS --cacert "$p/ca.pem" -o /dev/null https://localhost:14000/dir 2>/dev/null &&
-		curl -sS -o /dev/null http://localhost:8055/ 2>/dev/null && break
+	curl -fsS --cacert "$p/ca.pem" -o /dev/null "https://localhost:$E2E_PEBBLE_PORT/dir" 2>/dev/null &&
+		curl -sS -o /dev/null "http://localhost:$E2E_CHALL_PORT/" 2>/dev/null && break
 	sleep 1
 done
-curl -fsS --cacert "$p/ca.pem" -o /dev/null https://localhost:14000/dir || die "Pebble didn't start"
+curl -fsS --cacert "$p/ca.pem" -o /dev/null "https://localhost:$E2E_PEBBLE_PORT/dir" || die "Pebble didn't start"
 
 printf 'BRIDGE=%s\nCIP=%s\n' "$bridge" "$cip" >"$E2E_WORK/state.env"
 log "up: bridge $bridge, container $cip"

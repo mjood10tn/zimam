@@ -132,4 +132,56 @@ send_field "site.env.write of ../laravel" site.env.write '{"name":"../laravel","
 send_field "site.env.write with a NUL" site.env.write '{"name":"laravel","content":"APP_KEY=x\u0000\n"}' content
 send_field "site.env.write of 64 KiB + 1" site.env.write "{\"name\":\"laravel\",\"content\":\"$(printf 'x%.0s' $(seq 65537))\"}" content
 send_field "site.env.write with content 1" site.env.write '{"name":"laravel","content":1}' params
+
+# v0.3.0's database and cache commands. The SQL and the ACL file the agent
+# writes hold these values between backquotes and after a ">", so none of
+# these may reach them: every one answers validation_failed, naming the field.
+# db.create and db.drop: a database name of a site, with its prefix (php84's
+# is s_php84_) and then lowercase letters, digits and underscores, at most 64
+# characters, each underscore counting twice in a grant.
+longname=$(printf 'x%.0s' {1..60})
+# shellcheck disable=SC2016 # $(id) is the probe
+for command in db.create db.drop; do
+	for d in 's_php84_x`' 's_php84_x`; DROP DATABASE mysql; --' "s_php84_x'" 's_php84_x"' 's_php84_x;' 's_php84_x--' 's_php84_x -- y' \
+		's_php84_x y' $'s_php84_x\n' $'s_php84_x\r' 's_php84_x.y' 's_php84_x/y' "s_php84_x\\" 's_php84_x%' 's_php84_x*' 's_php84_x$(id)' \
+		's_php84_Main' 'S_php84_x' 's_php84_é' 's_php84_' 's_php84' 'x' 'main' 's_php85_x' 's_static_x' '../s_php84_x' '' \
+		"s_php84_$longname" "s_php84_$(printf '_%.0s' {1..30})" mysql sys information_schema performance_schema zimam; do
+		send_field "$command of the database '${d//$'\n'/\\n}'" "$command" "{\"site\":\"php84\",\"database\":$(json_str "$d")}" database
+	done
+	for name in ../php84 PHP84 'php84/..' ''; do
+		send_field "$command of the site '$name'" "$command" "{\"site\":$(json_str "$name"),\"database\":\"s_php84_x\"}" site
+	done
+	send_field "$command with the database 1" "$command" '{"site":"php84","database":1}' params
+done
+for name in ../php84 PHP84 'php84/..'; do
+	send_field "db.list of the site '$name'" db.list "{\"site\":$(json_str "$name")}" site
+done
+# db.user and cache.user: a password of 24 to 64 letters, digits, "_" and "-".
+# One with a quote, a backslash or a newline would break out of the SQL
+# literal or the ACL rule. The refusal names the field, and neither the reply
+# nor the audit log holds the password.
+pad=$(printf 'p%.0s' {1..30})
+for command in db.user cache.user; do
+	for p in "$pad'" "$pad\\" "$pad\'; DROP USER root" "$pad"$'\n' "$pad"$'\nx' "$pad\"" "$pad " "$pad;" "$pad\`" "$pad\$" "$pad%" "$pad:" "$pad#" "$pad>" \
+		"$pad é" "$pad/" "$pad+" "$pad=" "$pad." \
+		"$(printf 'p%.0s' {1..23})" "$(printf 'p%.0s' {1..65})" ''; do
+		send_field "$command with the password '${p//$'\n'/\\n}'" "$command" "{\"site\":\"php84\",\"password\":$(json_str "$p")}" password
+	done
+	send_field "$command of the site '../php84'" "$command" "{\"site\":\"../php84\",\"password\":\"$(printf 'p%.0s' {1..30})\"}" site
+	send_field "$command with the password 1" "$command" '{"site":"php84","password":1}' params
+	# secret_probe: the refused password shows nowhere.
+	marker=ZqMarker7e2e
+	before=$(audit_lines)
+	reply=$(request "$command" "{\"site\":\"php84\",\"password\":$(json_str "${marker}${pad}'")}")
+	entries=$(audit_since "$before")
+	if [[ $reply != *"$marker"* && $entries != *"$marker"* && $(field code <<<"$reply") == validation_failed ]]; then
+		pass "$command's refused password is in neither the reply nor the audit log"
+	else
+		fail "$command's refused password shows: reply ${reply:0:200}; audit ${entries:0:300}"
+	fi
+done
+# site.destroy's drop_databases is a boolean.
+for v in '"yes"' 1 '""'; do
+	send_field "site.destroy with drop_databases $v" site.destroy "{\"name\":\"php84\",\"drop_databases\":$v}" params
+done
 exit "$failed"

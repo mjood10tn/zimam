@@ -59,7 +59,7 @@ up() {
 		address=127.0.0.1 port=$tunnel_port
 	else
 		log "the Git host: the container $name"
-		lxc launch -q "$E2E_IMAGE" "$name" --profile default --profile zimam-e2e
+		lxc launch -q "$E2E_IMAGE" "$name" --profile default --profile "$E2E_PROFILE"
 		address=
 		for _ in $(seq 60); do
 			address=$(lxc list "$name" -c 4 -f csv | grep -oE '^[0-9.]+' || true)

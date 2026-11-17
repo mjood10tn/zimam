@@ -73,6 +73,8 @@ jobs:
         run: bash e2e/githost/githost.sh up
       - name: v0.2.0 done-when 1 to 8, a Laravel site deployed, rolled back and webhook-deployed, in the browser
         run: bash e2e/scripts/browser.sh --project v02-deploy
+      - name: v0.3.0, MySQL and Valkey from the panel, two sites with their own users, a rotation, and a site deleted with its databases, in the browser
+        run: bash e2e/scripts/browser.sh --project v03-databases
       - name: done-when 12, every root-escalation probe in one pass between two identical snapshots
         run: bash e2e/probes/run-all.sh
       - name: done-when 11, the audit re-check (every command, the redaction, the cli:root runs, certbot renew)

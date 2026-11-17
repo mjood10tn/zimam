@@ -11,7 +11,7 @@ source "$(dirname "$0")/common.sh"
 load_state
 
 if [[ $E2E_TARGET == lxd ]]; then
-	curl -fsS --cacert "$E2E_WORK/pebble/ca.pem" -o "$E2E_CA" https://localhost:15000/roots/0
+	curl -fsS --cacert "$E2E_WORK/pebble/ca.pem" -o "$E2E_CA" "https://localhost:$E2E_PEBBLE_MGMT_PORT/roots/0"
 fi
 [[ -s $E2E_CA ]] || die "no $E2E_CA"
 if ! type -P certutil >/dev/null; then
@@ -28,7 +28,7 @@ split=$E2E_WORK/ca-split
 rm -rf "$split" && mkdir -p "$split"
 awk -v dir="$split" '/-----BEGIN CERTIFICATE-----/ { n++ } n { print > (dir "/" n ".pem") }' "$E2E_CA"
 for pem in "$split"/*.pem; do
-	nick="Zimam e2e root $(basename "$pem" .pem)"
+	nick="$E2E_NSS_NICK $(basename "$pem" .pem)"
 	certutil -d "sql:$nssdb" -D -n "$nick" 2>/dev/null || true
 	certutil -d "sql:$nssdb" -A -t "C,," -n "$nick" -i "$pem"
 done

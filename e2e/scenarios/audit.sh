@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Done-when 11 (design §2, §5.8): the audit re-check. First every one of
-# the 24 commands (§5.3's 18 and v0.2.0's six) runs at least once: the
+# the 31 commands (§5.3's 18, v0.2.0's six and v0.3.0's seven) runs at least once: the
 # scenarios and probes before this sent all but php.uninstall, which runs
-# here on PHP 8.3 (installed for it and removed again), and the eight
+# here on PHP 8.3 (installed for it and removed again), and the nine
 # routine reads run here once each, as zimam, and must add no entry, while
 # site.env.read, which returns a secret, adds exactly one with its result
 # redacted (R02-D10). Then certbot renews every certificate
@@ -36,7 +36,7 @@ else
 	fail "PHP 8.3 is still installed after php.uninstall: $installed"
 fi
 
-# The eight routine reads, each answered, none audited.
+# The nine routine reads, each answered, none audited.
 before=$(audit_lines)
 reads=(
 	'agent.version' '{}'
@@ -47,6 +47,7 @@ reads=(
 	'logs.list' '{"source":"site.nginx-access","name":"php84"}'
 	'logs.read' '{"source":"journal.nginx","direction":"back","limit":3}'
 	'site.releases' '{"name":"laravel"}'
+	'db.list' '{}'
 )
 for ((i = 0; i < ${#reads[@]}; i += 2)); do
 	reply=$(request "${reads[i]}" "${reads[i + 1]}")
@@ -58,7 +59,7 @@ for ((i = 0; i < ${#reads[@]}; i += 2)); do
 	fi
 done
 if [[ $(audit_lines) == "$before" ]]; then
-	pass "the eight reads added no audit entry"
+	pass "the nine reads added no audit entry"
 else
 	fail "the reads added: $(audit_since "$before")"
 fi
@@ -88,6 +89,28 @@ else
 	pass "the panel's agent_actions and agent_jobs hold nothing of the saved .env"
 fi
 
+# The passwords the panel made for the sites' MySQL and Valkey users (saved
+# by the databases browser run) are in no agent_actions or agent_jobs row.
+passwords=("$E2E_WORK"/v03/*.pw*)
+if [[ ! -f ${passwords[0]} ]]; then
+	fail "no passwords from the databases browser run"
+else
+	actions=$(panel_sql 'select * from agent_actions')
+	jobs=$(panel_sql 'select * from agent_jobs')
+	leaked=0
+	for f in "${passwords[@]}"; do
+		pw=$(cat "$f")
+		if grep -qF "$pw" <<<"$actions" || grep -qF "$pw" <<<"$jobs"; then
+			leaked=1
+		fi
+	done
+	if ((leaked)); then
+		fail "a MySQL or Valkey password is in the panel's agent_actions or agent_jobs"
+	else
+		pass "none of the ${#passwords[@]} MySQL and Valkey passwords is in the panel's agent_actions or agent_jobs"
+	fi
+fi
+
 # certbot's renewal confs name Pebble and the hook, but not Pebble's CA,
 # which the agent passes to cert.issue's certbot the same way.
 bundle=$(in_c cat /etc/zimam/agent.json | python3 -I -c 'import json, sys; print(json.load(sys.stdin).get("acme_ca_bundle") or "")')
@@ -110,8 +133,8 @@ fi
 
 # Read through cat, so this user owns the copy: lxc runs as root here.
 in_c cat /var/log/zimam/audit.log >"$E2E_WORK/audit.log"
-python3 -I - "$E2E_WORK/audit.log" "$marker" <<'PY' || failed=1
-import json, sys
+python3 -I - "$E2E_WORK/audit.log" "$marker" "$E2E_WORK/v03" <<'PY' || failed=1
+import json, os, sys
 
 raw = open(sys.argv[1]).read()
 entries = [json.loads(line) for line in raw.splitlines()]
@@ -128,16 +151,18 @@ def count(**want):
     return sum(all(e.get(k) == v for k, v in want.items()) for e in entries)
 
 
-# The 24 commands, §5.3's 18 and v0.2.0's six: the jobs are audited at
-# submission and outcome, job.cancel when it acts, the routine reads never,
-# unless refused, and site.env.read, which returns a secret, every time.
+# The 31 commands, §5.3's 18, v0.2.0's six and v0.3.0's seven: the jobs are
+# audited at submission and outcome, job.cancel when it acts, the routine
+# reads never, unless refused, and site.env.read, which returns a secret,
+# every time.
 jobs = ["php.install", "php.uninstall", "php.default", "site.provision", "site.php", "site.security",
         "site.destroy", "cert.issue", "security.check", "logs.policy",
-        "site.repo", "site.deploy", "site.rollback", "site.env.write"]
+        "site.repo", "site.deploy", "site.rollback", "site.env.write",
+        "mysql.install", "valkey.install", "db.create", "db.drop", "db.user", "cache.user"]
 reads = ["agent.version", "system.status", "system.metrics", "job.status", "job.follow", "logs.list", "logs.read",
-         "site.releases"]
+         "site.releases", "db.list"]
 audited_reads = ["site.env.read"]
-assert len(jobs) + 1 + len(reads) + len(audited_reads) == 24
+assert len(jobs) + 1 + len(reads) + len(audited_reads) == 31
 for command in jobs:
     for outcome in ("accepted", "ok"):
         n = count(command=command, outcome=outcome)
@@ -192,6 +217,15 @@ contents = [(e.get(part) or {}).get("content") for e in entries if e["command"] 
 check(len(contents) >= 4 and all(c == "[redacted]" for c in contents),
       f"every .env content shows as \"[redacted]\" ({len(contents)}; others: {[c[:20] for c in contents if c != '[redacted]'][:3]})")
 check(len(sys.argv[2]) > 8 and sys.argv[2] not in raw, "the .env marker the browser saved is not in the audit log")
+
+# v0.3.0's passwords (db.user, cache.user): every one in params shows as
+# "[redacted]", and none of the ones the browser run saved is anywhere.
+secrets = [e["params"]["password"] for e in entries if e["command"] in ("db.user", "cache.user") and "password" in (e.get("params") or {})]
+check(len(secrets) >= 6 and all(x == "[redacted]" for x in secrets),
+      f"every db.user and cache.user password shows as \"[redacted]\" ({len(secrets)}; others: {[x[:4] for x in secrets if x != '[redacted]'][:3]})")
+saved = [open(os.path.join(sys.argv[3], f)).read().strip() for f in os.listdir(sys.argv[3]) if ".pw" in f]
+check(len(saved) >= 6 and all(len(x) == 43 and x not in raw for x in saved),
+      f"none of the {len(saved)} passwords the browser saved is in the audit log")
 
 # The command line, as cli:root.
 steps = ["agent-config", "directories", "sury-repository", "php", "nginx", "panel-release",
@@ -252,11 +286,21 @@ for command, accepted, ok in [("site.repo", 2, 2), ("site.deploy", 11, 6), ("sit
     check(n >= ok, f"{command} ok: {n}, want at least {ok}")
 n = sum(e["command"] == "site.deploy" and e["outcome"].startswith("error:") and bool(e.get("job")) for e in entries)
 check(n >= 5, f"the failing deploys audited as failed: {n}, want at least 5")
+# v0.3.0 (v03-databases): both services installed from the panel; the
+# databases of a and b and one dropped on its own; each site's MySQL and
+# Valkey user, set at least three times for a (new, rotated) and twice for b.
+for command, accepted, ok in [("mysql.install", 1, 1), ("valkey.install", 1, 1), ("db.create", 3, 3), ("db.drop", 1, 1),
+                              ("db.user", 3, 3), ("cache.user", 3, 3)]:
+    n = count(command=command, outcome="accepted")
+    check(n >= accepted, f"{command} accepted: {n}, want at least {accepted}")
+    n = count(command=command, outcome="ok")
+    check(n >= ok, f"{command} ok: {n}, want at least {ok}")
 # The validation probes, and the contract suite's bad site name.
-for command, least in [("site.provision", 23), ("php.install", 3), ("site.php", 3), ("site.destroy", 3), ("cert.issue", 3),
+for command, least in [("site.provision", 23), ("php.install", 3), ("site.php", 3), ("site.destroy", 6), ("cert.issue", 3),
                        ("site.security", 31), ("logs.read", 7),
                        ("site.repo", 34), ("site.deploy", 23), ("site.rollback", 9), ("site.releases", 4),
-                       ("site.env.read", 4), ("site.env.write", 4)]:
+                       ("site.env.read", 4), ("site.env.write", 4),
+                       ("db.create", 39), ("db.drop", 39), ("db.list", 3), ("db.user", 25), ("cache.user", 25)]:
     n = count(command=command, outcome="error:validation_failed")
     check(n >= least, f"{command} refused as validation_failed: {n}, want at least {least}")
 sys.exit(1 if failed else 0)

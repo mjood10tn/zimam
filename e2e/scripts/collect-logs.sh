@@ -34,7 +34,7 @@ in_c journalctl --no-pager -o short-iso -u 'php*-fpm.service' >"$out/php-fpm-jou
 	echo "== FPM processes"
 	in_c bash -c 'ps -eo pid,user,etime,stat,pcpu,rss,args | grep -E "^ *PID|[p]hp-fpm"'
 } >"$out/php-fpm-status.txt" 2>&1
-for unit in zimam-e2e-pebble zimam-e2e-challtestsrv zimam-e2e-www; do
+for unit in "$E2E_UNIT-pebble" "$E2E_UNIT-challtestsrv" "$E2E_UNIT-www"; do
 	as_root journalctl -u "$unit" --no-pager >"$out/$unit.txt" 2>&1
 done
 cp -r "$E2E_WORK/playwright" "$out/" 2>/dev/null

@@ -1,11 +1,12 @@
 // What the browser specs share: the run's work directory, the admin the
 // setup spec creates, TOTP codes, and the panel's sign-in, sign-out and 2FA
-// enrolment. The selectors are Filament's English strings (Task 3 spike,
-// step 6) and Zimam's own, from lang/en/zimam.php.
+// enrolment, and the helpers for a Livewire round trip, a tab and a password
+// dialog. The selectors are Filament's English strings and Zimam's own, from
+// lang/en/zimam.php.
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { test as base, expect, type Locator, type Page } from '@playwright/test';
+import { test as base, expect, type Locator, type Page, type Response } from '@playwright/test';
 import { generate } from 'otplib';
 
 export const work = process.env.E2E_WORK ?? '/tmp/zimam-e2e';
@@ -220,4 +221,76 @@ export async function untilText(page: Page, want: RegExp, failed: RegExp | null,
 
 export function password(): string {
   return `e2e-${Math.random().toString(36).slice(2)}-${Date.now()}`;
+}
+
+// livewireUpdate waits for the page's next Livewire round trip, such as the
+// tab's 5-second poll.
+export function livewireUpdate(page: Page, timeout = 20_000): Promise<Response> {
+  return page.waitForResponse((r) => r.request().method() === 'POST' && /\/livewire[^/]*\/update/.test(r.url()), { timeout });
+}
+
+export async function openTab(page: Page, url: string, tab: string): Promise<void> {
+  await page.goto(url);
+  await page.getByRole('tab', { name: tab, exact: true }).click();
+}
+
+// livewireCall waits for the Livewire round trip that carries a call to
+// method, such as Filament's mountAction.
+export function livewireCall(page: Page, method: string, timeout = 30_000): Promise<Response> {
+  return page.waitForResponse(
+    (r) =>
+      r.request().method() === 'POST' &&
+      /\/livewire[^/]*\/update/.test(r.url()) &&
+      (r.request().postData() ?? '').includes(`"method":"${method}"`),
+    { timeout },
+  );
+}
+
+// confirm clicks an action's trigger, fills the password dialog it opens and
+// submits it. Filament shows the dialog at once and renders its form from
+// the mountAction answer; Livewire morphs that answer in a moment after the
+// response arrives, and the morph resets the field. Over a real server's
+// latency (vps.yml) a password typed before the morph was wiped, even after
+// waiting for the response, and the browser's required check then stopped
+// the submit without a request. There is no event for "morphed", so the
+// submit itself is the proof: it must send callMountedAction. When it
+// doesn't, nothing reached the server, so the field is filled again and the
+// submit retried; the dialog must then close, which a wrong password would
+// prevent. method is the Livewire call the trigger sends: mountAction for an
+// action's own button, or the component method that mounts the action
+// itself, as Save settings does for a changed deploy script. fill, when
+// given, sets the dialog's other fields; it runs before every submit, for
+// the same reason as the password.
+export async function confirm(
+  page: Page,
+  trigger: Locator,
+  heading: string | RegExp,
+  submit: string,
+  method = 'mountAction',
+  fill?: (dialog: Locator) => Promise<void>,
+): Promise<void> {
+  const password = loadAdmin().password;
+  const mounted = livewireCall(page, method);
+  await trigger.click();
+  await mounted;
+  const dialog = page.getByRole('dialog', { name: heading });
+  const field = dialog.getByLabel('Current password');
+  for (let attempt = 1; ; attempt++) {
+    await fill?.(dialog);
+    if ((await field.inputValue()) !== password) {
+      await field.fill(password);
+    }
+    const called = livewireCall(page, 'callMountedAction', 10_000);
+    await dialog.getByRole('button', { name: submit, exact: true }).click();
+    try {
+      await called;
+      break;
+    } catch (e) {
+      if (attempt === 3) {
+        throw new Error(`the ${submit} dialog sent nothing after 3 submits; its password field holds ${(await field.inputValue()).length} characters`, { cause: e });
+      }
+      console.warn(`confirm: the ${submit} submit sent no request (attempt ${attempt}); filling again`);
+    }
+  }
+  await expect(dialog).toBeHidden();
 }

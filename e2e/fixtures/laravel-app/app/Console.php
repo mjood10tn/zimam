@@ -49,6 +49,14 @@ final class Console
                 echo "Blade templates cached successfully.\n";
 
                 return 0;
+            case 'queue:work':
+                // The Redis queue worker, without Laravel: it runs until stopped, and
+                // ends with the error when Valkey closes its connection.
+                try {
+                    return (new Services($this->app))->work(in_array('--once', $args, true));
+                } catch (\Throwable $e) {
+                    return $this->fail('The worker stopped: '.$e->getMessage());
+                }
             default:
                 return $this->fail("Command \"{$command}\" is not defined.");
         }

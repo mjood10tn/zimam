@@ -10,76 +10,14 @@
 // a refused save keeps what was typed, and a reload hides it. The checks
 // from outside the browser are e2e/scenarios/v02-deploy.sh's.
 import { readFileSync, writeFileSync } from 'node:fs';
-import { expect, type Locator, type Page, type Response } from '@playwright/test';
-import { domain, loadAdmin, panel, scenario, signInAsAdmin, untilText, work, test } from './support.ts';
+import { expect, type Page } from '@playwright/test';
+import { confirm, domain, livewireUpdate, openTab, panel, scenario, signInAsAdmin, untilText, work, test } from './support.ts';
 
 const minutes = 60_000;
 const site = 'laravel';
 
 const secretCode = (page: Page) => page.locator('[wire\\:key^="webhook-secret-"] code');
 const deployUrlCode = (page: Page) => page.locator('[wire\\:key^="deploy-url-"] code');
-
-// livewireUpdate waits for the page's next Livewire round trip, such as the
-// tab's 5-second poll.
-function livewireUpdate(page: Page, timeout = 20_000): Promise<Response> {
-  return page.waitForResponse((r) => r.request().method() === 'POST' && /\/livewire[^/]*\/update/.test(r.url()), { timeout });
-}
-
-async function openTab(page: Page, url: string, tab: string): Promise<void> {
-  await page.goto(url);
-  await page.getByRole('tab', { name: tab, exact: true }).click();
-}
-
-// livewireCall waits for the Livewire round trip that carries a call to
-// method, such as Filament's mountAction.
-function livewireCall(page: Page, method: string, timeout = 30_000): Promise<Response> {
-  return page.waitForResponse(
-    (r) =>
-      r.request().method() === 'POST' &&
-      /\/livewire[^/]*\/update/.test(r.url()) &&
-      (r.request().postData() ?? '').includes(`"method":"${method}"`),
-    { timeout },
-  );
-}
-
-// confirm clicks an action's trigger, fills the password dialog it opens and
-// submits it. Filament shows the dialog at once and renders its form from
-// the mountAction answer; Livewire morphs that answer in a moment after the
-// response arrives, and the morph resets the field. Over a real server's
-// latency (vps.yml) a password typed before the morph was wiped, even after
-// waiting for the response, and the browser's required check then stopped
-// the submit without a request. There is no event for "morphed", so the
-// submit itself is the proof: it must send callMountedAction. When it
-// doesn't, nothing reached the server, so the field is filled again and the
-// submit retried; the dialog must then close, which a wrong password would
-// prevent. method is the Livewire call the trigger sends: mountAction for an
-// action's own button, or the component method that mounts the action
-// itself, as Save settings does for a changed deploy script.
-async function confirm(page: Page, trigger: Locator, heading: string | RegExp, submit: string, method = 'mountAction'): Promise<void> {
-  const password = loadAdmin().password;
-  const mounted = livewireCall(page, method);
-  await trigger.click();
-  await mounted;
-  const dialog = page.getByRole('dialog', { name: heading });
-  const field = dialog.getByLabel('Current password');
-  for (let attempt = 1; ; attempt++) {
-    if ((await field.inputValue()) !== password) {
-      await field.fill(password);
-    }
-    const called = livewireCall(page, 'callMountedAction', 10_000);
-    await dialog.getByRole('button', { name: submit, exact: true }).click();
-    try {
-      await called;
-      break;
-    } catch (e) {
-      if (attempt === 3) {
-        throw new Error(`the ${submit} dialog sent nothing after 3 submits; its password field holds ${(await field.inputValue()).length} characters`, { cause: e });
-      }
-      console.warn(`confirm: the ${submit} submit sent no request (attempt ${attempt}); filling again`);
-    }
-  }
-  await expect(dialog).toBeHidden();
-}
 
 async function deployNow(page: Page, url: string): Promise<void> {
   await openTab(page, url, 'Deployments');

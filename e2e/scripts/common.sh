@@ -11,7 +11,19 @@ E2E_WORK=${E2E_WORK:-/tmp/zimam-e2e}
 E2E_CONTAINER=${E2E_CONTAINER:-zimam-e2e}
 E2E_IMAGE=${E2E_IMAGE:-ubuntu:26.04}
 E2E_VERSION=${E2E_VERSION:-0.0.0-e2e}
-E2E_PORT=8080
+# The release server's port, Pebble's and challtestsrv's ports, the names of
+# the host units that run them and of the LXD profile the containers use.
+# The defaults are what CI uses. A second run on a host that already runs
+# one (a local VM) sets all of them, so the two share nothing.
+E2E_PORT=${E2E_PORT:-8080}
+E2E_PEBBLE_PORT=${E2E_PEBBLE_PORT:-14000}
+E2E_PEBBLE_MGMT_PORT=${E2E_PEBBLE_MGMT_PORT:-15000}
+E2E_DNS_PORT=${E2E_DNS_PORT:-8053}
+E2E_CHALL_PORT=${E2E_CHALL_PORT:-8055}
+E2E_UNIT=${E2E_UNIT:-zimam-e2e}
+E2E_PROFILE=${E2E_PROFILE:-zimam-e2e}
+# The name Chromium's NSS database keeps the run's root under.
+E2E_NSS_NICK=${E2E_NSS_NICK:-Zimam e2e root}
 # lxd: an LXD container on this host, with Pebble. vps: a real server that
 # e2e/vps/create.sh made, reached over SSH (E2E_SSH, its user@address),
 # with Let's Encrypt staging and the server's firewall on.
@@ -31,7 +43,7 @@ if [[ $E2E_TARGET == vps ]]; then
 	E2E_INSTALL_FLAGS="--acme-server https://acme-staging-v02.api.letsencrypt.org/directory"
 else
 	E2E_CA=$E2E_WORK/pebble-root.pem
-	E2E_INSTALL_FLAGS="--acme-server https://pebble:14000/dir --acme-ca-bundle /root/pebble-ca.pem --skip-firewall"
+	E2E_INSTALL_FLAGS="--acme-server https://pebble:$E2E_PEBBLE_PORT/dir --acme-ca-bundle /root/pebble-ca.pem --skip-firewall"
 fi
 
 log() { printf '== %s\n' "$*" >&2; }

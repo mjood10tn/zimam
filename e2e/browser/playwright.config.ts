@@ -33,7 +33,9 @@ export default defineConfig({
   // switch, then the new default, which needs the sites to exist.
   // Milestone 3 runs monitoring, php84's security and the log settings
   // (--project m3-settings), on the sites milestone 2 left. v0.2.0's deploys
-  // (--project v02-deploy) need the Git host (e2e/githost) and PHP 8.4.
+  // (--project v02-deploy) need the Git host (e2e/githost) and PHP 8.4, and so do
+  // v0.3.0's databases and cache users (--project v03-databases), which install
+  // MySQL and Valkey.
   projects: [
     { name: 'setup', testMatch: 'setup.spec.ts' },
     { name: 'recovery', testMatch: 'recovery.spec.ts', dependencies: ['setup'] },
@@ -44,5 +46,6 @@ export default defineConfig({
     { name: 'm3-security', testMatch: 'security.spec.ts', dependencies: ['m3-monitoring'] },
     { name: 'm3-settings', testMatch: 'settings.spec.ts', dependencies: ['m3-security'] },
     { name: 'v02-deploy', testMatch: 'deploy.spec.ts' },
+    { name: 'v03-databases', testMatch: 'databases.spec.ts' },
   ],
 });
