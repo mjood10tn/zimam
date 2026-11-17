@@ -47,9 +47,16 @@ git -C "$E2E_ROOT" worktree add -q --detach "$tree" "refs/tags/$tag"
 # A tag from before common.sh read E2E_PORT sets the release server's port
 # itself, which would put the wrong URL in the release when a second run on
 # this host serves on another port. Only the port line of the throwaway
-# checkout changes, and only then.
-# shellcheck disable=SC2016 # the line's own ${...}
-sed -i 's/^E2E_PORT=8080$/E2E_PORT=${E2E_PORT:-8080}/' "$tree/e2e/scripts/common.sh"
+# checkout changes, and only when a run asks for another port; if that
+# line isn't there afterwards (the tag's common.sh is laid out differently),
+# the run stops here instead of building a release with the wrong URL.
+if [[ -n ${E2E_PORT:-} && $E2E_PORT != 8080 ]]; then
+	# shellcheck disable=SC2016 # the line's own ${...}
+	sed -i 's/^E2E_PORT=8080$/E2E_PORT=${E2E_PORT:-8080}/' "$tree/e2e/scripts/common.sh"
+	# shellcheck disable=SC2016
+	grep -q '^E2E_PORT=${E2E_PORT:-8080}$' "$tree/e2e/scripts/common.sh" ||
+		die "$tag's common.sh has no E2E_PORT line to read the port from: the build would use port 8080, not $E2E_PORT"
+fi
 E2E_WORK=$prev E2E_VERSION=$version bash "$tree/e2e/scripts/build.sh"
 
 built=$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["version"])' "$prev/dist/manifest.json")

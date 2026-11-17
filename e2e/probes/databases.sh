@@ -12,7 +12,8 @@
 #     statement runs (CREATE USER, GRANT, SET GLOBAL, the mysql schema);
 #     root's account isn't open over TCP;
 #   - as dbp-a in Valkey: another site's keys, CONFIG, ACL, FLUSHALL,
-#     FLUSHDB, KEYS, FUNCTION, SHUTDOWN, replication and another site's
+#     FLUSHDB, KEYS, FUNCTION, SCRIPT FLUSH, SCRIPT KILL, SCRIPT DEBUG,
+#     SHUTDOWN, replication and another site's
 #     channel are refused, in database 0 and in database 1, and scripts can't
 #     reach another site's keys, declared or not; its own keys work, scripts
 #     included; the default user is off and a wrong password is refused;
@@ -169,6 +170,9 @@ denied "FLUSHDB" '^NOPERM' "$(va FLUSHDB)"
 denied "KEYS *" '^NOPERM' "$(va KEYS '*')"
 denied "FUNCTION LIST" '^NOPERM' "$(va FUNCTION LIST)"
 denied "FUNCTION FLUSH" '^NOPERM' "$(va FUNCTION FLUSH)"
+denied "SCRIPT FLUSH" '^NOPERM' "$(va SCRIPT FLUSH)"
+denied "SCRIPT KILL" '^NOPERM' "$(va SCRIPT KILL)"
+denied "SCRIPT DEBUG" '^NOPERM' "$(va SCRIPT DEBUG NO)"
 denied "PUBLISH on another site's channel" '^NOPERM' "$(va PUBLISH "$ub:channel" hi)"
 denied "SHUTDOWN" '^NOPERM' "$(va SHUTDOWN NOSAVE)"
 denied "REPLICAOF" '^NOPERM' "$(va REPLICAOF 192.0.2.1 6379)"
