@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -129,12 +130,12 @@ func TestRootValkeyInstall(t *testing.T) {
 	d := rootDeps(t)
 	ctx := context.Background()
 
-	// From before the package is installed until the bad-file cases below (which
-	// start servers with the default user on on purpose, to see them refused),
-	// nobody may get a reply to an unauthenticated PING: the package server on its
-	// own settings would let any local user in.
+	// From before the package is installed to the end, nobody may get a reply to
+	// an unauthenticated PING: the package server on its own settings would let
+	// any local user in, and so would a candidate with the default user on, which
+	// is refused before the real server is touched.
 	anon := watchAnonymous()
-	checkAnonymous := func() {
+	defer func() {
 		samples, pongs, errs := anon.finish()
 		t.Logf("unauthenticated PINGs: %d samples, %d refused, %d with no server, %d answered", samples, samples-pongs-errs, errs, pongs)
 		if pongs > 0 {
@@ -143,7 +144,7 @@ func TestRootValkeyInstall(t *testing.T) {
 		if samples < 50 {
 			t.Errorf("only %d samples were taken", samples)
 		}
-	}
+	}()
 
 	// Data from before Zimam managed Valkey is refused, with the service
 	// masked and nothing listening.
@@ -293,8 +294,6 @@ func TestRootValkeyInstall(t *testing.T) {
 		t.Error("the re-run changed the admin password")
 	}
 
-	checkAnonymous()
-
 	// Bad files are refused: the previous files come back and the server
 	// runs on.
 	conf, acl, dropIn := readFile(t, d.Paths.ValkeyConf()), readFile(t, d.Paths.ValkeyACL()), readFile(t, d.Paths.ValkeyDropIn())
@@ -314,9 +313,12 @@ func TestRootValkeyInstall(t *testing.T) {
 		"an ACL with a bad hash":    with(conf, strings.Replace(acl, "#", "#abc", 1)),
 		"an ACL rule that is none":  with(conf, acl+"user s_x on nopass +@nosuchcategory\n"),
 		"an ACL that isn't an ACL":  with(conf, "garbage here\n"),
-		// These two start: the restart happens and the live values refuse them.
+		// The candidate server shows these two before the real server is touched, so
+		// the default user is never on where anyone could reach it.
 		"listening on every address": with(strings.Replace(conf, "bind 127.0.0.1 -::1", "bind * -::*", 1), acl),
 		"the default user on":        with(conf, strings.Replace(acl, "user default off", "user default on nopass ~* &* +@all", 1)),
+		// This one starts: the real server restarts, and its live values refuse it.
+		"a memory limit other than the one asked for": with(strings.Replace(conf, fmt.Sprintf("maxmemory %dmb", memMiB), "maxmemory 100mb", 1), acl),
 	} {
 		before := mainPID(t)
 		_, err := applyFiles(ctx, d, bad, target{uid: uid, gid: gid, memMiB: memMiB})
@@ -340,6 +342,34 @@ func TestRootValkeyInstall(t *testing.T) {
 		if out := shell(t, "/usr/bin/valkey-cli", "-h", "127.0.0.1", "PING"); !strings.HasPrefix(out, "NOAUTH") {
 			t.Errorf("%s: an anonymous PING was answered %q", name, out)
 		}
+	}
+
+	// A working server whose settings lose a file is stopped and masked, and
+	// brought back on Zimam's settings by the next run, with the sites' data
+	// kept and nobody let in meanwhile; and one left masked by hand is healed.
+	if out, err := Cli(ctx, d, "SET", "s_blog:kept", "the sites' own data"); err != nil || out != "OK" {
+		t.Fatalf("SET as the admin = %q, %v", out, err)
+	}
+	if err := os.Remove(d.Paths.ValkeyDropIn()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Install(ctx, d, noUsers); err != nil {
+		t.Fatalf("Install after the drop-in was removed: %v", err)
+	}
+	assertRunning(t, d, "the drop-in was made again")
+	if out, err := Cli(ctx, d, "GET", "s_blog:kept"); err != nil || out != "the sites' own data" {
+		t.Errorf("the key after the run that made the drop-in again = %q, %v", out, err)
+	}
+	shell(t, "/usr/bin/systemctl", "mask", "--now", unit)
+	if isActive() {
+		t.Fatal("the service is active after mask --now")
+	}
+	if _, err := Install(ctx, d, noUsers); err != nil {
+		t.Fatalf("Install after the service was masked by hand: %v", err)
+	}
+	assertRunning(t, d, "the masked service was healed")
+	if out, err := Cli(ctx, d, "GET", "s_blog:kept"); err != nil || out != "the sites' own data" {
+		t.Errorf("the key after the run that unmasked the service = %q, %v", out, err)
 	}
 
 	// A site's user is kept by a re-run and is confined to its prefix.
@@ -370,7 +400,7 @@ func TestRootValkeyInstall(t *testing.T) {
 	// A candidate server that a killed job left running is ended by the next
 	// test of the files.
 	leftover := startLeftoverCandidate(t, d)
-	if err := testCandidate(ctx, d, uid, gid); err != nil {
+	if err := testCandidate(ctx, d, uid, gid, aclUsers([]byte(readFile(t, d.Paths.ValkeyACL())))); err != nil {
 		t.Fatalf("testCandidate: %v", err)
 	}
 	if !leftover.gone() {
@@ -491,4 +521,22 @@ func (l leftoverCandidate) gone() bool {
 		time.Sleep(50 * time.Millisecond)
 	}
 	return false
+}
+
+// assertRunning checks that the service is enabled and active on Zimam's
+// config, with the admin logged in and nobody else.
+func assertRunning(t *testing.T, d sysexec.Deps, what string) {
+	t.Helper()
+	if !isActive() {
+		t.Errorf("%s: the service is not active", what)
+	}
+	if out, _ := exec.Command("/usr/bin/systemctl", "is-enabled", unit).Output(); strings.TrimSpace(string(out)) != "enabled" {
+		t.Errorf("%s: the service is %q, want enabled", what, strings.TrimSpace(string(out)))
+	}
+	if out := shell(t, "/usr/bin/systemctl", "show", "-p", "ExecStart", "--value", unit); !strings.Contains(out, "/etc/zimam/valkey/valkey.conf") {
+		t.Errorf("%s: ExecStart = %s", what, out)
+	}
+	if out, err := Cli(context.Background(), d, "PING"); err != nil || out != "PONG" {
+		t.Errorf("%s: the admin's PING = %q, %v", what, out, err)
+	}
 }

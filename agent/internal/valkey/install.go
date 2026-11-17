@@ -45,15 +45,18 @@ const (
 
 // The time limits of the steps around the packages. The job may run 900 s.
 //
-// Before apt-get, when Zimam's files are not in place yet, the service is
-// masked, stopped and checked: 10 + 60 + 10 s. apt-get may wait up to 300 s
+// Before apt-get, when a Zimam file is missing, the service is masked,
+// stopped and checked: 10 + 60 + 10 s. apt-get may wait up to 300 s
 // for a dpkg lock, then downloads and installs. After it, the worst case of
 // everything else is what needed() adds up:
 //
 //	waiting for the ACL lock             lockWait              60 s
-//	the skip check of a re-run           4 * cliTimeout        40 s
-//	candidate server, to stop it         startTimeout + cliTimeout + stopWait
-//	                                                           15 + 10 + 10 s
+//	the skip check of a re-run           reloadTimeout + 4 * cliTimeout
+//	                                     (is-enabled, then the live checks)
+//	                                                           10 + 40 s
+//	candidate server, its checks over
+//	the socket, and stopping it          startTimeout + 3 * cliTimeout + stopWait
+//	                                                           15 + 30 + 10 s
 //	unmask, reload, enable               3 * reloadTimeout     30 s
 //	the restart                          restartTimeout        60 s
 //	live checks (PING, CONFIG GET,
@@ -62,7 +65,10 @@ const (
 //	                                     (reload, then reset-failed and restart,
 //	                                     or stop and mask)     10 + 10 + 60 s
 //
-// which is 345 s with the lock wait, so apt-get has about 475 s of the 900.
+// which is 375 s with the lock wait. With the 80 s before apt-get and its own
+// lock wait of 300 s that is 755 s, so apt-get has about 145 s of the 900 for
+// its download and install.
+//
 // Install refuses to start the files' test when the job's deadline leaves
 // less than needed() after the lock, so a slow apt-get can't leave the undo to
 // be cut off. The package's unit has TimeoutStopSec=0, which never gives up,
@@ -80,8 +86,8 @@ var (
 // may take after the lock is held: the worst case in the table above.
 func needed() time.Duration {
 	live := 4 * cliTimeout
-	candidate := startTimeout + cliTimeout + stopWait
-	forward := live + candidate + 3*reloadTimeout + restartTimeout + live
+	candidate := startTimeout + 3*cliTimeout + stopWait
+	forward := reloadTimeout + live + candidate + 3*reloadTimeout + restartTimeout + live
 	undo := 2*reloadTimeout + restartTimeout
 	return forward + undo
 }
@@ -94,9 +100,11 @@ func needed() time.Duration {
 //
 // The package's server must never run with the package's own settings, which
 // let anyone on the machine in without a password. So while Zimam's files are
-// not in place, the service is stopped and masked before apt-get, and
-// unmasked and started only after the files passed their test. A first install
-// that fails leaves it stopped and masked.
+// not all in place, the service is stopped and masked before apt-get, and
+// unmasked and started only after the files passed their test. If they fail,
+// it stays stopped and masked. A successful run always ends with the service
+// unmasked, enabled and running on the files, whatever state an earlier run
+// left it in.
 //
 // users lists the sites' Valkey users, which the ACL file must hold. It is
 // called under the ACL lock, so the file is never rendered from a list that
@@ -110,24 +118,30 @@ func Install(ctx context.Context, d sysexec.Deps, users func() ([]SiteUser, erro
 	if err != nil {
 		return "", err
 	}
-	first := !filesInPlace(d.Paths)
+	// While a Zimam file is missing there is no complete configuration of
+	// ours to run, recorded or not: the service must not run, or be restarted,
+	// on the package's settings.
+	held := !filesInPlace(d.Paths)
 	d.Logf("Installing Valkey")
-	if first {
+	if held {
+		if recorded.Valkey.Installed {
+			d.Logf("A file of Zimam's Valkey settings is missing, so Valkey is stopped until the files are made again and tested; sites have no Valkey meanwhile.")
+		}
 		if err := holdUnit(ctx, d); err != nil {
 			return "", err
 		}
 	}
 	if err := php.InstallPackages(ctx, d, packageName); err != nil {
-		if first {
+		if held {
 			d.Logf("%s", maskedNote)
 		}
 		return "", err
 	}
 	fail := func(err error) (string, error) {
-		d.Logf("%s", failureNote(first, recorded.Valkey.Installed))
+		d.Logf("%s", failureNote(held, recorded.Valkey.Installed))
 		return "", err
 	}
-	if first {
+	if held && !recorded.Valkey.Installed {
 		// Data from before Zimam managed Valkey could hold keys planted by
 		// anyone, under any site's prefix.
 		if err := refuseExistingData(d.Paths); err != nil {
@@ -185,7 +199,7 @@ func Install(ctx context.Context, d sysexec.Deps, users func() ([]SiteUser, erro
 	}
 	f := files{conf: conf, acl: acl, dropIn: dropIn, adminPass: newPass}
 	d.Logf("Writing Valkey's settings (a %d MiB memory limit)", memMiB)
-	live, err := applyFiles(ctx, d, f, target{uid: uid, gid: gid, memMiB: memMiB, first: first})
+	live, err := applyFiles(ctx, d, f, target{uid: uid, gid: gid, memMiB: memMiB, held: held, recorded: recorded.Valkey.Installed})
 	if err != nil {
 		return fail(err)
 	}
@@ -199,9 +213,11 @@ func Install(ctx context.Context, d sysexec.Deps, users func() ([]SiteUser, erro
 // maskedNote and failureNote go in the job's log when the install stops.
 const maskedNote = "Valkey's service is stopped and masked, so no server runs with the package's own settings; running the install again continues from here."
 
-func failureNote(first, recorded bool) string {
+func failureNote(held, recorded bool) string {
 	switch {
-	case first:
+	case held && recorded:
+		return maskedNote + " Sites have no Valkey until it does."
+	case held:
 		return maskedNote
 	case recorded:
 		return "Valkey keeps running the settings it had before this install; nothing recorded has changed."
@@ -252,8 +268,9 @@ func holdUnit(ctx context.Context, d sysexec.Deps) error {
 }
 
 // refuseExistingData refuses to manage a Valkey whose data directory holds
-// data that Zimam didn't see written. Zimam's server would load it, and the
-// keys in it could lie in any site's prefix. Nothing is deleted.
+// data when Zimam has no record of installing Valkey. Zimam's server would load
+// it, and the keys in it could lie in any site's prefix. On a recorded server
+// the data is the sites' own and this is not asked. Nothing is deleted.
 func refuseExistingData(p paths.Paths) error {
 	dir := p.ValkeyDataDir()
 	var found []string
@@ -271,8 +288,9 @@ func refuseExistingData(p paths.Paths) error {
 		return nil
 	}
 	return &contract.AgentError{Code: contract.ErrConflict, Message: fmt.Sprintf(
-		"%s holds data from before Zimam managed Valkey (%s). Remove or move it, then run the install again. "+
-			"Zimam deleted nothing; the Valkey service is stopped and masked.", dir, strings.Join(found, ", "))}
+		"%s holds data that Zimam did not record installing Valkey with: %s. It may be from before Zimam managed Valkey, "+
+			"or left by an install that was interrupted. Check it, then remove or move the %s from that directory and run the install again. "+
+			"Zimam deleted nothing; the Valkey service is stopped and masked.", dir, strings.Join(found, ", "), strings.Join(found, " and "))}
 }
 
 // serviceIDs are the package's valkey user and group ids.
@@ -357,9 +375,13 @@ type files struct{ conf, acl, dropIn, adminPass []byte }
 // target is what the files are written for.
 type target struct {
 	uid, gid, memMiB int
-	// first is set when Zimam's files were not in place: the service is masked,
-	// and stays so unless the files pass their test.
-	first bool
+	// held is set when a Zimam file was missing: the service is masked and
+	// stopped, and stays so unless the files pass their test. There is then no
+	// complete previous configuration of ours to go back to.
+	held bool
+	// recorded is set when services.json says Zimam installed Valkey, so what
+	// is in its data directory is the sites' own and is never deleted.
+	recorded bool
 }
 
 // aclUsers are the user names an ACL file defines.
@@ -411,7 +433,10 @@ func applyFiles(ctx context.Context, d sysexec.Deps, f files, t target) (liveVal
 		// couldn't stage the files. Only the first pass with the candidate in
 		// place checks anything; a pass after that puts back what the server
 		// had.
-		restore := passes > 0 || !same(p.ValkeyConf(), f.conf) || !same(p.ValkeyACL(), f.acl) || !same(p.ValkeyDropIn(), f.dropIn)
+		// The new admin password counts too: if staging it failed after the
+		// others were already as wanted, this call is the undo.
+		restore := passes > 0 || !same(p.ValkeyConf(), f.conf) || !same(p.ValkeyACL(), f.acl) || !same(p.ValkeyDropIn(), f.dropIn) ||
+			(f.adminPass != nil && !same(p.ValkeyAdminPass(), f.adminPass))
 		passes++
 		if restore {
 			// A job is cancelled by stopping its unit, which ends ctx. The
@@ -422,31 +447,31 @@ func applyFiles(ctx context.Context, d sysexec.Deps, f files, t target) (liveVal
 			defer cancel()
 			return undo(ctx, d, t, dropInSame, unmasked, reloaded, restarted)
 		}
-		if unchanged {
+		// A server that is usable is enabled and answers as configured. One that
+		// a killed or failed run left masked or disabled is brought up below.
+		if unchanged && enabled(ctx, d) {
 			if v, err := readLive(ctx, d); err == nil && v.check(t.memMiB, users) == nil {
 				live = v
 				return nil
 			}
 		}
-		if err := testCandidate(ctx, d, t.uid, t.gid); err != nil {
+		if err := testCandidate(ctx, d, t.uid, t.gid, users); err != nil {
 			return err
 		}
-		if t.first {
-			unmasked = true
-			if err := systemctlRun(ctx, d, reloadTimeout, "unmask", unit); err != nil {
-				return err
-			}
+		// Whatever state an earlier run left the unit in, a successful run ends
+		// with it unmasked, enabled and started on these files.
+		unmasked = true
+		if err := systemctlRun(ctx, d, reloadTimeout, "unmask", unit); err != nil {
+			return err
 		}
-		if t.first || !dropInSame {
+		if t.held || !dropInSame {
 			reloaded = true
 			if err := systemctlRun(ctx, d, reloadTimeout, "daemon-reload"); err != nil {
 				return err
 			}
 		}
-		if t.first {
-			if err := systemctlRun(ctx, d, reloadTimeout, "enable", unit); err != nil {
-				return err
-			}
+		if err := systemctlRun(ctx, d, reloadTimeout, "enable", unit); err != nil {
+			return err
 		}
 		restarted = true
 		if err := systemctlRun(ctx, d, restartTimeout, "restart", unit); err != nil {
@@ -474,7 +499,7 @@ func undo(ctx context.Context, d sysexec.Deps, t target, dropInSame, unmasked, r
 			return may(err)
 		}
 	}
-	if t.first {
+	if t.held {
 		// There are no previous settings of ours to run, and the package's must
 		// not run: stop the service and mask it again.
 		if unmasked {
@@ -485,11 +510,13 @@ func undo(ctx context.Context, d sysexec.Deps, t target, dropInSame, unmasked, r
 				return may(err)
 			}
 		}
-		if restarted {
-			// The server saves a dump when it stops. Nothing was in the data
-			// directory before this first start, and only Zimam's server with
-			// no users but the admin ran, so the dump is Zimam's and is removed:
-			// left, the next install would refuse it.
+		if restarted && !t.recorded {
+			// The server saves a dump when it stops. On a server Zimam never
+			// recorded, nothing was in the data directory before this first start
+			// (it was checked), and only Zimam's server with no users but the admin
+			// ran, so the dump is Zimam's and is removed: left, the next install
+			// would refuse it. On a recorded server the data is the sites' own, and is
+			// never deleted.
 			if err := os.Remove(filepath.Join(p.ValkeyDataDir(), "dump.rdb")); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return may(err)
 			}
@@ -535,7 +562,7 @@ type candidateOutcome struct {
 // is stopped and its directory removed on every way out, a cancel included.
 // It runs outside the unit's sandbox, so it can't catch a failure the
 // sandbox causes; the restart that follows does.
-func testCandidate(ctx context.Context, d sysexec.Deps, uid, gid int) error {
+func testCandidate(ctx context.Context, d sysexec.Deps, uid, gid int, users []string) error {
 	p := d.Paths
 	dir := p.ValkeyTestDir()
 	killStale(d, dir, uid) // one left by a job that was killed
@@ -606,7 +633,7 @@ func testCandidate(ctx context.Context, d sysexec.Deps, uid, gid int) error {
 		}
 		out, err := cliSocket(ctx, d, socket, "PING")
 		if err == nil && out == "PONG" {
-			return nil
+			return checkCandidate(ctx, d, socket, users)
 		}
 		if err == nil {
 			err = fmt.Errorf("PING was answered %q", out)
@@ -748,6 +775,11 @@ func killStale(d sysexec.Deps, dir string, uid int) {
 	if err != nil || strings.TrimSpace(string(comm)) != "valkey-server" {
 		return
 	}
+	// The real server is a valkey-server of the same user, and a recycled pid
+	// may be its. Only a candidate has its directory in its command line.
+	if cmdline, err := os.ReadFile(filepath.Join(proc, "cmdline")); err != nil || !bytes.Contains(cmdline, []byte(dir)) {
+		return
+	}
 	if !ownedBy(filepath.Join(proc, "status"), uid) {
 		return
 	}
@@ -769,4 +801,64 @@ func ownedBy(status string, uid int) bool {
 		}
 	}
 	return false
+}
+
+// enabled reports whether the service is enabled. A masked or disabled one is
+// not a usable server, whatever answers on the port.
+func enabled(ctx context.Context, d sysexec.Deps) bool {
+	ctx, cancel := context.WithTimeout(ctx, reloadTimeout)
+	defer cancel()
+	res, err := d.Run.Run(ctx, sysexec.Cmd{Path: systemctl, Args: []string{"is-enabled", unit}})
+	return err == nil && strings.TrimSpace(string(res.Stdout)) == "enabled"
+}
+
+// checkCandidate asks the candidate server, over its socket, what it loaded,
+// and refuses it before the real server is touched: its default user must be
+// off, it must have exactly the users the ACL file defines (the admin among
+// them), and it must be bound to loopback and read Zimam's ACL file. Its port
+// is not checked, since the test runs it with no port.
+func checkCandidate(ctx context.Context, d sysexec.Deps, socket string, users []string) error {
+	refuse := func(format string, args ...any) error {
+		return &configtx.TestFailed{Output: "a server started from the files " + fmt.Sprintf(format, args...)}
+	}
+	out, err := cliSocket(ctx, d, socket, "ACL", "LIST")
+	if err != nil {
+		return refuse("didn't answer ACL LIST: %v", err)
+	}
+	var got []string
+	defaultOff := false
+	for line := range strings.Lines(out) {
+		f := strings.Fields(line)
+		if len(f) >= 2 && f[0] == "user" {
+			got = append(got, f[1])
+		}
+		if len(f) >= 3 && f[0] == "user" && f[1] == "default" {
+			defaultOff = f[2] == "off"
+		}
+	}
+	slices.Sort(got)
+	switch {
+	case !defaultOff:
+		return refuse("has the default user on")
+	case !slices.Contains(got, adminUser):
+		return refuse("has no %s user", adminUser)
+	case !slices.Equal(got, users):
+		return refuse("has the users %v, want %v", got, users)
+	}
+	out, err = cliSocket(ctx, d, socket, "CONFIG", "GET", "bind", "aclfile")
+	if err != nil {
+		return refuse("didn't answer CONFIG GET: %v", err)
+	}
+	cfg := map[string]string{}
+	lines := strings.Split(out, "\n")
+	for i := 0; i+1 < len(lines); i += 2 {
+		cfg[lines[i]] = strings.TrimRight(lines[i+1], "\r")
+	}
+	if cfg["bind"] != "127.0.0.1 -::1" {
+		return refuse("is bound to %q, want 127.0.0.1 -::1", cfg["bind"])
+	}
+	if cfg["aclfile"] != d.Paths.ValkeyACL() {
+		return refuse("reads the ACL file %q, want %s", cfg["aclfile"], d.Paths.ValkeyACL())
+	}
+	return nil
 }
