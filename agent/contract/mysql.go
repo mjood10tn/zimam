@@ -82,13 +82,18 @@ func (DatabaseName) JSONSchema() Schema {
 
 // DatabasePrefix is what every database of a site starts with: "s_", the
 // site name with each hyphen turned into an underscore, and "_". It is also
-// the start of the site's MySQL user name.
+// the start of the site's MySQL user name. A prefix alone does not identify
+// a site: see BelongsTo.
 func DatabasePrefix(site SiteName) string {
 	return "s_" + strings.ReplaceAll(string(site), "-", "_") + "_"
 }
 
-// BelongsTo reports whether the name is one of the site's databases: it
-// starts with the site's prefix and has at least one more character.
+// BelongsTo reports whether the name carries the site's prefix and has at
+// least one more character. That is necessary for a database of the site,
+// but not sufficient: when one site's name extends another's (shop and
+// shop-x), a name such as s_shop_x_main carries both prefixes. The contract
+// cannot know which sites exist, so handlers decide ownership from the sites'
+// state, using ClaimedBy to find every site a name could belong to.
 func (n DatabaseName) BelongsTo(site SiteName) bool {
 	rest, ok := strings.CutPrefix(string(n), DatabasePrefix(site))
 	return ok && rest != ""
@@ -139,7 +144,21 @@ func (p *DbListParams) Validate() error {
 type DatabaseInfo struct {
 	Name      DatabaseName `json:"name"`
 	Site      SiteName     `json:"site"`
-	SizeBytes int64        `json:"size_bytes"`
+	SizeBytes DatabaseSize `json:"size_bytes"`
+}
+
+// DatabaseSize is a database's size in bytes.
+type DatabaseSize int64
+
+func (s DatabaseSize) Validate() error {
+	if s < 0 {
+		return errors.New("must not be negative")
+	}
+	return nil
+}
+
+func (DatabaseSize) JSONSchema() Schema {
+	return Schema{"type": "integer", "minimum": 0}
 }
 
 // DbListResult is db.list's result. The list is empty, never null: the
@@ -152,7 +171,9 @@ type DbListResult struct {
 func NewDbListResult() DbListResult { return DbListResult{Databases: []DatabaseInfo{}} }
 
 // checkDatabase checks a site and one of its databases together, for the
-// params that carry both.
+// params that carry both. It refuses a name without the site's prefix, and
+// nothing more: a name that another site's prefix also covers passes here,
+// and the handler refuses it from the sites' state.
 func checkDatabase(f FieldErrors, site SiteName, db DatabaseName) {
 	f.Check("site", site)
 	f.Check("database", db)
@@ -210,4 +231,17 @@ func (p *DbUserParams) Validate() error {
 // cache.user set. The password is never echoed.
 type ServiceUserResult struct {
 	Site SiteName `json:"site"`
+}
+
+// ClaimedBy returns every site in the list whose prefix the name carries,
+// in list order. A handler refuses a name that is claimed by a site other
+// than the one it acts for.
+func (n DatabaseName) ClaimedBy(sites []SiteName) []SiteName {
+	var out []SiteName
+	for _, s := range sites {
+		if n.BelongsTo(s) {
+			out = append(out, s)
+		}
+	}
+	return out
 }

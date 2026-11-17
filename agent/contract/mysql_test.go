@@ -156,3 +156,31 @@ func TestDatabaseCommandsSubjects(t *testing.T) {
 		t.Errorf("db.list = %+v, %v; want an unaudited read", d, ok)
 	}
 }
+
+// A name can carry the prefix of two sites when one site's name extends the
+// other's. The contract accepts it for both; handlers decide from state.
+func TestDatabasePrefixIsNotOwnership(t *testing.T) {
+	const db = DatabaseName("s_shop_x_main")
+	if !db.BelongsTo("shop") || !db.BelongsTo("shop-x") {
+		t.Error("s_shop_x_main should carry both prefixes")
+	}
+	wantNone := func(p Params) {
+		t.Helper()
+		if f := fields(t, p); f != nil {
+			t.Errorf("%#v: %v", p, f)
+		}
+	}
+	wantNone(&DbCreateParams{Site: "shop", Database: db})
+	wantNone(&DbDropParams{Site: "shop", Database: db})
+	got := db.ClaimedBy([]SiteName{"shop", "shop-x", "blog"})
+	if !reflect.DeepEqual(got, []SiteName{"shop", "shop-x"}) {
+		t.Errorf("ClaimedBy = %v, want [shop shop-x]", got)
+	}
+	if got := DatabaseName("s_blog_main").ClaimedBy([]SiteName{"shop"}); got != nil {
+		t.Errorf("ClaimedBy = %v, want none", got)
+	}
+}
+
+func TestDatabaseSize(t *testing.T) {
+	checkValues(t, []DatabaseSize{0, 1, 1 << 40}, []DatabaseSize{-1})
+}

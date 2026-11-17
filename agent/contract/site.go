@@ -119,8 +119,7 @@ type SitePHPResult struct {
 	PHPVersion PHPVersion `json:"php_version"`
 }
 
-// SiteNameParams is the params of cert.issue (§5.3): the
-// site alone.
+// SiteNameParams is the params of cert.issue (§5.3): the site alone.
 type SiteNameParams struct {
 	Name SiteName `json:"name"`
 }
