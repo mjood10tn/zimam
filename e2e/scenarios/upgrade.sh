@@ -175,6 +175,36 @@ else
 	fail "upgrade: the panel's current points at $current, not releases/$new"
 fi
 check_sites "on $new"
+# The upgrade installs neither MySQL nor Valkey: they come only when an
+# admin asks for them in the panel.
+absent=()
+for pkg in mysql-server valkey-server; do
+	if in_c dpkg -s "$pkg" 2>/dev/null | grep -q '^Status: install ok installed'; then
+		absent+=("package $pkg is installed")
+	fi
+done
+for unit in mysql valkey-server; do
+	if in_c systemctl is-active --quiet "$unit"; then
+		absent+=("unit $unit is active")
+	fi
+done
+if in_c test -e /etc/zimam/valkey; then
+	absent+=("/etc/zimam/valkey exists")
+fi
+if in_c test -e /var/lib/zimam/services.json; then
+	state=$(in_c python3 -I -c '
+import json, sys
+st = json.load(open(sys.argv[1]))
+print(" ".join(k for k in ("mysql", "valkey") if (st.get(k) or {}).get("installed")))' /var/lib/zimam/services.json) || state="unreadable"
+	[[ -z $state ]] || absent+=("services.json says installed: $state")
+fi
+listening=$(in_c ss -H -ltn | awk '$4 ~ /:(3306|6379)$/ { print $4 }') || listening="unreadable"
+[[ -z $listening ]] || absent+=("listening on $listening")
+if ((${#absent[@]} == 0)); then
+	pass "upgrade: neither MySQL nor Valkey is installed, running, recorded or listening on $new"
+else
+	fail "upgrade: MySQL or Valkey appeared on $new: ${absent[*]}"
+fi
 # A new site on the upgraded server. A release before v0.1.1 leaves no
 # uid-highwater.json, so the new site user's uid then comes from
 # /etc/passwd alone, above the sites provisioned on $old.

@@ -70,8 +70,23 @@ It has two parts:
 - Logs over 200 MB are rotated and compressed. Old archives are deleted after a retention period (14 days by default) and a size cap per site (5 GiB by default).
 - An audit log of every change, every call that carries a secret and every rejected call. Passwords are redacted.
 
+**Databases and cache**
+- MySQL 8.4 and Valkey, installed from Ubuntu's own archive when you ask for them in the panel. A server that doesn't need them never gets them, and upgrading Zimam installs neither. Both listen on localhost only.
+- Each site gets its own MySQL user (`s_<site>`) with full rights on that site's databases and nothing else. A database's name starts with `s_<site>_`, with dashes in the site's name written as underscores. You create databases from the panel and drop them there too, with a password confirmation.
+- Each site gets its own Valkey user (`s_<site>`), limited to the keys and channels that start with `s_<site>:`. The Valkey `default` user is turned off.
+- The panel generates each password, shows it once and never stores it. To get a new one, rotate the password on the site's Database or Cache tab. **Write to .env** on the same tab sets the site's `DB_*` or `REDIS_*` keys and keeps every other line of its `.env`. For Valkey it writes `REDIS_CLIENT=phpredis`, `REDIS_HOST=127.0.0.1`, `REDIS_PORT=6379`, `REDIS_USERNAME`, `REDIS_PASSWORD` and `REDIS_PREFIX=s_<site>:`. It leaves `CACHE_STORE`, `QUEUE_CONNECTION` and `SESSION_DRIVER` as they are, and a site with a cached config reads the new values from its next deploy.
+- Deleting a site removes its MySQL and Valkey users and the Valkey keys under its prefix. Its databases are dropped only if you tick the box, and a site that still has databases isn't deleted without it.
+- There is no uninstall for MySQL or Valkey in this release.
+
 **Releases**
 - Signed releases: the installer checks the manifest's Ed25519 signature and every file's SHA-256 before it runs anything it downloaded.
+
+### Databases and cache: limits to know
+
+- **One Valkey for every site.** A site's user can read and write only the keys and channels under `s_<site>:`. It can still see other sites' key names, but not their values, through `SCAN`, `RANDOMKEY` and `DBSIZE`. Don't put anything secret in a key name. Keep `REDIS_PREFIX` at `s_<site>:` (Write to .env sets it) and don't override the prefix of the Redis connection, because a key outside that prefix is refused.
+- **Denied Valkey commands.** `FLUSHDB` and `FLUSHALL`, everything in the admin and dangerous command groups, the `FUNCTION` commands and `SCRIPT KILL`, `SCRIPT FLUSH` and `SCRIPT DEBUG` are denied. So `php artisan cache:clear` and `optimize:clear` fail for a site that caches in Valkey. Use `config:clear`, `route:clear`, `view:clear`, `event:clear` or `optimize` instead.
+- **MySQL binary logging is off.** Zimam turns it off, because the logs grow quickly on a small server and keep deleted site data. Installing MySQL over a server that already writes binary logs turns them off and leaves the old log files on disk. If you need replication or point-in-time recovery, turn binary logging back on yourself, in a config file in `/etc/mysql/mysql.conf.d/` whose name sorts after `zz-zimam.cnf`, which Zimam owns and rewrites.
+- **Deleting a site needs its services running.** If a site has a MySQL user or databases, MySQL must be running when you delete it. If it has a Valkey user, Valkey must be. Otherwise the delete is refused and nothing changes.
 
 ## Requirements
 
@@ -137,7 +152,7 @@ Found a security issue? Please report it privately through [GitHub's security ad
 These are planned but not in v0.1.0:
 
 - Git deploys and Laravel-aware sites, queue workers and cron.
-- MySQL, Valkey and Node.
+- Node.
 - Backups.
 - Notifications (warnings show on screen only).
 - Editing firewall and SSH settings, and fail2ban.
