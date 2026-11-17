@@ -108,6 +108,9 @@ func Exec(ctx context.Context, d sysexec.Deps, statements ...Statement) ([][]str
 		if s.err != nil {
 			return nil, s.err
 		}
+		if s.sql == "" {
+			return nil, errors.New("mysql: a statement with no SQL (not made by a constructor)")
+		}
 	}
 	var rows [][]string
 	for _, s := range statements {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"zimam/agent/internal/paths"
@@ -50,5 +51,22 @@ func TestInstalledReadsServicesState(t *testing.T) {
 	}
 	if _, err := Installed(d); err == nil {
 		t.Error("a broken services.json read as a clean answer")
+	}
+}
+
+func TestObjectCount(t *testing.T) {
+	run := sysexec.NewFakeRunner(sysexec.Script{Path: clientPath, Args: clientArgs, Result: sysexec.Result{Stdout: []byte("3\n")}})
+	d := sysexec.Deps{Run: run}
+	if n, err := ObjectCount(context.Background(), d, "s_shop_a"); err != nil || n != 3 {
+		t.Fatalf("ObjectCount = %d, %v", n, err)
+	}
+	sql := string(run.Calls()[0].Stdin)
+	for _, want := range []string{"information_schema.tables WHERE table_schema = 's_shop_a'", "information_schema.routines WHERE routine_schema = 's_shop_a'", "information_schema.events WHERE event_schema = 's_shop_a'"} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("SQL lacks %q:\n%s", want, sql)
+		}
+	}
+	if _, err := ObjectCount(context.Background(), d, "a'b"); err == nil || len(run.Calls()) != 1 {
+		t.Errorf("a bad name reached the client: %v", err)
 	}
 }

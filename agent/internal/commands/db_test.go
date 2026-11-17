@@ -162,10 +162,9 @@ func TestCreateRefusesNameOfOtherSite(t *testing.T) {
 		db   contract.DatabaseName
 		want string
 	}{
-		"listed by the other site":                  {"shop", "s_shop_x_a", "belongs to site shop-x"},
-		"covered by the other site's prefix":        {"shop", "s_shop_x_b", "prefix of site shop-x"},
-		"the longer site creates under the shorter": {"shop-x", "s_shop_x_c", "prefix of site shop"},
-		"listed by the site itself":                 {"shop-x", "s_shop_x_a", "already has"},
+		"listed by the other site":           {"shop", "s_shop_x_a", "belongs to site shop-x"},
+		"covered by the other site's prefix": {"shop", "s_shop_x_b", "prefix of site shop-x"},
+		"listed by the site itself":          {"shop-x", "s_shop_x_a", "already has"},
 	} {
 		e.run = sysexec.NewFakeRunner()
 		e.d.Run = e.run
@@ -268,21 +267,6 @@ func TestCreateUnknownSite(t *testing.T) {
 	wantCode(t, e.precheck(t, "db.create", create("nope", "s_nope_a")), contract.ErrNotFound)
 }
 
-// A database that exists in MySQL but is no site's is never adopted.
-func TestCreateOfUntrackedExistingDatabaseIsConflict(t *testing.T) {
-	e := newDBEnv(t)
-	before := e.stateFile(t, "blog")
-	e.answer("", "ERROR 1007 (HY000) at line 1: Can't create database 's_blog_a'; database exists")
-	_, err := e.job(t, "db.create", create("blog", "s_blog_a"))
-	ae := wantCode(t, err, contract.ErrConflict)
-	if !strings.Contains(ae.Message, "already exists in MySQL") {
-		t.Errorf("message %q", ae.Message)
-	}
-	if e.stateFile(t, "blog") != before || len(e.sql()) != 1 {
-		t.Errorf("state changed or more SQL ran: %q", e.sql())
-	}
-}
-
 func TestCreateUndoesTheDatabaseWhenTheGrantFails(t *testing.T) {
 	e := newDBEnv(t)
 	st := e.site(t, "blog")
@@ -363,6 +347,9 @@ func TestDropOtherSitesDatabaseIsNotFound(t *testing.T) {
 	shop := e.site(t, "shop")
 	shop.Databases = []contract.DatabaseName{"s_shop_a"}
 	e.saveSite(t, shop)
+	shopx := e.site(t, "shop-x")
+	shopx.Databases = []contract.DatabaseName{"s_shop_x_a"}
+	e.saveSite(t, shopx)
 	for name, tc := range map[string]struct {
 		site contract.SiteName
 		db   contract.DatabaseName
@@ -370,6 +357,8 @@ func TestDropOtherSitesDatabaseIsNotFound(t *testing.T) {
 		"the name of another site's database": {"shop", "s_blog_a"},
 		"a name no site lists":                {"blog", "s_blog_untracked"},
 		"another site's under its own prefix": {"shop-x", "s_shop_a"},
+		// valid under shop's prefix too, but shop-x lists it
+		"a name a longer-prefixed site lists": {"shop", "s_shop_x_a"},
 	} {
 		for _, err := range []error{e.precheck(t, "db.drop", drop(tc.site, tc.db)), func() error { _, err := e.job(t, "db.drop", drop(tc.site, tc.db)); return err }()} {
 			if err == nil {
@@ -429,20 +418,69 @@ func TestDropLastDatabaseLeavesNoField(t *testing.T) {
 	}
 }
 
-// A database already gone from MySQL is dropped from the state: DROP
-// DATABASE IF EXISTS answers 0 and the state converges.
-func TestDropConvergesWhenTheDatabaseIsGone(t *testing.T) {
+// A drop whose state save failed left the database dropped and the state
+// listing it. Running the command again finishes: both statements are the
+// forms that accept a database that is already gone.
+func TestDropConvergesAfterAFailedStateSave(t *testing.T) {
 	e := newDBEnv(t)
 	st := e.site(t, "blog")
 	st.Databases = []contract.DatabaseName{"s_blog_a"}
 	e.saveSite(t, st)
-	e.answer("", "")
-	e.answer("", "")
+	listed := e.stateFile(t, "blog")
+	run := sysexec.NewFakeRunner()
+	for range 4 {
+		run.Add(sysexec.Script{Path: mysqlClient, Args: mysqlClientArgs})
+	}
+	e.run = run
+	hook := &hookRunner{Runner: run, after: 2, do: func() {
+		if err := os.Remove(e.p.SiteState("blog")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(e.p.SiteState("blog"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}}
+	h := commands.JobHandlers()["db.drop"]
+	_, err := h(context.Background(), &jobs.Context{ID: "01JBX7Q3A1B2C3D4E5F6G7H8J9", Logf: t.Logf, Paths: e.p, Run: hook}, drop("blog", "s_blog_a"))
+	if err == nil || !strings.Contains(err.Error(), "run the command again") {
+		t.Fatalf("err = %v", err)
+	}
+	// The state file comes back as it was; the second run finds the
+	// database already gone.
+	if err := os.Remove(e.p.SiteState("blog")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(e.p.SiteState("blog"), []byte(listed), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := e.job(t, "db.drop", drop("blog", "s_blog_a")); err != nil {
 		t.Fatal(err)
 	}
 	if got := e.site(t, "blog"); len(got.Databases) != 0 {
 		t.Errorf("databases %v", got.Databases)
+	}
+	got := e.sql()
+	if len(got) != 4 || !strings.Contains(got[2], "REVOKE IF EXISTS") || !strings.Contains(got[2], "IGNORE UNKNOWN USER") || got[3] != "DROP DATABASE IF EXISTS `s_blog_a`;" {
+		t.Errorf("SQL = %q", got)
+	}
+}
+
+// REVOKE worked and DROP DATABASE failed: the state keeps the database, and
+// the message says what to do.
+func TestDropFailureAfterRevokeSaysRunAgain(t *testing.T) {
+	e := newDBEnv(t)
+	st := e.site(t, "blog")
+	st.Databases = []contract.DatabaseName{"s_blog_a"}
+	e.saveSite(t, st)
+	before := e.stateFile(t, "blog")
+	e.answer("", "")
+	e.answer("", "ERROR 1010 (HY000): Error dropping database")
+	_, err := e.job(t, "db.drop", drop("blog", "s_blog_a"))
+	if err == nil || !strings.Contains(err.Error(), "run the command again") || !strings.Contains(err.Error(), "no longer has access") {
+		t.Fatalf("err = %v", err)
+	}
+	if e.stateFile(t, "blog") != before {
+		t.Error("state changed")
 	}
 }
 
@@ -561,4 +599,111 @@ func jsonEqual(t *testing.T, a, b any) bool {
 		t.Fatal(err1, err2)
 	}
 	return string(x) == string(y)
+}
+
+// shop-x owns the names under its longer prefix, even while shop exists.
+func TestCreateByTheLongerSiteSucceeds(t *testing.T) {
+	e := newDBEnv(t)
+	e.answer("", "")
+	if _, err := e.job(t, "db.create", create("shop-x", "s_shop_x_main")); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.site(t, "shop-x").Databases; len(got) != 1 || got[0] != "s_shop_x_main" {
+		t.Errorf("databases %v", got)
+	}
+	// And shop may not take a name of shop-x's.
+	_, err := e.job(t, "db.create", create("shop", "s_shop_x_other"))
+	if ae := wantCode(t, err, contract.ErrConflict); !strings.Contains(ae.Message, "belongs to site shop-x") {
+		t.Errorf("message %q", ae.Message)
+	}
+}
+
+const errExists = "ERROR 1007 (HY000) at line 1: Can't create database 's_blog_a'; database exists"
+
+// An empty database that exists in MySQL and that no site lists is taken
+// over: the grant and the state follow as after a fresh create.
+func TestCreateTakesOverAnEmptyExistingDatabase(t *testing.T) {
+	e := newDBEnv(t)
+	st := e.site(t, "blog")
+	st.DBUser = true
+	e.saveSite(t, st)
+	e.answer("", errExists)
+	e.answer("0\n", "")
+	e.answer("", "")
+	res, err := e.job(t, "db.create", create("blog", "s_blog_a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res != (contract.DatabaseResult{Site: "blog", Database: "s_blog_a"}) {
+		t.Errorf("result %+v", res)
+	}
+	got := e.sql()
+	if len(got) != 3 || !strings.HasPrefix(got[0], "CREATE DATABASE `s_blog_a`") ||
+		!strings.Contains(got[1], "information_schema.tables WHERE table_schema = 's_blog_a'") || !strings.HasPrefix(got[2], "GRANT ALL PRIVILEGES ON ") {
+		t.Fatalf("SQL = %q", got)
+	}
+	if after := e.site(t, "blog"); len(after.Databases) != 1 || after.Databases[0] != "s_blog_a" {
+		t.Errorf("state %+v", after)
+	}
+}
+
+func TestCreateRefusesAnExistingDatabaseWithContent(t *testing.T) {
+	e := newDBEnv(t)
+	before := e.stateFile(t, "blog")
+	e.answer("", errExists)
+	e.answer("2\n", "")
+	_, err := e.job(t, "db.create", create("blog", "s_blog_a"))
+	ae := wantCode(t, err, contract.ErrConflict)
+	if !strings.Contains(ae.Message, "with content") {
+		t.Errorf("message %q", ae.Message)
+	}
+	if e.stateFile(t, "blog") != before || len(e.sql()) != 2 {
+		t.Errorf("state changed or more SQL ran: %q", e.sql())
+	}
+}
+
+// When the cleanup after a failure fails too, the recorded message says the
+// empty database stays and a new create takes it over. The job records an
+// AgentError's Message only, so the text must be in it.
+func TestCreateCleanupFailureIsInTheRecordedMessage(t *testing.T) {
+	e := newDBEnv(t)
+	st := e.site(t, "blog")
+	st.DBUser = true
+	e.saveSite(t, st)
+	e.answer("", "")
+	e.answer("", "ERROR 2013 (HY000): Lost connection to MySQL server")
+	e.answer("", "ERROR 2013 (HY000): Lost connection to MySQL server")
+	_, err := e.job(t, "db.create", create("blog", "s_blog_a"))
+	ae := wantCode(t, err, contract.ErrConflict)
+	for _, want := range []string{"isn't running", "s_blog_a was left in MySQL", "take it over"} {
+		if !strings.Contains(ae.Message, want) {
+			t.Errorf("message %q lacks %q", ae.Message, want)
+		}
+	}
+}
+
+// A create whose job was cancelled may or may not have made the database.
+// Nothing is dropped blindly; the next create takes the database over.
+func TestCreateAfterACancelledCreateTakesTheDatabaseOver(t *testing.T) {
+	e := newDBEnv(t)
+	before := e.stateFile(t, "blog")
+	e.run.Add(sysexec.Script{Path: mysqlClient, Args: mysqlClientArgs, Err: context.Canceled})
+	_, err := e.job(t, "db.create", create("blog", "s_blog_a"))
+	if err == nil {
+		t.Fatal("no error")
+	}
+	if got := e.sql(); len(got) != 1 {
+		t.Errorf("SQL after the cancelled create: %q", got)
+	}
+	if e.stateFile(t, "blog") != before {
+		t.Error("state changed")
+	}
+	e.answer("", errExists)
+	e.answer("0\n", "")
+	if _, err := e.job(t, "db.create", create("blog", "s_blog_a")); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.site(t, "blog").Databases; len(got) != 1 || got[0] != "s_blog_a" {
+		t.Errorf("databases %v", got)
+	}
 }

@@ -168,3 +168,96 @@ func TestCreateAndDropAgainstRealMySQL(t *testing.T) {
 		t.Errorf("accounts left after DropUser: %s", got)
 	}
 }
+
+// A name whose escaped form is exactly 64 characters, the longest the
+// params allow, takes a grant and a revoke. MySQL refuses a grant name of 65
+// characters or more (error 1059), which is why the params limit a name's
+// length plus its underscores.
+func TestLongDatabaseNamesAgainstRealMySQL(t *testing.T) {
+	d := rootDeps(t)
+	ctx := context.Background()
+	if _, err := Install(ctx, d); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	manyUnderscores := contract.DatabaseName("s_aa_" + strings.Repeat("a_", 18) + "aaa")
+	fewUnderscores := contract.DatabaseName("s_aa_" + strings.Repeat("a", 57))
+	for _, db := range []contract.DatabaseName{manyUnderscores, fewUnderscores} {
+		if g := len(db) + strings.Count(string(db), "_"); g != 64 || db.Validate() != nil {
+			t.Fatalf("%s: %d characters when escaped, %v", db, g, db.Validate())
+		}
+	}
+	cleanup := func() {
+		for _, db := range []contract.DatabaseName{manyUnderscores, fewUnderscores} {
+			Exec(ctx, d, RevokeAll("aa", db), DropDatabase(db))
+		}
+		Exec(ctx, d, DropUser("aa"))
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	if _, err := Exec(ctx, d, CreateUser("aa", pwOne), AlterUserPassword("aa", pwOne)); err != nil {
+		t.Fatal(err)
+	}
+	for _, db := range []contract.DatabaseName{manyUnderscores, fewUnderscores} {
+		t.Logf("%s: %d characters, %d underscores, %d in the grant", db, len(db), strings.Count(string(db), "_"), len(db)+strings.Count(string(db), "_"))
+		_, err := Exec(ctx, d, CreateDatabase(db), GrantAll("aa", db))
+		t.Logf("create and grant: %v", err)
+		if err != nil {
+			t.Errorf("%s: %v", db, err)
+			continue
+		}
+		mustQuery(t, d, "CREATE TABLE `"+string(db)+"`.t (id INT); INSERT INTO `"+string(db)+"`.t VALUES (7);")
+		if out, err := asSiteUser(t, "aa", pwOne, false, "SELECT id FROM `"+string(db)+"`.t"); err != nil || out != "7" {
+			t.Errorf("%s: the user can't use its database: %q, %v", db, out, err)
+		}
+		if _, err := Exec(ctx, d, RevokeAll("aa", db), DropDatabase(db)); err != nil {
+			t.Errorf("%s: revoke and drop: %v", db, err)
+		}
+		if got := mustQuery(t, d, "SHOW GRANTS FOR 's_aa'@'localhost';"); strings.Contains(got, "ALL PRIVILEGES") {
+			t.Errorf("%s: grants left after the revoke:\n%s", db, got)
+		}
+	}
+}
+
+func TestObjectCountAgainstRealMySQL(t *testing.T) {
+	d := rootDeps(t)
+	ctx := context.Background()
+	if _, err := Install(ctx, d); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	cleanup := func() { Exec(ctx, d, DropDatabase("s_aa_cnt")) }
+	cleanup()
+	t.Cleanup(cleanup)
+	count := func() int64 {
+		t.Helper()
+		n, err := ObjectCount(ctx, d, "s_aa_cnt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := count(); n != 0 {
+		t.Errorf("a database that doesn't exist: %d", n)
+	}
+	if _, err := Exec(ctx, d, CreateDatabase("s_aa_cnt")); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(); n != 0 {
+		t.Errorf("an empty database: %d", n)
+	}
+	mustQuery(t, d, "CREATE TABLE s_aa_cnt.t (id INT);")
+	if n := count(); n != 1 {
+		t.Errorf("one table: %d", n)
+	}
+	mustQuery(t, d, "DROP TABLE s_aa_cnt.t; CREATE VIEW s_aa_cnt.v AS SELECT 1 AS one;")
+	if n := count(); n != 1 {
+		t.Errorf("one view: %d", n)
+	}
+	mustQuery(t, d, "DROP VIEW s_aa_cnt.v; CREATE FUNCTION s_aa_cnt.f() RETURNS INT DETERMINISTIC RETURN 1;")
+	if n := count(); n != 1 {
+		t.Errorf("one routine: %d", n)
+	}
+	mustQuery(t, d, "DROP FUNCTION s_aa_cnt.f; CREATE EVENT s_aa_cnt.ev ON SCHEDULE EVERY 1 DAY DO SELECT 1;")
+	if n := count(); n != 1 {
+		t.Errorf("one event: %d", n)
+	}
+}

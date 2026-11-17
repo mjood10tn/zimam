@@ -87,7 +87,7 @@ func TestStatementWithUnvalidatedValueIsRefused(t *testing.T) {
 }
 
 // The package gives no way to hand it SQL: no exported function or method
-// takes a string, and a Statement has no exported field and no method that
+// takes anything but an allowed type, and a Statement has no exported field and no method that
 // returns its text.
 func TestNoRawStatementConstructor(t *testing.T) {
 	files, err := filepath.Glob("*.go")
@@ -112,8 +112,8 @@ func TestNoRawStatementConstructor(t *testing.T) {
 				}
 				checked++
 				for _, field := range d.Type.Params.List {
-					if hasString(field.Type) {
-						t.Errorf("%s: exported %s takes a string-typed parameter", name, d.Name.Name)
+					if tn := typeName(field.Type); !allowedParams[tn] {
+						t.Errorf("%s: exported %s takes a parameter of type %s, which is not on the allow-list", name, d.Name.Name, tn)
 					}
 				}
 			case *ast.GenDecl:
@@ -147,18 +147,36 @@ func TestNoRawStatementConstructor(t *testing.T) {
 	}
 }
 
-func hasString(e ast.Expr) bool {
+// allowedParams are the only parameter types an exported function or
+// method of the package may take: validated contract types, the context and
+// the deps, and Statements. Nothing that could carry SQL text (string, a
+// named string type, []byte, io.Reader, fmt.Stringer) is on it.
+var allowedParams = map[string]bool{
+	"context.Context":          true,
+	"sysexec.Deps":             true,
+	"contract.DatabaseName":    true,
+	"contract.SiteName":        true,
+	"contract.ServicePassword": true,
+	"Statement":                true,
+	"...Statement":             true,
+	"uint64":                   true, // BufferPoolMiB's memory size
+	"error":                    true, // IsDown inspects an error, it builds nothing
+}
+
+func typeName(e ast.Expr) string {
 	switch t := e.(type) {
 	case *ast.Ident:
-		return t.Name == "string"
-	case *ast.ArrayType:
-		return hasString(t.Elt)
+		return t.Name
+	case *ast.SelectorExpr:
+		return typeName(t.X) + "." + t.Sel.Name
 	case *ast.Ellipsis:
-		return hasString(t.Elt)
-	case *ast.MapType:
-		return hasString(t.Key) || hasString(t.Value)
+		return "..." + typeName(t.Elt)
+	case *ast.StarExpr:
+		return "*" + typeName(t.X)
+	case *ast.ArrayType:
+		return "[]" + typeName(t.Elt)
 	}
-	return false
+	return fmt.Sprintf("%T", e)
 }
 
 // A statement that holds a password prints as its kind, in every format
@@ -252,5 +270,13 @@ func TestExecDownServer(t *testing.T) {
 	}
 	if IsDown(errors.New("x")) || IsDown(nil) {
 		t.Error("IsDown on an unrelated error")
+	}
+}
+
+// A zero Statement has no SQL and is not made by a constructor.
+func TestExecRefusesAZeroStatement(t *testing.T) {
+	run := sysexec.NewFakeRunner()
+	if _, err := Exec(context.Background(), sysexec.Deps{Run: run}, CreateDatabase("s_shop_a"), Statement{}); err == nil || len(run.Calls()) != 0 {
+		t.Errorf("err %v, %d calls", err, len(run.Calls()))
 	}
 }

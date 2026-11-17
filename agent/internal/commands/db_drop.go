@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"zimam/agent/contract"
@@ -53,8 +54,16 @@ func dbDrop(ctx context.Context, j *jobs.Context, p contract.Params) (any, error
 		return nil, err
 	}
 	db := params.Database
-	if _, err := mysql.Exec(ctx, d, mysql.RevokeAll(params.Site, db), mysql.DropDatabase(db)); err != nil {
+	if _, err := mysql.Exec(ctx, d, mysql.RevokeAll(params.Site, db)); err != nil {
 		return nil, dbError(err)
+	}
+	if _, err := mysql.Exec(ctx, d, mysql.DropDatabase(db)); err != nil {
+		err = dbError(err)
+		var ae *contract.AgentError
+		if errors.As(err, &ae) {
+			return nil, &contract.AgentError{Code: ae.Code, Message: ae.Message + revokedNotDropped(db)}
+		}
+		return nil, fmt.Errorf("%w. %s", err, revokedNotDropped(db))
 	}
 	d.Logf("Dropped database %s", db)
 	st.Databases = withoutDatabase(st.Databases, db)
@@ -62,4 +71,11 @@ func dbDrop(ctx context.Context, j *jobs.Context, p contract.Params) (any, error
 		return nil, fmt.Errorf("the database %s is dropped, but site %s's state could not be saved; run the command again: %w", db, params.Site, err)
 	}
 	return contract.DatabaseResult{Site: params.Site, Database: db}, nil
+}
+
+// revokedNotDropped is what a failed DROP DATABASE adds to its error: the
+// grant is already gone, so the site's user can't reach the database, and
+// the state file still lists it.
+func revokedNotDropped(db contract.DatabaseName) string {
+	return fmt.Sprintf(" The site's user no longer has access to %s, and the database is still listed; run the command again to finish dropping it.", db)
 }

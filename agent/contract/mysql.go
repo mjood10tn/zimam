@@ -76,6 +76,10 @@ func (n DatabaseName) Validate() error {
 	return nil
 }
 
+// maxGrantNameLength is MySQL's limit on a database name in a GRANT or
+// REVOKE, where every underscore is written with a backslash.
+const maxGrantNameLength = 64
+
 func (DatabaseName) JSONSchema() Schema {
 	return Schema{"type": "string", "pattern": databaseNameRe.String(), "not": Schema{"enum": reservedDatabaseNames}}
 }
@@ -92,8 +96,8 @@ func DatabasePrefix(site SiteName) string {
 // least one more character. That is necessary for a database of the site,
 // but not sufficient: when one site's name extends another's (shop and
 // shop-x), a name such as s_shop_x_main carries both prefixes. The contract
-// cannot know which sites exist, so handlers decide ownership from the sites'
-// state, using ClaimedBy to find every site a name could belong to.
+// cannot know which sites exist, so handlers decide from the sites' state:
+// OwnerAmong names the site a name belongs to.
 func (n DatabaseName) BelongsTo(site SiteName) bool {
 	rest, ok := strings.CutPrefix(string(n), DatabasePrefix(site))
 	return ok && rest != ""
@@ -180,6 +184,12 @@ func checkDatabase(f FieldErrors, site SiteName, db DatabaseName) {
 	if f["database"] == "" && site.Validate() == nil && !db.BelongsTo(site) {
 		f["database"] = "must start with " + DatabasePrefix(site) + " and have at least one more character"
 	}
+	// A pattern can't count underscores twice, so the schema doesn't show
+	// this: the grant that gives the site's user the database writes each
+	// underscore as two characters, and MySQL refuses a name over 64.
+	if f["database"] == "" && len(db)+strings.Count(string(db), "_") > maxGrantNameLength {
+		f["database"] = "is too long: each underscore counts twice, and the length with them may be at most 64"
+	}
 }
 
 // DbCreateParams is db.create's params: a database of the site, named with
@@ -244,4 +254,21 @@ func (n DatabaseName) ClaimedBy(sites []SiteName) []SiteName {
 		}
 	}
 	return out
+}
+
+// OwnerAmong returns the site in the list that a database name belongs to:
+// of the sites whose prefix the name carries, the one with the longest
+// prefix. With shop and shop-x, s_shop_x_main belongs to shop-x and
+// s_shop_main to shop. Two sites never have prefixes of one length that
+// both fit a name, since distinct site names give distinct prefixes. The
+// second result is false when no site's prefix fits.
+func (n DatabaseName) OwnerAmong(sites []SiteName) (SiteName, bool) {
+	var owner SiteName
+	longest := 0
+	for _, s := range sites {
+		if n.BelongsTo(s) && len(DatabasePrefix(s)) > longest {
+			owner, longest = s, len(DatabasePrefix(s))
+		}
+	}
+	return owner, longest > 0
 }

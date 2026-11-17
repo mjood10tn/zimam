@@ -70,6 +70,37 @@ func DatabaseSizes() Statement {
 		"LEFT JOIN information_schema.tables t ON t.table_schema = s.schema_name GROUP BY s.schema_name ORDER BY s.schema_name;"}
 }
 
+// DatabaseObjects selects how many tables (views included), routines and
+// events a database holds, as one number. A name that passed Validate has
+// no quote, so it can sit in a single-quoted literal.
+func DatabaseObjects(name contract.DatabaseName) Statement {
+	const kind = "count database objects"
+	if err := name.Validate(); err != nil {
+		return invalid(kind, "the database name", err)
+	}
+	n := "'" + string(name) + "'"
+	return Statement{kind: kind, sql: "SELECT (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = " + n +
+		") + (SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema = " + n +
+		") + (SELECT COUNT(*) FROM information_schema.events WHERE event_schema = " + n + ");"}
+}
+
+// ObjectCount is how many tables, views, routines and events the database
+// holds; 0 for an empty database and for one that doesn't exist.
+func ObjectCount(ctx context.Context, d sysexec.Deps, name contract.DatabaseName) (int64, error) {
+	rows, err := Exec(ctx, d, DatabaseObjects(name))
+	if err != nil {
+		return 0, err
+	}
+	if len(rows) != 1 || len(rows[0]) != 1 {
+		return 0, fmt.Errorf("MySQL answered %v to the query for a database's objects", rows)
+	}
+	n, err := strconv.ParseInt(rows[0][0], 10, 64)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("MySQL answered %q to the query for a database's objects", rows[0][0])
+	}
+	return n, nil
+}
+
 // Sizes returns every schema's size in bytes by name, including MySQL's own.
 func Sizes(ctx context.Context, d sysexec.Deps) (map[string]int64, error) {
 	rows, err := Exec(ctx, d, DatabaseSizes())

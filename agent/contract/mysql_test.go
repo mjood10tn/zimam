@@ -184,3 +184,55 @@ func TestDatabasePrefixIsNotOwnership(t *testing.T) {
 func TestDatabaseSize(t *testing.T) {
 	checkValues(t, []DatabaseSize{0, 1, 1 << 40}, []DatabaseSize{-1})
 }
+
+func TestOwnerAmongIsTheLongestPrefix(t *testing.T) {
+	for _, tc := range []struct {
+		db    DatabaseName
+		sites []SiteName
+		want  SiteName
+		ok    bool
+	}{
+		{"s_shop_x_main", []SiteName{"shop", "shop-x", "blog"}, "shop-x", true},
+		{"s_shop_x_main", []SiteName{"shop-x", "shop"}, "shop-x", true},
+		{"s_shop_main", []SiteName{"shop", "shop-x"}, "shop", true},
+		{"s_shop_x_main", []SiteName{"shop"}, "shop", true},
+		{"s_a_b_c_db", []SiteName{"a", "a-b", "a-b-c"}, "a-b-c", true},
+		{"s_a_b_db", []SiteName{"a", "a-b", "a-b-c"}, "a-b", true},
+		{"s_a_db", []SiteName{"a-b-c", "a-b", "a"}, "a", true},
+		{"s_blog_main", []SiteName{"shop"}, "", false},
+		{"s_blog_main", nil, "", false},
+		{"s_shop_", []SiteName{"shop"}, "", false}, // nothing after the prefix
+	} {
+		got, ok := tc.db.OwnerAmong(tc.sites)
+		if got != tc.want || ok != tc.ok {
+			t.Errorf("%s among %v = %q, %v; want %q, %v", tc.db, tc.sites, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
+// MySQL refuses a grant whose database name is over 64 characters, and a
+// grant writes each underscore as two. So db.create and db.drop refuse a
+// name whose length plus its underscores is over 64.
+func TestDatabaseNameMustFitAGrantEscaped(t *testing.T) {
+	for name, tc := range map[string]struct {
+		db DatabaseName
+		ok bool
+	}{
+		"64 characters, 2 underscores": {"s_aa_" + DatabaseName(strings.Repeat("a", 59)), false},
+		"62 characters, 2 underscores": {"s_aa_" + DatabaseName(strings.Repeat("a", 57)), true},
+		"63 characters, 2 underscores": {"s_aa_" + DatabaseName(strings.Repeat("a", 58)), false},
+		"many underscores, 64 escaped": {"s_aa_" + DatabaseName(strings.Repeat("a_", 18)+"aaa"), true},
+		"many underscores, 65 escaped": {"s_aa_" + DatabaseName(strings.Repeat("a_", 18)+"aaaa"), false},
+	} {
+		for _, p := range []Params{&DbCreateParams{Site: "aa", Database: tc.db}, &DbDropParams{Site: "aa", Database: tc.db}} {
+			err := p.Validate()
+			if (err == nil) != tc.ok {
+				t.Errorf("%s (%d characters): %#v: %v, want ok=%v", name, len(tc.db), p, err, tc.ok)
+			}
+		}
+	}
+	// The name alone is still valid for the type; the limit is the params'.
+	if err := DatabaseName("s_aa_" + strings.Repeat("a", 59)).Validate(); err != nil {
+		t.Errorf("Validate: %v", err)
+	}
+}

@@ -63,13 +63,13 @@ func undoCtx(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(ctx), undoTimeout)
 }
 
-// claimedBy lists every site in all whose prefix the name carries.
-func claimedBy(all []sites.State, name contract.DatabaseName) []contract.SiteName {
+// siteNames lists the names of the sites in all.
+func siteNames(all []sites.State) []contract.SiteName {
 	names := make([]contract.SiteName, len(all))
 	for i, s := range all {
 		names[i] = s.Name
 	}
-	return name.ClaimedBy(names)
+	return names
 }
 
 func withoutDatabase(dbs []contract.DatabaseName, name contract.DatabaseName) []contract.DatabaseName {
