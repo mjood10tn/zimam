@@ -11,6 +11,7 @@ use App\Agent\FileJobLogReader;
 use App\Agent\JobLogReader;
 use App\Agent\JobOutcomes;
 use App\Agent\Outcomes\CertificateOutcomes;
+use App\Agent\Outcomes\DatabaseOutcomes;
 use App\Agent\Outcomes\DeploymentOutcomes;
 use App\Agent\Outcomes\PhpOutcomes;
 use App\Agent\Outcomes\SecurityOutcomes;
@@ -37,6 +38,7 @@ class AgentServiceProvider extends ServiceProvider
             SettingsOutcomes::register($outcomes);
             CertificateOutcomes::register($outcomes);
             DeploymentOutcomes::register($outcomes);
+            DatabaseOutcomes::register($outcomes);
 
             return $outcomes;
         });

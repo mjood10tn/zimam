@@ -6,6 +6,10 @@ use App\Agent\AgentCommand;
 use App\Agent\AgentCommandKind;
 use App\Agent\Commands\AgentVersion;
 use App\Agent\Commands\CertIssue;
+use App\Agent\Commands\DbCreate;
+use App\Agent\Commands\DbDrop;
+use App\Agent\Commands\DbList;
+use App\Agent\Commands\DbUser;
 use App\Agent\Commands\E2eSleep;
 use App\Agent\Commands\JobCancel;
 use App\Agent\Commands\JobFollow;
@@ -13,6 +17,7 @@ use App\Agent\Commands\JobStatus;
 use App\Agent\Commands\LogsList;
 use App\Agent\Commands\LogsPolicy;
 use App\Agent\Commands\LogsRead;
+use App\Agent\Commands\MysqlInstall;
 use App\Agent\Commands\PhpDefault;
 use App\Agent\Commands\PhpInstall;
 use App\Agent\Commands\PhpUninstall;
@@ -63,6 +68,10 @@ final class SchemaTest extends TestCase
         'site.deploy' => 1800,
         'site.rollback' => 300,
         'site.env.write' => 120,
+        'mysql.install' => 900,
+        'db.create' => 120,
+        'db.drop' => 300,
+        'db.user' => 120,
         'e2e.sleep' => 180,
     ];
 
@@ -84,6 +93,11 @@ final class SchemaTest extends TestCase
             new SitePhp('shop', '8.5'),
             new SiteSecurity('shop', forceHttps: true, hstsMaxAge: 31536000, hstsIncludeSubdomains: true, ipAllow: ['192.0.2.0/24'], ipDeny: ['2001:db8::1'], passwordProtection: true, users: [['username' => 'alice', 'password_hash' => '$2y$12$Mda0LhSrcwEX8fAIrkvr/eP5OR7zhBWHVUNmE9n4xm8B76JOYiAI.']]),
             new SiteDestroy('shop'),
+            new MysqlInstall,
+            new DbList,
+            new DbCreate('shop', 's_shop_main'),
+            new DbDrop('shop', 's_shop_main'),
+            new DbUser('shop', DbUser::generatePassword()),
             new CertIssue('shop'),
             new SiteRepo('shop', 'octo/shop', 'release/2.x', rotateKey: true),
             new SiteDeploy('shop', 'manual', composer: true, keepReleases: 5, script: "php artisan migrate --force\n", commit: str_repeat('a1', 20)),
@@ -151,6 +165,32 @@ final class SchemaTest extends TestCase
         $repo = new SiteRepo('shop', 'octo/shop', 'main');
         $this->assertSame(['name' => 'shop', 'repository' => 'octo/shop', 'branch' => 'main'], $repo->params());
         $this->assertValid(self::wire($repo->jsonParams()), file_get_contents($this->schemaPath('site.repo.params')), 'site.repo params without rotate_key');
+    }
+
+    /** Optional params are left out when unset; the fake's database answers match the result schemas. */
+    public function testDatabaseParamsAndFakeResultsMatchSchemas(): void
+    {
+        $this->assertSame(['name' => 'shop'], (new SiteDestroy('shop'))->params());
+        $destroy = new SiteDestroy('shop', dropDatabases: true);
+        $this->assertSame(['name' => 'shop', 'drop_databases' => true], $destroy->params());
+        $this->assertValid(self::wire($destroy->jsonParams()), file_get_contents($this->schemaPath('site.destroy.params')), 'site.destroy params with drop_databases');
+        $this->assertSame([], (new DbList)->params());
+        $this->assertValid(self::wire((new DbList('shop'))->jsonParams()), file_get_contents($this->schemaPath('db.list.params')), 'db.list params for a site');
+
+        $fake = (new FakeAgentClient)->installMysql();
+        $this->assertResult('db.list', $fake->call(new DbList)->data, 'empty db.list');
+        foreach ([new DbCreate('shop', 's_shop_main'), new DbUser('shop', DbUser::generatePassword()), new DbDrop('shop', 's_shop_main')] as $command) {
+            $final = $fake->follow($fake->submit($command)->id, 0, function (): void {});
+            $this->assertSame('succeeded', $final->status);
+            $this->assertResult($command->name(), $final->result, "fake {$command->name()} result");
+        }
+        $bare = new FakeAgentClient;
+        $final = $bare->follow($bare->submit(new MysqlInstall)->id, 0, function (): void {});
+        $this->assertSame('succeeded', $final->status);
+        $this->assertResult('mysql.install', $final->result, 'fake mysql.install result');
+
+        $fake->database('shop', 's_shop_main', 4096);
+        $this->assertResult('db.list', $fake->call(new DbList('shop'))->data, 'db.list with a database');
     }
 
     /**

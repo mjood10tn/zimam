@@ -5,18 +5,22 @@ namespace App\Filament\Actions;
 use Closure;
 use Filament\Actions\Action;
 use Filament\Forms\Components\TextInput;
+use Filament\Schemas\Components\Component;
 use Illuminate\Support\Facades\Hash;
 use SensitiveParameter;
 
 /**
  * Makes an action ask for the current password before it runs (§7.2), for
- * deleting a site or uninstalling a PHP version. It sets the action's form.
+ * deleting a site or uninstalling a PHP version. It sets the action's form:
+ * any $fields the action needs, then the password.
  */
 final class ConfirmsPassword
 {
-    public static function apply(Action $action): Action
+    /** @param  list<Component>  $fields */
+    public static function apply(Action $action, array $fields = []): Action
     {
         return $action->schema([
+            ...$fields,
             TextInput::make('current_password')
                 ->label(__('zimam.confirm_password.label'))
                 ->password()

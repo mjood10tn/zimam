@@ -79,6 +79,12 @@ final class FakeAgentClient implements AgentClient
     /** @var array<string, string> each site's ~/site/shared/.env, as env() or succeeded site.env.write jobs left it */
     private array $envs = [];
 
+    /** @var array<string, array{site: string, size_bytes: int}> each database on the fake's MySQL, by name, as succeeded db.create jobs left them */
+    private array $databases = [];
+
+    /** @var array<string, true> the sites with a MySQL user, as succeeded db.user jobs left them */
+    private array $dbUsers = [];
+
     /** How many deploys took the branch's head: each gets its own commit. */
     private int $heads = 0;
 
@@ -150,6 +156,28 @@ final class FakeAgentClient implements AgentClient
         $this->repositories[$site] = ['repository' => $repository, 'branch' => $branch];
 
         return $this;
+    }
+
+    /** Installs MySQL on the fake's server, as a succeeded mysql.install would. */
+    public function installMysql(string $version = '8.4.13'): static
+    {
+        $this->systemStatus['services']['mysql'] = ['installed' => true, 'version' => $version, 'active' => true];
+
+        return $this;
+    }
+
+    /** Puts a database on the fake's MySQL, as a succeeded db.create would. */
+    public function database(string $site, string $name, int $sizeBytes = 0): static
+    {
+        $this->databases[$name] = ['site' => $site, 'size_bytes' => $sizeBytes];
+
+        return $this;
+    }
+
+    /** The names of the databases on the fake's MySQL. */
+    public function databaseNames(): array
+    {
+        return array_keys($this->databases);
     }
 
     /** Gives a site a .env on the fake's server, as a succeeded site.env.write would. */
@@ -226,6 +254,7 @@ final class FakeAgentClient implements AgentClient
             $command->name() === 'logs.read' => $this->logsRead($command->params()),
             $command->name() === 'site.releases' => $this->siteReleases($command->params()['name']),
             $command->name() === 'site.env.read' => $this->siteEnvRead($command->params()['name']),
+            $command->name() === 'db.list' => $this->dbList($command->params()),
             $command instanceof JobStatus => $this->advance($command->job),
             $command instanceof JobCancel => $this->cancel($command->job),
             $command instanceof JobFollow => throw new LogicException('job.follow streams: use follow()'),
@@ -262,6 +291,17 @@ final class FakeAgentClient implements AgentClient
      */
     private function precheck(AgentCommand $command): void
     {
+        if ($command->name() === 'site.destroy') {
+            $name = $command->params()['name'];
+            if (! ($command->params()['drop_databases'] ?? false) && in_array($name, array_column($this->databases, 'site'), true)) {
+                throw new AgentConflict("Site {$name} still has databases. Delete them first, or delete the site with its databases.");
+            }
+        }
+        if (str_starts_with($command->name(), 'db.')) {
+            $this->precheckDatabase($command);
+
+            return;
+        }
         if (in_array($command->name(), ['site.deploy', 'site.rollback'], true)) {
             $name = $command->params()['name'];
             if (! isset($this->repositories[$name])) {
@@ -332,6 +372,9 @@ final class FakeAgentClient implements AgentClient
             'site.provision' => ['name' => $params['name'], 'template_version' => 1],
             'site.php' => ['name' => $params['name'], 'php_version' => $params['php_version']],
             'site.destroy', 'site.security', 'site.env.write' => ['name' => $params['name']],
+            'mysql.install' => ['version' => '8.4.13'],
+            'db.create', 'db.drop' => ['site' => $params['site'], 'database' => $params['database']],
+            'db.user' => ['site' => $params['site']],
             'security.check' => self::securityFindings($params),
             'logs.policy' => $params,
             // Let's Encrypt's certificates last 90 days.
@@ -386,6 +429,43 @@ final class FakeAgentClient implements AgentClient
         }
 
         return ['name' => $name, 'releases' => $this->releases[$name] ?? [], 'missing' => [], 'unlisted' => []];
+    }
+
+    /** The agent's checks of a db.* job against the fake's MySQL. */
+    private function precheckDatabase(AgentCommand $command): void
+    {
+        $params = $command->params();
+        if (! $this->systemStatus['services']['mysql']['installed']) {
+            throw new AgentConflict("MySQL isn't installed. Install it first.");
+        }
+        $database = $params['database'] ?? null;
+        match (true) {
+            $command->name() === 'db.create' && isset($this->databases[$database]) => throw new AgentConflict("Database {$database} already exists."),
+            $command->name() === 'db.drop' && ($this->databases[$database]['site'] ?? null) !== $params['site'] => throw new AgentNotFound("Site {$params['site']} has no database {$database}."),
+            default => null,
+        };
+    }
+
+    /**
+     * db.list's data: every database, or the site's, as the agent reads them
+     * from MySQL.
+     *
+     * @param  array<string, mixed>  $params
+     * @return array{databases: list<array{name: string, site: string, size_bytes: int}>}
+     */
+    private function dbList(array $params): array
+    {
+        if (! $this->systemStatus['services']['mysql']['installed']) {
+            throw new AgentConflict("MySQL isn't installed. Install it first.");
+        }
+        $list = [];
+        foreach ($this->databases as $name => $database) {
+            if (! isset($params['site']) || $params['site'] === $database['site']) {
+                $list[] = ['name' => $name, 'site' => $database['site'], 'size_bytes' => $database['size_bytes']];
+            }
+        }
+
+        return ['databases' => $list];
     }
 
     /** @return array{content: string} site.env.read's data: not_found for a site without a .env (R02-D10) */
@@ -464,6 +544,10 @@ final class FakeAgentClient implements AgentClient
             ),
             'site.env.write' => $this->envs[$name] = $params['content'],
             'site.destroy' => $this->forget($name),
+            'mysql.install' => $this->installMysql($result['version'] ?? '8.4.13'),
+            'db.create' => $this->database($params['site'], $params['database']),
+            'db.drop' => $this->databases = array_diff_key($this->databases, [$params['database'] => true]),
+            'db.user' => $this->dbUsers[$params['site']] = true,
             default => null,
         };
     }
@@ -490,7 +574,8 @@ final class FakeAgentClient implements AgentClient
 
     private function forget(string $name): void
     {
-        unset($this->repositories[$name], $this->releases[$name], $this->envs[$name]);
+        unset($this->repositories[$name], $this->releases[$name], $this->envs[$name], $this->dbUsers[$name]);
+        $this->databases = array_filter($this->databases, fn (array $database): bool => $database['site'] !== $name);
     }
 
     public function status(string $jobId): AgentJobStatus
@@ -595,6 +680,11 @@ final class FakeAgentClient implements AgentClient
 
             return;
         }
+        if (in_array($command->name(), ['db.create', 'db.drop', 'db.user'], true)) {
+            $this->validateDatabase($command->name(), $params);
+
+            return;
+        }
         if ($command->name() === 'logs.policy') {
             $fields = [];
             if ($params['retention_days'] < 1 || $params['retention_days'] > 365) {
@@ -643,6 +733,40 @@ final class FakeAgentClient implements AgentClient
         }
         if (! preg_match(self::SITE_NAME, $params['subject']) || in_array($params['subject'], self::RESERVED_NAMES, true)) {
             $fields['subject'] = 'must be 2 to 24 lowercase letters, digits and hyphens, starting with a letter';
+        }
+        if ($fields !== []) {
+            throw new AgentValidationFailed('Invalid parameters', $fields);
+        }
+    }
+
+    /**
+     * The agent's checks of the db.* params: the site, the password's
+     * alphabet, and a database name with its site's prefix, within
+     * MySQL's limit on a grant's database name.
+     *
+     * @param  array<string, mixed>  $params
+     */
+    private function validateDatabase(string $command, array $params): void
+    {
+        $fields = [];
+        if (! is_string($params['site'] ?? null) || ! preg_match(self::SITE_NAME, $params['site']) || in_array($params['site'], self::RESERVED_NAMES, true)) {
+            $fields['site'] = 'must be 2–24 lowercase letters, digits or hyphens, start with a letter and not end with a hyphen';
+        }
+        if ($command === 'db.user' && ! preg_match('/^[A-Za-z0-9_-]{24,64}\z/', (string) ($params['password'] ?? ''))) {
+            $fields['password'] = 'must be 24–64 letters, digits, underscores or hyphens';
+        }
+        if ($command !== 'db.user') {
+            $name = (string) ($params['database'] ?? '');
+            $prefix = 's_'.str_replace('-', '_', (string) ($params['site'] ?? '')).'_';
+            if (! preg_match('/^[a-z][a-z0-9_]{0,63}\z/', $name)) {
+                $fields['database'] = 'must be 1–64 lowercase letters, digits or underscores and start with a letter';
+            } elseif (in_array($name, ['mysql', 'sys', 'information_schema', 'performance_schema', 'zimam'], true)) {
+                $fields['database'] = 'is reserved';
+            } elseif (! isset($fields['site']) && (! str_starts_with($name, $prefix) || $name === $prefix)) {
+                $fields['database'] = "must start with {$prefix} and have at least one more character";
+            } elseif (strlen($name) + substr_count($name, '_') > 64) {
+                $fields['database'] = 'is too long: each underscore counts twice, and the length with them may be at most 64';
+            }
         }
         if ($fields !== []) {
             throw new AgentValidationFailed('Invalid parameters', $fields);
@@ -780,6 +904,7 @@ final class FakeAgentClient implements AgentClient
             $command->name() === 'e2e.sleep' => 'e2e:'.$params['subject'],
             $command->name() === 'security.check' => isset($params['name']) ? 'site:'.$params['name'] : 'server',
             str_starts_with($command->name(), 'site.') || $command->name() === 'cert.issue' => 'site:'.($params['name'] ?? ''),
+            in_array($command->name(), ['db.create', 'db.drop', 'db.user'], true) => 'site:'.($params['site'] ?? ''),
             str_starts_with($command->name(), 'php.') && $command->name() !== 'php.default' => 'php:'.($params['version'] ?? ''),
             default => 'server',
         };
@@ -898,6 +1023,10 @@ final class FakeAgentClient implements AgentClient
             if ($php['in_use']) {
                 $services[] = ['unit' => "php{$php['version']}-fpm.service", 'active_state' => 'active', 'unit_file_state' => 'enabled'];
             }
+        }
+        // MySQL is monitored once it is installed, and not before.
+        if ($this->systemStatus['services']['mysql']['installed']) {
+            $services[] = ['unit' => 'mysql.service', 'active_state' => 'active', 'unit_file_state' => 'enabled'];
         }
         foreach (['zimam-agent.socket', 'zimam-panel-queue.service', 'zimam-panel-scheduler.timer', 'zimam-maintenance.timer', 'certbot.timer', 'ssh.socket'] as $unit) {
             $services[] = ['unit' => $unit, 'active_state' => 'active', 'unit_file_state' => 'enabled'];

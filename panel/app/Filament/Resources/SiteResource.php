@@ -3,6 +3,7 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\SiteResource\Pages\CreateSite;
+use App\Filament\Resources\SiteResource\Pages\DatabaseTab;
 use App\Filament\Resources\SiteResource\Pages\DeploymentsTab;
 use App\Filament\Resources\SiteResource\Pages\EnvironmentTab;
 use App\Filament\Resources\SiteResource\Pages\ListSites;
@@ -152,6 +153,9 @@ class SiteResource extends Resource
                 ]),
                 Tab::make(__('zimam.sites.tabs.environment'))->schema([
                     Livewire::make(EnvironmentTab::class, fn (Site $record): array => ['site' => $record])->key('site-environment'),
+                ]),
+                Tab::make(__('zimam.sites.tabs.database'))->schema([
+                    Livewire::make(DatabaseTab::class, fn (Site $record): array => ['site' => $record])->key('site-database'),
                 ]),
                 Tab::make(__('zimam.sites.tabs.logs'))->schema([
                     Livewire::make(SiteLogs::class, fn (Site $record): array => ['site' => $record])->key('site-logs'),

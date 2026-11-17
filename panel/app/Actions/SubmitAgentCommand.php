@@ -21,12 +21,21 @@ final class SubmitAgentCommand
 {
     public function __construct(private readonly AgentClient $agent) {}
 
-    /** @throws Halt when the agent can't be reached, after telling the user if there is one */
-    public function run(AgentCommand $command, ?Model $related = null): AgentJob
+    /**
+     * With $waitWhenBusy false a busy answer is rethrown instead of queued
+     * for a retry: the queue would hold the command, and a one-time password
+     * must not wait in a queue table, even encrypted.
+     *
+     * @throws Halt when the agent can't be reached, after telling the user if there is one
+     */
+    public function run(AgentCommand $command, ?Model $related = null, bool $waitWhenBusy = true): AgentJob
     {
         try {
             $accepted = $this->agent->submit($command);
-        } catch (AgentBusy) {
+        } catch (AgentBusy $busy) {
+            if (! $waitWhenBusy) {
+                throw $busy;
+            }
             $job = $this->record($command, $related, AgentJob::WAITING);
             SubmitAgentJob::dispatch($job, $command)->delay(SubmitAgentJob::BACKOFF[0]);
 

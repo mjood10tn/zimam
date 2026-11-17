@@ -77,6 +77,18 @@ class Site extends Model
         return $this->hasMany(Deployment::class);
     }
 
+    /** The site's MySQL databases, as the agent last listed them. */
+    public function databases(): HasMany
+    {
+        return $this->hasMany(Database::class);
+    }
+
+    /** The site's service users: MySQL's now, Valkey's next. */
+    public function credentials(): HasMany
+    {
+        return $this->hasMany(SiteCredential::class);
+    }
+
     public function securitySettings(): HasOne
     {
         return $this->hasOne(SiteSecuritySetting::class);
@@ -118,7 +130,11 @@ class Site extends Model
     public function hasUnfinishedJob(): bool
     {
         return $this->jobs()->whereNotIn('status', AgentJob::FINISHED)->exists()
-            || ($this->certificate?->jobs()->whereNotIn('status', AgentJob::FINISHED)->exists() ?? false);
+            || ($this->certificate?->jobs()->whereNotIn('status', AgentJob::FINISHED)->exists() ?? false)
+            || AgentJob::whereNotIn('status', AgentJob::FINISHED)
+                ->where('related_type', (new Database)->getMorphClass())
+                ->whereIn('related_id', $this->databases()->select('id'))
+                ->exists();
     }
 
     /** The address the site answers on: HTTPS once its certificate is issued. */

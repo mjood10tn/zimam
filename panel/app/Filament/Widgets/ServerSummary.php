@@ -36,13 +36,17 @@ class ServerSummary extends Widget
      */
     protected function rows(array $data): array
     {
-        return [
+        $mysql = $data['services']['mysql'] ?? [];
+
+        return array_values(array_filter([
             [__('zimam.server.agent'), __('zimam.server.agent_value', [
                 'version' => $data['agent_version'] ?? '?',
                 'protocols' => implode(', ', (array) ($data['protocols'] ?? [])),
             ])],
             [__('zimam.server.nginx'), filled($data['nginx_version'] ?? null) ? $data['nginx_version'] : __('zimam.server.nginx_unknown')],
             [__('zimam.server.php'), $this->php($data['php'] ?? [])],
+            // Nothing is said of a service that isn't installed.
+            ($mysql['installed'] ?? false) ? [__('zimam.server.mysql'), __($mysql['active'] ? 'zimam.server.mysql_active' : 'zimam.server.mysql_inactive', ['version' => $mysql['version']])] : null,
             [__('zimam.server.panel_domain'), (string) ($data['panel_domain'] ?? '')],
             [__('zimam.server.acme'), match ($data['acme_directory'] ?? null) {
                 self::LETS_ENCRYPT => __('zimam.server.acme_production'),
@@ -51,7 +55,7 @@ class ServerSummary extends Widget
             }],
             [__('zimam.server.reboot'), ($data['reboot_required'] ?? false) ? __('zimam.server.reboot_required') : __('zimam.server.reboot_not_required')],
             [__('zimam.server.updates'), $this->updates($data['updates'] ?? [])],
-        ];
+        ]));
     }
 
     /** @param array<string, mixed> $php */

@@ -15,6 +15,7 @@ use App\Filament\Resources\SiteResource;
 use App\Models\Certificate;
 use App\Models\Site;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
@@ -75,7 +76,13 @@ class ViewSite extends ViewRecord
                         ->modalDescription(__('zimam.sites.delete.description'))
                         ->modalSubmitActionLabel(__('zimam.sites.delete.label'))
                         ->visible(fn (Site $record): bool => in_array($record->status, [Site::ACTIVE, Site::FAILED], true))
-                        ->action(fn (Site $record) => $this->delete($record)),
+                        ->action(fn (Site $record, array $data) => $this->delete($record, (bool) ($data['drop_databases'] ?? false))),
+                    [
+                        Checkbox::make('drop_databases')
+                            ->label(__('zimam.sites.delete.drop_databases'))
+                            ->helperText(fn (): string => __('zimam.sites.delete.drop_databases_help', ['names' => $this->getRecord()->databases()->orderBy('name')->pluck('name')->implode(', ')]))
+                            ->visible(fn (): bool => $this->getRecord()->databases()->exists()),
+                    ],
                 ),
                 fn (Site $record): ?string => $record->hasUnfinishedJob() ? __('zimam.sites.busy') : null,
             ),
@@ -113,12 +120,12 @@ class ViewSite extends ViewRecord
      * the rows. A site with nothing left on the server (not_found) loses its
      * rows at once. Any other refusal puts the status back.
      */
-    private function delete(Site $site): void
+    private function delete(Site $site, bool $dropDatabases = false): void
     {
         $status = $site->status;
         $site->update(['status' => Site::DELETING]);
         try {
-            app(SubmitAgentCommand::class)->run(new SiteDestroy($site->name), $site);
+            app(SubmitAgentCommand::class)->run(new SiteDestroy($site->name, $dropDatabases), $site);
         } catch (AgentNotFound) {
             $site->delete();
             Notification::make()->title(__('zimam.sites.delete.done', ['name' => $site->name]))->success()->send();

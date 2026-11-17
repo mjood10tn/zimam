@@ -2,10 +2,12 @@
 
 namespace App\Agent\Outcomes;
 
+use App\Actions\SyncMysql;
 use App\Agent\AgentJobStatus;
 use App\Agent\JobOutcomes;
 use App\Models\AgentJob;
 use App\Models\Site;
+use Illuminate\Support\Facades\DB;
 
 /** What site.provision's, site.php's, site.security's and site.destroy's outcomes change in sites (§7.4, §9.2, §9.5, §9.6, §9.8). */
 final class SiteOutcomes
@@ -90,6 +92,10 @@ final class SiteOutcomes
                 'status' => Site::FAILED,
                 'last_error' => $status->status === AgentJob::CANCELLED ? __('zimam.sites.delete.cancelled') : $status->message,
             ]);
+            // Some of its databases may be gone already.
+            if ($job->params['drop_databases'] ?? false) {
+                DB::afterCommit(fn () => app(SyncMysql::class)->run());
+            }
         });
     }
 }
