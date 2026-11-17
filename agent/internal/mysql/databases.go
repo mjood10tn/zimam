@@ -78,12 +78,14 @@ func RevokeAllUnescaped(site contract.SiteName, name contract.DatabaseName) Stat
 // the database pattern of every row of mysql.db that covers the name. MySQL
 // does the matching, so a grant written with escaped underscores, one with
 // the name as it is and one with a wildcard such as s\_shop\_% all show up.
+// The session sets its own sql_mode first: with NO_BACKSLASH_ESCAPES on the
+// server, the backslashes in a stored pattern would stop matching.
 func DatabaseGrantees(name contract.DatabaseName) Statement {
 	const kind = "list grants on a database"
 	if err := name.Validate(); err != nil {
 		return invalid(kind, "the database name", err)
 	}
-	return Statement{kind: kind, sql: "SELECT User, Host, Db FROM mysql.db WHERE '" + string(name) + "' LIKE Db ORDER BY User, Host, Db;"}
+	return Statement{kind: kind, sql: "SET SESSION sql_mode = '';\nSELECT User, Host, Db FROM mysql.db WHERE '" + string(name) + "' LIKE Db ORDER BY User, Host, Db;"}
 }
 
 // Grantee is one row of mysql.db that covers a database: an account, and

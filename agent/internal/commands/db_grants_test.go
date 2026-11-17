@@ -51,7 +51,7 @@ func TestTakeoverRevokesAnotherSitesLeftoverGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := e.sql()
-	prefixes(t, got, "CREATE DATABASE", "SELECT (SELECT COUNT(*)", "SELECT User, Host, Db", "REVOKE IF EXISTS ALL PRIVILEGES ON `s", "SELECT User, Host, Db", "GRANT ALL PRIVILEGES ON `s")
+	prefixes(t, got, "CREATE DATABASE", "SELECT (SELECT COUNT(*)", "SET SESSION sql_mode", "REVOKE IF EXISTS ALL PRIVILEGES ON `s", "SET SESSION sql_mode", "GRANT ALL PRIVILEGES ON `s")
 	wantRevoke := "REVOKE IF EXISTS ALL PRIVILEGES ON `s" + `\_blog\_a` + "`.* FROM 's_shop'@'localhost', 's_shop'@'127.0.0.1' IGNORE UNKNOWN USER;"
 	if got[3] != wantRevoke {
 		t.Errorf("revoke = %s\nwant     %s", got[3], wantRevoke)
@@ -75,7 +75,7 @@ func TestTakeoverRevokesAGrantWrittenWithTheNameAsItIs(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := e.sql()
-	prefixes(t, got, "CREATE DATABASE", "SELECT (SELECT", "SELECT User", "REVOKE IF EXISTS ALL PRIVILEGES ON `s_blog_a`.* FROM 's_shop'@", "SELECT User", "GRANT")
+	prefixes(t, got, "CREATE DATABASE", "SELECT (SELECT", "SET SESSION sql_mode", "REVOKE IF EXISTS ALL PRIVILEGES ON `s_blog_a`.* FROM 's_shop'@", "SET SESSION sql_mode", "GRANT")
 }
 
 // Anything but a site's own account on this exact name refuses the
@@ -100,7 +100,7 @@ func TestTakeoverIsRefusedForOtherGrants(t *testing.T) {
 		}
 		// Only the create, the count and the grantee query ran: nothing
 		// from the column text reached a statement.
-		prefixes(t, e.sql(), "CREATE DATABASE", "SELECT (SELECT", "SELECT User")
+		prefixes(t, e.sql(), "CREATE DATABASE", "SELECT (SELECT", "SET SESSION sql_mode")
 		if e.stateFile(t, "blog") != before {
 			t.Errorf("%s: state changed", name)
 		}
@@ -118,7 +118,7 @@ func TestTakeoverRefusesWhatRemainsAfterTheRevokes(t *testing.T) {
 	if !strings.Contains(ae.Message, "'hand'@'localhost'") {
 		t.Errorf("message %q", ae.Message)
 	}
-	prefixes(t, e.sql(), "CREATE DATABASE", "SELECT (SELECT", "SELECT User", "REVOKE", "SELECT User")
+	prefixes(t, e.sql(), "CREATE DATABASE", "SELECT (SELECT", "SET SESSION sql_mode", "REVOKE", "SET SESSION sql_mode")
 	if len(e.site(t, "blog").Databases) != 0 {
 		t.Error("the database was listed")
 	}
@@ -138,7 +138,7 @@ func TestFreshCreateRefusedForAForeignGrantDropsTheNewDatabase(t *testing.T) {
 	before := e.stateFile(t, "blog")
 	_, err := e.job(t, "db.create", create("blog", "s_blog_a"))
 	wantCode(t, err, contract.ErrConflict)
-	prefixes(t, e.sql(), "CREATE DATABASE", "SELECT User", "REVOKE IF EXISTS", "DROP DATABASE IF EXISTS `s_blog_a`")
+	prefixes(t, e.sql(), "CREATE DATABASE", "SET SESSION sql_mode", "REVOKE IF EXISTS", "DROP DATABASE IF EXISTS `s_blog_a`")
 	if e.stateFile(t, "blog") != before {
 		t.Error("state changed")
 	}
@@ -155,7 +155,7 @@ func TestFailedGrantAfterATakeoverLeavesTheExistingDatabase(t *testing.T) {
 		t.Fatal("no error")
 	}
 	got := e.sql()
-	prefixes(t, got, "CREATE DATABASE", "SELECT (SELECT", "SELECT User", "GRANT", "REVOKE IF EXISTS")
+	prefixes(t, got, "CREATE DATABASE", "SELECT (SELECT", "SET SESSION sql_mode", "GRANT", "REVOKE IF EXISTS")
 	for _, s := range got {
 		if strings.Contains(s, "DROP DATABASE") {
 			t.Errorf("the existing database was dropped: %q", got)

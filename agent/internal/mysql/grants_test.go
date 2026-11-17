@@ -17,7 +17,7 @@ func TestGranteeStatementsGolden(t *testing.T) {
 		"revoke unescaped": RevokeAllUnescaped("shop", "s_shop_x_a"),
 	}
 	want := map[string]string{
-		"grantees":         "SELECT User, Host, Db FROM mysql.db WHERE 's_shop_x_a' LIKE Db ORDER BY User, Host, Db;",
+		"grantees":         "SET SESSION sql_mode = '';\nSELECT User, Host, Db FROM mysql.db WHERE 's_shop_x_a' LIKE Db ORDER BY User, Host, Db;",
 		"revoke unescaped": "REVOKE IF EXISTS ALL PRIVILEGES ON `s_shop_x_a`.* FROM " + both + " IGNORE UNKNOWN USER;",
 	}
 	for name, st := range got {

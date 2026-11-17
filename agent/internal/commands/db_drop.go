@@ -53,24 +53,33 @@ func dbDrop(ctx context.Context, j *jobs.Context, p contract.Params) (any, error
 	if err != nil {
 		return nil, err
 	}
-	db := params.Database
-	if _, err := mysql.Exec(ctx, d, mysql.RevokeAll(params.Site, db)); err != nil {
-		return nil, dbError(err)
+	if _, err := dropDatabase(ctx, d, st, params.Database); err != nil {
+		return nil, err
+	}
+	return contract.DatabaseResult{Site: params.Site, Database: params.Database}, nil
+}
+
+// dropDatabase revokes the database from the site's accounts, drops it, and
+// removes it from the site's state, which it saves and returns. site.destroy
+// drops each database of a site this way too.
+func dropDatabase(ctx context.Context, d sysexec.Deps, st sites.State, db contract.DatabaseName) (sites.State, error) {
+	if _, err := mysql.Exec(ctx, d, mysql.RevokeAll(st.Name, db)); err != nil {
+		return st, dbError(err)
 	}
 	if _, err := mysql.Exec(ctx, d, mysql.DropDatabase(db)); err != nil {
 		err = dbError(err)
 		var ae *contract.AgentError
 		if errors.As(err, &ae) {
-			return nil, &contract.AgentError{Code: ae.Code, Message: ae.Message + revokedNotDropped(db)}
+			return st, &contract.AgentError{Code: ae.Code, Message: ae.Message + revokedNotDropped(db)}
 		}
-		return nil, fmt.Errorf("%w.%s", err, revokedNotDropped(db))
+		return st, fmt.Errorf("%w.%s", err, revokedNotDropped(db))
 	}
 	d.Logf("Dropped database %s", db)
 	st.Databases = withoutDatabase(st.Databases, db)
 	if err := sites.Save(d.Paths, st); err != nil {
-		return nil, fmt.Errorf("the database %s is dropped, but site %s's state could not be saved; run the command again: %w", db, params.Site, err)
+		return st, fmt.Errorf("the database %s is dropped, but site %s's state could not be saved; run the command again: %w", db, st.Name, err)
 	}
-	return contract.DatabaseResult{Site: params.Site, Database: db}, nil
+	return st, nil
 }
 
 // revokedNotDropped is what a failed DROP DATABASE adds to its error: the
