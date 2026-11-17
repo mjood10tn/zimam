@@ -53,6 +53,7 @@ func withValkey(t *testing.T, e *dbEnv) *dbEnv {
 		t.Fatal(err)
 	}
 	e.run.Add(cliInfo)
+	e.run.Add(cliDatabases)
 	return e
 }
 
@@ -65,6 +66,8 @@ func cli(out string, code int, args ...string) sysexec.Script {
 var (
 	cliPing = cli("PONG\n", 0, "PING")
 	cliLoad = cli("OK\n", 0, "ACL", "LOAD")
+	// One database keeps the scripts of the purge short.
+	cliDatabases = cli("databases\n1\n", 0, "CONFIG", "GET", "databases")
 	// INFO server tells the process apart: a SCAN cursor is good only for one.
 	cliInfo = cli("# Server\r\nvalkey_version:9.0.4\r\nrun_id:"+runA+"\r\n", 0, "INFO", "server")
 )

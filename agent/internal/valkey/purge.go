@@ -43,16 +43,17 @@ var purgePages = 5
 // and needs 120 s of them for MySQL and its own steps, which leaves 180 s for
 // everything Valkey does before them:
 //
-//	the admin PING, MySQL's check (its own 10 s bound) and the
-//	server's run id                                               3 x 10 s
+//	the admin PING, MySQL's check (its own 10 s bound), the
+//	server's run id and its number of databases                   4 x 10 s
 //	waiting for the lock on Valkey's users                        60 s
-//	two purges, each purgeBudget plus its last call (10 s)        2 x (25 + 10) s
+//	two purges, each purgeBudget plus its last call (10 s)        2 x (20 + 10) s
 //	loading the users, and the restore if Valkey refuses them     2 x 10 s
 //	saving the progress (local file writes)                       negligible
 //
-// which is 180 s. A purge that doesn't finish saves where it got to, so a
+// which is 180 s. Each database is scanned in turn and an empty one costs
+// one call of a few milliseconds, so the databases add little. A purge that doesn't finish saves where it got to, so a
 // smaller budget only means more runs.
-var purgeBudget = 25 * time.Second
+var purgeBudget = 20 * time.Second
 
 var (
 	purgeReply = regexp.MustCompile(`^([0-9]+) ([0-9]+)$`)
@@ -85,41 +86,52 @@ func PurgeArgs(cursor string, site contract.SiteName) []string {
 	return []string{"EVAL", purgeScript, "0", cursor, sitePattern(site), strconv.Itoa(purgePages)}
 }
 
-// purgeFrom removes the site's keys from a cursor until the scan ends (done)
-// or purgeBudget is spent, and returns the cursor to continue from. The budget
+// pos is where a purge is: a database and the SCAN cursor in it.
+type pos struct {
+	db     int
+	cursor string
+}
+
+// purgeFrom removes the site's keys from a position through the last
+// database until the scan ends (done) or purgeBudget is spent, and returns the
+// position to continue from. Each database is scanned in turn (a site's user
+// may SELECT any of them, and Laravel's stock cache store is database 1); an
+// empty one costs a call. The budget
 // is checked between calls, so every run makes at least one call of progress.
 // SCAN returns every key that is there from the first call to the last only
 // within one server process: the hash seed is chosen at each start and the
 // tables are rebuilt when the data is loaded, so a cursor from before a restart
 // skips keys. A saved cursor is therefore used only by the process that gave it
 // (see RemoveSiteUser).
-func purgeFrom(ctx context.Context, d sysexec.Deps, site contract.SiteName, cursor string) (next string, removed int, done bool, err error) {
+func purgeFrom(ctx context.Context, d sysexec.Deps, site contract.SiteName, at pos, databases int) (next pos, removed int, done bool, err error) {
 	if err := site.Validate(); err != nil {
-		return cursor, 0, false, fmt.Errorf("site %q %v", site, err)
+		return at, 0, false, fmt.Errorf("site %q %v", site, err)
 	}
-	if !cursorRe.MatchString(cursor) {
-		return cursor, 0, false, fmt.Errorf("%q is not a SCAN cursor", cursor)
+	if !cursorRe.MatchString(at.cursor) || at.db < 0 || at.db >= databases {
+		return at, 0, false, fmt.Errorf("%+v is not a position in %d databases", at, databases)
 	}
 	end := time.Now().Add(purgeBudget)
 	for {
 		if err := ctx.Err(); err != nil {
-			return cursor, removed, false, err
+			return at, removed, false, err
 		}
-		out, err := cliAdmin(ctx, d, PurgeArgs(cursor, site)...)
+		out, err := cliAdminDB(ctx, d, at.db, PurgeArgs(at.cursor, site)...)
 		if err != nil {
-			return cursor, removed, false, err
+			return at, removed, false, err
 		}
 		m := purgeReply.FindStringSubmatch(out)
 		if m == nil || !cursorRe.MatchString(m[1]) {
-			return cursor, removed, false, fmt.Errorf("removing the keys of site %s was answered %q", site, out)
+			return at, removed, false, fmt.Errorf("removing the keys of site %s was answered %q", site, out)
 		}
 		n, _ := strconv.Atoi(m[2])
 		removed += n
-		if cursor = m[1]; cursor == "0" {
-			return cursor, removed, true, nil
+		if at.cursor = m[1]; at.cursor == "0" {
+			if at.db++; at.db >= databases {
+				return pos{}, removed, true, nil
+			}
 		}
 		if time.Now().After(end) {
-			return cursor, removed, false, nil
+			return at, removed, false, nil
 		}
 	}
 }
@@ -128,7 +140,14 @@ func purgeFrom(ctx context.Context, d sysexec.Deps, site contract.SiteName, curs
 // many it removed, as the admin. If purgeBudget runs out first it says so and
 // to run the command again; the keys removed by then stay removed.
 func PurgeSiteKeys(ctx context.Context, d sysexec.Deps, site contract.SiteName) (int, error) {
-	_, n, done, err := purgeFrom(ctx, d, site, "0")
+	if err := site.Validate(); err != nil {
+		return 0, fmt.Errorf("site %q %v", site, err)
+	}
+	databases, err := databaseCount(ctx, d)
+	if err != nil {
+		return 0, err
+	}
+	_, n, done, err := purgeFrom(ctx, d, site, pos{cursor: "0"}, databases)
 	if err != nil {
 		return n, err
 	}
@@ -137,6 +156,28 @@ func PurgeSiteKeys(ctx context.Context, d sysexec.Deps, site contract.SiteName) 
 	}
 	return n, nil
 }
+
+// databaseCount is how many databases the server has (CONFIG GET databases).
+// A site's user may SELECT any of them.
+func databaseCount(ctx context.Context, d sysexec.Deps) (int, error) {
+	out, err := cliAdmin(ctx, d, "CONFIG", "GET", "databases")
+	if err != nil {
+		return 0, err
+	}
+	f := strings.Fields(out)
+	if len(f) != 2 || f[0] != "databases" {
+		return 0, fmt.Errorf("Valkey answered %q to the query for its number of databases", out)
+	}
+	n, err := strconv.Atoi(f[1])
+	if err != nil || n < 1 || n > maxDatabases {
+		return 0, fmt.Errorf("Valkey reports %q databases", f[1])
+	}
+	return n, nil
+}
+
+// maxDatabases is the most databases the agent will walk; the state keeps an
+// index up to it.
+const maxDatabases = 65535
 
 var runIDRe = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
@@ -160,10 +201,12 @@ func runID(ctx context.Context, d sysexec.Deps) (string, error) {
 
 // Progress is how far RemoveSiteUser got: Pass 0 is nothing yet, 1 is the
 // purge before the user is removed, 2 the purge after; Cursor is where the
-// purge in progress continues, and RunID the server process it belongs to.
+// purge in progress continues in database DB, and RunID the server process it belongs to.
 type Progress struct {
 	Pass   int
 	Cursor string
+	// DB is the database the cursor is in; 0 for a progress saved without one.
+	DB int
 	// RunID is the id of the server process that gave the cursor. A cursor is
 	// good only for that process.
 	RunID string
@@ -182,15 +225,15 @@ type Removal struct {
 // order that leaves the site no way to write a key after the last purge, and
 // all under one hold of the lock on Valkey's users:
 //
-//  1. purge the site's keys (pass 1);
+//  1. purge the site's keys in every database (pass 1);
 //  2. load the users without the site (users() lists them all; the site is left
 //     out here), which closes the user's connections;
-//  3. purge again, for keys written between the first purge and the removal
+//  3. purge every database again, for keys written between the first purge and the removal
 //     (pass 2);
 //  4. Clear, which the caller uses to drop the site's hash from its state.
 //
 // A purge has a time budget. When it is spent, or a call fails, the cursor it
-// reached is saved with its pass and the error says to run the command again,
+// reached (database and cursor) is saved with its pass and the error says to run the command again,
 // which continues from there: a keyspace too large for one run is still
 // removed after a few. The hash stays in the state until the last purge has
 // finished, so a failure at any step leaves a state that makes the next run
@@ -198,7 +241,7 @@ type Removal struct {
 // is removed, and a run that resumes it loads the users without the site again
 // before it continues. A cursor is good only for the server process that
 // gave it, so a run that finds a different run id (or none) in the saved progress,
-// after a restart of Valkey, scans that pass again from 0; pass 2 stays pass 2,
+// after a restart of Valkey, scans that pass again from database 0, cursor 0; pass 2 stays pass 2,
 // since the user is already removed. Until the hash is cleared the state is ahead of the live
 // users: another change to Valkey's users renders the user back from the state,
 // which is what a site that is not gone should have. Step 2 is applyLocked, the
@@ -217,7 +260,7 @@ func RemoveSiteUser(ctx context.Context, d sysexec.Deps, users func() ([]SiteUse
 	if err != nil {
 		return err
 	}
-	if saved.Pass < 0 || saved.Pass > 2 || (saved.Pass > 0 && !cursorRe.MatchString(saved.Cursor)) {
+	if saved.Pass < 0 || saved.Pass > 2 || (saved.Pass > 0 && !cursorRe.MatchString(saved.Cursor)) || saved.DB < 0 {
 		return fmt.Errorf("the saved progress of removing site %s's keys is %+v", site, saved)
 	}
 	// Read before anything is scanned: a restart after this makes the run id
@@ -226,25 +269,32 @@ func RemoveSiteUser(ctx context.Context, d sysexec.Deps, users func() ([]SiteUse
 	if err != nil {
 		return err
 	}
+	databases, err := databaseCount(ctx, d)
+	if err != nil {
+		return err
+	}
 
 	// run is one pass: from the saved cursor, or from the start.
 	run := func(pass int) error {
-		cursor := "0"
+		at := pos{cursor: "0"}
 		if saved.Pass == pass {
-			if saved.RunID == rid {
-				cursor = saved.Cursor
-			} else {
+			switch {
+			case saved.RunID == rid && saved.DB < databases:
+				at = pos{db: saved.DB, cursor: saved.Cursor}
+			case saved.RunID == rid:
+				d.Logf("Valkey has fewer databases (%d) than the progress of removing site %s's keys was saved in; scanning this pass again from the first", databases, site)
+			default:
 				d.Logf("Valkey has restarted since the progress of removing site %s's keys was saved, and a cursor is good only for the process that gave it; scanning this pass again from the start", site)
 			}
 		}
-		next, n, done, err := purgeFrom(ctx, d, site, cursor)
+		next, n, done, err := purgeFrom(ctx, d, site, at, databases)
 		if n > 0 {
 			d.Logf("Removed %d key(s) of site %s from Valkey", n, site)
 		}
 		if done {
 			return nil
 		}
-		if serr := rem.Save(Progress{Pass: pass, Cursor: next, RunID: rid}); serr != nil {
+		if serr := rem.Save(Progress{Pass: pass, Cursor: next.cursor, DB: next.db, RunID: rid}); serr != nil {
 			return errors.Join(fmt.Errorf("removing the keys of site %s stopped and its progress could not be saved; run the command again", site), err, serr)
 		}
 		switch {

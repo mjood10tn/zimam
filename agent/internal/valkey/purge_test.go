@@ -47,19 +47,21 @@ func TestPatternOfOneSiteMissesTheNext(t *testing.T) {
 
 func TestPurgePagesUntilTheCursorIsZero(t *testing.T) {
 	e := cliEnv(t)
+	e.add(databases(1))
 	e.add(purgeStep("0", "shop", "17 1000\n"), purgeStep("17", "shop", "9000000000000000000 400\n"), purgeStep("9000000000000000000", "shop", "0 5\n"))
 	n, err := PurgeSiteKeys(context.Background(), e.d, "shop")
 	if err != nil || n != 1405 {
 		t.Fatalf("PurgeSiteKeys = %d, %v; want 1405", n, err)
 	}
-	if got := len(e.run.Calls()); got != 3 {
-		t.Errorf("%d calls, want 3", got)
+	if got := len(e.run.Calls()); got != 4 {
+		t.Errorf("%d calls, want 4 (the databases, then three pages)", got)
 	}
 }
 
 func TestPurgeRefusesWhatItCannotRead(t *testing.T) {
 	for _, reply := range []string{"OK\n", "x 1\n", "0\n", "0 -1\n", "1 2 3\n", "0 1\nextra\n", "\n"} {
 		e := cliEnv(t)
+		e.add(databases(1))
 		e.add(purgeStep("0", "shop", reply))
 		if _, err := PurgeSiteKeys(context.Background(), e.d, "shop"); err == nil {
 			t.Errorf("accepted the reply %q", reply)
@@ -75,6 +77,7 @@ func TestPurgeRefusesWhatItCannotRead(t *testing.T) {
 // stays removed.
 func TestPurgeThatRunsOutOfTimeSaysRunAgain(t *testing.T) {
 	e := cliEnv(t)
+	e.add(databases(1))
 	e.add(purgeStep("0", "shop", "5 10\n"), purgeStep("5", "shop", "6 10\n"), purgeStep("6", "shop", "7 10\n"), purgeStep("7", "shop", "8 10\n"))
 	old := purgeBudget
 	purgeBudget = 150 * time.Millisecond

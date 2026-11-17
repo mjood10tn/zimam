@@ -11,7 +11,7 @@ import (
 
 // serve gives the server a new set of scripts and says which process it is.
 func (r *removal) serve(runID string, scripts ...sysexec.Script) {
-	r.e.run = sysexec.NewFakeRunner(append([]sysexec.Script{infoRun(runID)}, scripts...)...)
+	r.e.run = sysexec.NewFakeRunner(append([]sysexec.Script{infoRun(runID), databases(1)}, scripts...)...)
 	r.e.srv = serverRunner{FakeRunner: r.e.run, killed: r.e.killed}
 	r.e.d.Run = r.e.srv
 }
@@ -42,15 +42,15 @@ func TestSavedCursorOfAnotherProcessIsNotTrusted(t *testing.T) {
 		scripts []sysexec.Script
 	}{
 		"pass 2, another run id": {
-			Progress{2, "33", runA}, Progress{2, "9", runB},
+			Progress{2, "33", 0, runA}, Progress{2, "9", 0, runB},
 			[]sysexec.Script{loadOK, purgeStep("0", "shop", "9 1\n")},
 		},
 		"pass 2, no run id saved": {
-			Progress{2, "33", ""}, Progress{2, "9", runB},
+			Progress{2, "33", 0, ""}, Progress{2, "9", 0, runB},
 			[]sysexec.Script{loadOK, purgeStep("0", "shop", "9 1\n")},
 		},
 		"pass 1, another run id": {
-			Progress{1, "77", runA}, Progress{1, "9", runB},
+			Progress{1, "77", 0, runA}, Progress{1, "9", 0, runB},
 			[]sysexec.Script{purgeStep("0", "shop", "9 1\n")},
 		},
 	} {
@@ -75,9 +75,9 @@ func TestSavedCursorOfAnotherProcessIsNotTrusted(t *testing.T) {
 	}
 	t.Run("the same process resumes, with no such line in the log", func(t *testing.T) {
 		r := newRemoval(t)
-		r.prog = Progress{2, "33", runB}
+		r.prog = Progress{2, "33", 0, runB}
 		r.serve(runB, loadOK, purgeStep("33", "shop", "9 1\n"))
-		if err := r.run(t); err == nil || !slices.Equal(purgeCursors(r), []string{"33"}) || r.prog != (Progress{2, "9", runB}) {
+		if err := r.run(t); err == nil || !slices.Equal(purgeCursors(r), []string{"33"}) || r.prog != (Progress{2, "9", 0, runB}) {
 			t.Errorf("RemoveSiteUser = %v, cursors %q, progress %+v", err, purgeCursors(r), r.prog)
 		}
 		if strings.Contains(r.e.logs.String(), "has restarted") {
@@ -128,7 +128,7 @@ func TestRemovalStopsBeforeAnyScanWhenTheRunIDCantBeRead(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := newRemoval(t)
-			r.prog = Progress{2, "33", runA}
+			r.prog = Progress{2, "33", 0, runA}
 			r.e.run = sysexec.NewFakeRunner(live(reply, "INFO", "server"))
 			r.e.srv = serverRunner{FakeRunner: r.e.run, killed: r.e.killed}
 			r.e.d.Run = r.e.srv
@@ -139,7 +139,7 @@ func TestRemovalStopsBeforeAnyScanWhenTheRunIDCantBeRead(t *testing.T) {
 			if got := len(r.e.run.Calls()); got != 1 {
 				t.Errorf("%d calls (%v); only the INFO may run", got, lines(r.e.run.Calls()))
 			}
-			if readFile(t, r.e.p.ValkeyACL()) != before || r.prog != (Progress{2, "33", runA}) || len(r.saves) != 0 || len(r.events) != 0 {
+			if readFile(t, r.e.p.ValkeyACL()) != before || r.prog != (Progress{2, "33", 0, runA}) || len(r.saves) != 0 || len(r.events) != 0 {
 				t.Errorf("something changed: saves %v, progress %+v, events %q", r.saves, r.prog, r.events)
 			}
 		})

@@ -293,7 +293,7 @@ func TestStateCachePurge(t *testing.T) {
 		t.Errorf("the bytes changed:\n%s\nwas\n%s", after, before)
 	}
 	withPurge := base
-	withPurge.CachePurge = &CachePurge{Pass: 2, Cursor: "18446744073709551615", RunID: strings.Repeat("0f", 20)}
+	withPurge.CachePurge = &CachePurge{Pass: 2, Cursor: "18446744073709551615", DB: 15, RunID: strings.Repeat("0f", 20)}
 	if err := Save(p, withPurge); err != nil {
 		t.Fatal(err)
 	}
@@ -305,6 +305,7 @@ func TestStateCachePurge(t *testing.T) {
 		"pass 0": {Pass: 0, Cursor: "1"}, "pass 3": {Pass: 3, Cursor: "1"},
 		"no cursor": {Pass: 1}, "letters": {Pass: 1, Cursor: "1a"}, "negative": {Pass: 1, Cursor: "-1"},
 		"too long": {Pass: 1, Cursor: strings.Repeat("9", 21)}, "a newline": {Pass: 1, Cursor: "1\n"},
+		"a negative database": {Pass: 1, Cursor: "1", DB: -1}, "a database too far": {Pass: 1, Cursor: "1", DB: 65536},
 		"a short run id": {Pass: 1, Cursor: "1", RunID: "abc"}, "an upper-case run id": {Pass: 1, Cursor: "1", RunID: strings.Repeat("AB", 20)},
 	} {
 		bad := base
@@ -312,6 +313,18 @@ func TestStateCachePurge(t *testing.T) {
 		if err := Save(p, bad); err == nil {
 			t.Errorf("%s: Save accepted %+v", name, c)
 		}
+	}
+	// Database 0 is left out of the file, and a file without the field reads as 0.
+	zero := base
+	zero.CachePurge = &CachePurge{Pass: 1, Cursor: "5"}
+	if err := Save(p, zero); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(p.SiteState("my-shop")); strings.Contains(string(data), `"db"`) {
+		t.Errorf("database 0 is written:\n%s", data)
+	}
+	if got, err := Load(p, "my-shop"); err != nil || got.CachePurge == nil || got.CachePurge.DB != 0 {
+		t.Errorf("Load = %+v, %v; want database 0", got.CachePurge, err)
 	}
 	noHash := withPurge
 	noHash.CacheUserHash = ""

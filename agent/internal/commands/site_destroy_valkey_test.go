@@ -44,7 +44,7 @@ func TestDestroyRemovesValkeyUser(t *testing.T) {
 		t.Errorf("users.acl =\n%s", acl)
 	}
 	// Removing a user closes its connections by itself; nothing is killed.
-	if got := e.valkeyRuns(); !slices.Equal(got, []string{"PING", "INFO server", "PURGE s_shop:* @0", "ACL LOAD", "PURGE s_shop:* @0"}) {
+	if got := e.valkeyRuns(); !slices.Equal(got, []string{"PING", "INFO server", "CONFIG GET databases", "PURGE s_shop:* @0", "ACL LOAD", "PURGE s_shop:* @0"}) {
 		t.Errorf("valkey-cli ran %q", got)
 	}
 	if stateExists(e, "shop") {
@@ -200,7 +200,7 @@ func TestDestroyValkeyThenMySQL(t *testing.T) {
 			order = append(order, "mysql")
 		}
 	}
-	if want := []string{"valkey PING", "mysql", "valkey INFO server", "valkey PURGE s_shop:* @0", "valkey ACL LOAD", "valkey PURGE s_shop:* @0", "mysql", "mysql", "mysql"}; !slices.Equal(order, want) {
+	if want := []string{"valkey PING", "mysql", "valkey INFO server", "valkey CONFIG GET databases", "valkey PURGE s_shop:* @0", "valkey ACL LOAD", "valkey PURGE s_shop:* @0", "mysql", "mysql", "mysql"}; !slices.Equal(order, want) {
 		t.Errorf("order %q, want %q", order, want)
 	}
 	got := e.site(t, "shop")
@@ -228,19 +228,19 @@ func TestDestroyFailureAtEachValkeyStepConverges(t *testing.T) {
 	}{
 		"the first purge fails": {
 			scripts:      []sysexec.Script{purgeFail},
-			wantRuns:     []string{"PING", "INFO server", "PURGE s_shop:* @0"},
+			wantRuns:     []string{"PING", "INFO server", "CONFIG GET databases", "PURGE s_shop:* @0"},
 			aclHasShop:   true,
 			hashRemained: true,
 		},
 		"the load fails": {
 			scripts:      append(cliPurge("shop", 3, 0), cli("ERR bad\n", 1, "ACL", "LOAD"), cliLoad),
-			wantRuns:     []string{"PING", "INFO server", "PURGE s_shop:* @0", "ACL LOAD", "ACL LOAD"},
+			wantRuns:     []string{"PING", "INFO server", "CONFIG GET databases", "PURGE s_shop:* @0", "ACL LOAD", "ACL LOAD"},
 			aclHasShop:   true,
 			hashRemained: true,
 		},
 		"the second purge fails": {
 			scripts:      []sysexec.Script{cli("0 3\n", 0, valkey.PurgeArgs("0", "shop")...), cliLoad, purgeFail},
-			wantRuns:     []string{"PING", "INFO server", "PURGE s_shop:* @0", "ACL LOAD", "PURGE s_shop:* @0"},
+			wantRuns:     []string{"PING", "INFO server", "CONFIG GET databases", "PURGE s_shop:* @0", "ACL LOAD", "PURGE s_shop:* @0"},
 			aclHasShop:   false, // the live users lack it; the state still has the hash
 			hashRemained: true,
 		},
@@ -272,16 +272,16 @@ func TestDestroyFailureAtEachValkeyStepConverges(t *testing.T) {
 				t.Errorf("users.acl has s_shop = %v, want %v", has, tc.aclHasShop)
 			}
 			// Again, Valkey well: the same steps run and the destroy ends.
-			e.run = sysexec.NewFakeRunner(append([]sysexec.Script{cliPing, cliInfo, cliLoad}, cliPurge("shop", 0, 0)...)...)
+			e.run = sysexec.NewFakeRunner(append([]sysexec.Script{cliPing, cliInfo, cliDatabases, cliLoad}, cliPurge("shop", 0, 0)...)...)
 			e.d.Run = e.run
 			if _, err := e.job(t, "site.destroy", destroyParams(false)); err != nil {
 				t.Fatal(err)
 			}
-			want := []string{"PING", "INFO server", "PURGE s_shop:* @0", "ACL LOAD", "PURGE s_shop:* @0"}
+			want := []string{"PING", "INFO server", "CONFIG GET databases", "PURGE s_shop:* @0", "ACL LOAD", "PURGE s_shop:* @0"}
 			if name == "the second purge fails" {
 				// The first pass and the user's removal are done and recorded, so the
 				// second run resumes the second pass (after loading the users again).
-				want = []string{"PING", "INFO server", "ACL LOAD", "PURGE s_shop:* @0"}
+				want = []string{"PING", "INFO server", "CONFIG GET databases", "ACL LOAD", "PURGE s_shop:* @0"}
 			}
 			if got := e.valkeyRuns(); !slices.Equal(got, want) {
 				t.Errorf("the second run made %q, want %q", got, want)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -38,6 +39,11 @@ var (
 	runB = strings.Repeat("b", 40)
 )
 
+// databases is the answer to the query for the number of databases.
+func databases(n int) sysexec.Script {
+	return live("databases\n"+strconv.Itoa(n)+"\n", "CONFIG", "GET", "databases")
+}
+
 func infoRun(id string) sysexec.Script {
 	return live("# Server\r\nvalkey_version:9.0.4\r\nrun_id:"+id+"\r\ntcp_port:6379\r\n", "INFO", "server")
 }
@@ -58,7 +64,7 @@ func newRemoval(t *testing.T, scripts ...sysexec.Script) *removal {
 	if err := os.WriteFile(r.e.p.ValkeyACL(), acl, 0o640); err != nil {
 		t.Fatal(err)
 	}
-	r.e.add(infoRun(runA))
+	r.e.add(infoRun(runA), databases(1))
 	r.e.add(scripts...)
 	return r
 }
@@ -90,7 +96,7 @@ func (r *removal) run(t *testing.T) error {
 
 // again gives the server a new set of scripts, as a later run finds it.
 func (r *removal) again(scripts ...sysexec.Script) {
-	r.e.run = sysexec.NewFakeRunner(append([]sysexec.Script{infoRun(runA)}, scripts...)...)
+	r.e.run = sysexec.NewFakeRunner(append([]sysexec.Script{infoRun(runA), databases(1)}, scripts...)...)
 	r.e.srv = serverRunner{FakeRunner: r.e.run, killed: r.e.killed}
 	r.e.d.Run = r.e.srv
 }
@@ -118,13 +124,13 @@ func TestRemoveSiteUserOrder(t *testing.T) {
 	if err := r.run(t); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{line(infoRun(runA)), line(step), line(loadOK), line(step)}
+	want := []string{line(infoRun(runA)), line(databases(1)), line(step), line(loadOK), line(step)}
 	if got := lines(r.e.run.Calls()); !slices.Equal(got, want) {
 		t.Errorf("ran\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 	// Pass 2 is recorded once the user is removed, the state is cleared last
 	// with the live users already without the site, and nothing is left saved.
-	if !slices.Equal(r.saves, []Progress{{2, "0", runA}}) || r.prog != (Progress{}) {
+	if !slices.Equal(r.saves, []Progress{{2, "0", 0, runA}}) || r.prog != (Progress{}) {
 		t.Errorf("saves %v, left %v", r.saves, r.prog)
 	}
 	if !slices.Equal(r.events, []string{"clear; users.acl has s_shop: no"}) {
@@ -145,9 +151,9 @@ func TestRemoveSiteUserFailureAtEachStepConverges(t *testing.T) {
 		scripts []sysexec.Script
 		calls   int
 	}{
-		"first purge": {[]sysexec.Script{boom}, 2},
-		"load":        {[]sysexec.Script{first, loadFail, loadOK}, 4},
-		"last purge":  {[]sysexec.Script{first, loadOK, boom}, 4},
+		"first purge": {[]sysexec.Script{boom}, 3},
+		"load":        {[]sysexec.Script{first, loadFail, loadOK}, 5},
+		"last purge":  {[]sysexec.Script{first, loadOK, boom}, 5},
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := newRemoval(t, tc.scripts...)
@@ -182,18 +188,18 @@ func TestRemoveSiteUserResumesFromTheSavedCursor(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "run the command again to continue") {
 		t.Fatalf("RemoveSiteUser = %v", err)
 	}
-	if r.prog != (Progress{1, "70", runA}) || len(r.events) != 0 {
+	if r.prog != (Progress{1, "70", 0, runA}) || len(r.events) != 0 {
 		t.Fatalf("progress %v, events %q", r.prog, r.events)
 	}
 	// Second run: starts at 70, not 0, and runs out of time again.
 	r.again(purgeStep("70", "shop", "90 100\n"))
-	if err := r.run(t); err == nil || r.prog != (Progress{1, "90", runA}) || cursorOfFirstPurge(r) != "70" {
+	if err := r.run(t); err == nil || r.prog != (Progress{1, "90", 0, runA}) || cursorOfFirstPurge(r) != "70" {
 		t.Fatalf("second run: %v, progress %v, first cursor %q", err, r.prog, cursorOfFirstPurge(r))
 	}
 	// Third run: the pass ends, the user is removed, pass 2 starts at 0 and
 	// runs out of time at once.
 	r.again(purgeStep("90", "shop", "0 5\n"), loadOK, purgeStep("0", "shop", "33 7\n"))
-	if err := r.run(t); err == nil || r.prog != (Progress{2, "33", runA}) || cursorOfFirstPurge(r) != "90" {
+	if err := r.run(t); err == nil || r.prog != (Progress{2, "33", 0, runA}) || cursorOfFirstPurge(r) != "90" {
 		t.Fatalf("third run: %v, progress %v", err, r.prog)
 	}
 	if strings.Contains(readFile(t, r.e.p.ValkeyACL()), "s_shop") {
@@ -206,7 +212,7 @@ func TestRemoveSiteUserResumesFromTheSavedCursor(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := lines(r.e.run.Calls())
-	if len(got) != 3 || got[1] != line(loadOK) || got[2] != line(purgeStep("33", "shop", "")) {
+	if len(got) != 4 || got[2] != line(loadOK) || got[3] != line(purgeStep("33", "shop", "")) {
 		t.Errorf("fourth run made\n%s", strings.Join(got, "\n"))
 	}
 	if r.prog != (Progress{}) || len(r.events) != 1 {
@@ -227,7 +233,7 @@ func TestRemoveSiteUserWhoseProgressCantBeSaved(t *testing.T) {
 }
 
 func TestRemoveSiteUserRefusesProgressItCannotUse(t *testing.T) {
-	for _, p := range []Progress{{3, "0", ""}, {1, "", ""}, {2, "x", ""}, {-1, "0", ""}} {
+	for _, p := range []Progress{{3, "0", 0, ""}, {1, "", 0, ""}, {2, "x", 0, ""}, {-1, "0", 0, ""}, {1, "5", -1, ""}} {
 		r := newRemoval(t)
 		r.prog = p
 		if err := r.run(t); err == nil || len(r.e.run.Calls()) != 0 {
@@ -264,7 +270,7 @@ func TestRemoveSiteUserInterruptedByACancel(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "interrupted") || !strings.Contains(err.Error(), "run the command again to continue") || !errors.Is(err, context.Canceled) {
 		t.Fatalf("RemoveSiteUser = %v", err)
 	}
-	if r.prog != (Progress{1, "70", runA}) {
+	if r.prog != (Progress{1, "70", 0, runA}) {
 		t.Errorf("progress %v", r.prog)
 	}
 }

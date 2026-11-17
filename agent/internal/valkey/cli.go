@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -38,6 +39,16 @@ var cliTimeout = 10 * time.Second
 // the install's checks) call it, so no text from the panel reaches it.
 func cliAdmin(ctx context.Context, d sysexec.Deps, args ...string) (string, error) {
 	return cli(ctx, d, []string{"-h", "127.0.0.1", "-p", "6379"}, args)
+}
+
+// cliAdminDB is cliAdmin with database db selected for the call (valkey-cli -n),
+// which database 0, the default, needs no option for.
+func cliAdminDB(ctx context.Context, d sysexec.Deps, db int, args ...string) (string, error) {
+	target := []string{"-h", "127.0.0.1", "-p", "6379"}
+	if db != 0 {
+		target = append(target, "-n", strconv.Itoa(db))
+	}
+	return cli(ctx, d, target, args)
 }
 
 // cliSocket is cliAdmin for a server that listens on a unix socket only, which is
