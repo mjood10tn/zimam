@@ -74,10 +74,20 @@ class Databases extends Page implements HasTable
             ?? ServerService::named(ServerService::MYSQL)?->status === ServerService::INSTALLED;
     }
 
+    /** Whether the agent couldn't say if MySQL is installed, and the panel has no row that does. */
+    public function mysqlUnknown(): bool
+    {
+        return ServerStatus::current()?->serviceUnknown(ServerService::MYSQL) === true && ! $this->mysqlInstalled();
+    }
+
     public function content(Schema $schema): Schema
     {
         return $schema->components([
-            Text::make(fn (): string => $this->mysqlInstalled() ? __('zimam.databases.sizes_note') : __('zimam.databases.not_installed')),
+            Text::make(fn (): string => match (true) {
+                $this->mysqlInstalled() => __('zimam.databases.sizes_note'),
+                $this->mysqlUnknown() => __('zimam.databases.unknown'),
+                default => __('zimam.databases.not_installed'),
+            }),
             EmbeddedTable::make(),
         ]);
     }
@@ -138,7 +148,7 @@ class Databases extends Page implements HasTable
             AgentHealth::guard(
                 Action::make('install')
                     ->label(__('zimam.databases.install.label'))
-                    ->visible(fn (): bool => ! $this->mysqlInstalled() && ServerService::named(ServerService::MYSQL)?->status !== ServerService::INSTALLING)
+                    ->visible(fn (): bool => ! $this->mysqlInstalled() && ! $this->mysqlUnknown() && ServerService::named(ServerService::MYSQL)?->status !== ServerService::INSTALLING)
                     ->requiresConfirmation()
                     ->modalHeading(__('zimam.databases.install.heading'))
                     ->modalDescription(__('zimam.databases.install.description'))

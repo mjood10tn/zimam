@@ -2,8 +2,11 @@
 
 namespace Tests\Feature\Cache;
 
+use App\Actions\SyncMysql;
+use App\Actions\SyncValkey;
 use App\Agent\Commands\SystemStatus;
 use App\Agent\Exceptions\AgentUnavailable;
+use App\Agent\FakeAgentClient;
 use App\Agent\ServerStatus;
 use App\Filament\Pages\Cache;
 use App\Filament\Pages\Databases;
@@ -53,26 +56,55 @@ final class OldStatusTest extends DatabasesTestCase
 
     /**
      * An agent that can't read services.json, or can't ask systemd, leaves a
-     * service out of the status: unknown, not "not installed". Nothing throws,
-     * and the panel's own record of the service stands in.
+     * service out of the status: unknown, not "not installed". The agent
+     * itself answers that way here, and the panel's record of the service
+     * stands: its row survives every sync, nothing offers an install, and
+     * nothing throws.
      */
-    public function testPagesRenderWhenTheStatusLeavesServicesUnknown(): void
+    public function testUnknownServicesKeepTheirRowsAndOfferNoInstall(): void
     {
         $site = $this->site();
         $this->agent->installMysql()->installValkey();
-        ServerService::create(['name' => ServerService::MYSQL, 'status' => ServerService::INSTALLED, 'version' => '8.4.13']);
-        ServerService::create(['name' => ServerService::VALKEY, 'status' => ServerService::INSTALLED, 'version' => '9.0.4']);
+        foreach ([ServerService::MYSQL => '8.4.13', ServerService::VALKEY => '9.0.4'] as $name => $version) {
+            ServerService::create(['name' => $name, 'status' => ServerService::INSTALLED, 'version' => $version]);
+        }
         foreach ([[], ['mysql' => null, 'valkey' => null]] as $services) {
-            $data = $this->agent->call(new SystemStatus)->data;
-            $data['services'] = $services;
-            CacheStore::forever('zimam.system_status', ['data' => $data, 'issued_at' => now()->toIso8601String()]);
+            $this->agent->respond('system.status', function () use ($services): array {
+                $data = (new FakeAgentClient)->call(new SystemStatus)->data;
+                $data['services'] = $services;
 
-            $this->assertNull(ServerStatus::current()->service(ServerService::MYSQL));
+                return $data;
+            });
+            CacheStore::forget('zimam.system_status');
+
+            $this->assertNull(ServerStatus::fresh()->service(ServerService::MYSQL));
+            $this->assertTrue(ServerStatus::current()->serviceUnknown(ServerService::MYSQL));
+            $this->assertTrue(app(SyncMysql::class)->run() === false);
+            $this->assertFalse(app(SyncValkey::class)->run());
+            $this->assertFalse(app(SyncMysql::class)->runForSite($site));
+            $this->assertSame(2, ServerService::where('status', ServerService::INSTALLED)->count(), 'a row was dropped');
+
             Livewire::test(DatabaseTab::class, ['site' => $site])->assertOk()->assertDontSee(__('zimam.databases.not_installed'));
             Livewire::test(CacheTab::class, ['site' => $site])->assertOk()->assertDontSee(__('zimam.cache.tab.not_installed'));
-            Livewire::test(Databases::class)->assertOk();
-            Livewire::test(Cache::class)->assertOk();
-            $this->get('/admin')->assertOk();
+            Livewire::test(Databases::class)->assertOk()->assertActionHidden('install');
+            Livewire::test(Cache::class)->assertOk()->assertActionHidden('install');
+            $this->get('/admin')->assertOk()->assertSee(__('zimam.server.mysql_unknown'));
+            $this->assertSame(2, ServerService::where('status', ServerService::INSTALLED)->count());
         }
+
+        // With no row to fall back on, the pages say it is unknown and still offer no install.
+        ServerService::query()->delete();
+        Livewire::test(Databases::class)->assertSee(__('zimam.databases.unknown'))->assertActionHidden('install');
+        Livewire::test(Cache::class)->assertSee(__('zimam.cache.unknown'))->assertActionHidden('install');
+
+        // An agent that predates the services (no key at all) still means not installed.
+        $this->agent->respond('system.status', function (): array {
+            $data = (new FakeAgentClient)->call(new SystemStatus)->data;
+            unset($data['services']);
+
+            return $data;
+        });
+        CacheStore::forget('zimam.system_status');
+        Livewire::test(Databases::class)->assertActionVisible('install');
     }
 }

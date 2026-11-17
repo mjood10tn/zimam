@@ -232,6 +232,8 @@ return [
         'mysql' => 'MySQL',
         'mysql_active' => ':version, running',
         'mysql_inactive' => ':version, not running',
+        'mysql_unknown' => 'Not readable',
+        'valkey_unknown' => 'Not readable',
         'valkey' => 'Valkey',
         'valkey_active' => ':version, running',
         'valkey_inactive' => ':version, not running',
@@ -744,6 +746,7 @@ return [
         'title' => 'MySQL',
         'empty' => 'No databases yet.',
         'not_installed' => 'MySQL isn’t installed on this server. Install it from the MySQL page.',
+        'unknown' => 'Zimam could not read whether MySQL is installed. Try again in a moment.',
         'sizes_note' => 'Sizes come from MySQL’s statistics and may lag a little.',
         'submitted_body' => 'The job runs in the background. Follow it under Jobs.',
         'columns' => [
@@ -845,6 +848,7 @@ return [
     'cache' => [
         'title' => 'Cache',
         'not_installed' => 'Valkey isn’t installed on this server. Install it from this page to give sites a cache, queue or session store.',
+        'unknown' => 'Zimam could not read whether Valkey is installed. Try again in a moment.',
         'installing' => 'Installing Valkey…',
         'installed' => 'Valkey :version is installed. It listens on this server only. Each site gets its own user on the site’s Cache tab.',
         'failed' => 'Installing Valkey failed: :reason',

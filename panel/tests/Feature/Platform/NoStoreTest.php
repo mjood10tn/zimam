@@ -4,7 +4,6 @@ namespace Tests\Feature\Platform;
 
 use App\Agent\AgentClient;
 use App\Agent\FakeAgentClient;
-use App\Http\Middleware\NoStorePanelPages;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -32,8 +31,8 @@ final class NoStoreTest extends TestCase
 
     /**
      * A Livewire update is the response that carries a revealed password, so
-     * it must not be stored either: the page's middleware doesn't run on an
-     * update, only the persistent ones do.
+     * it must not be stored either. Livewire's own back-button middleware sets
+     * the header on it; the panel's page middleware does not run on updates.
      */
     public function testLivewireUpdatesAreNotStored(): void
     {
@@ -58,7 +57,5 @@ final class NoStoreTest extends TestCase
         ])->assertOk();
 
         $this->assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
-        // Not left to whatever else sets the header: the middleware itself re-runs on updates.
-        $this->assertContains(NoStorePanelPages::class, Livewire::getPersistentMiddleware());
     }
 }

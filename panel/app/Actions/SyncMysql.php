@@ -30,11 +30,15 @@ final class SyncMysql
      */
     private const IN_FLIGHT_GRACE_MINUTES = 5;
 
-    /** False when the agent didn't answer; nothing is changed then. */
+    /** False when the agent didn't answer or couldn't read MySQL's state; nothing is changed then. */
     public function run(): bool
     {
         $status = ServerStatus::fresh();
         if ($status === null) {
+            return false;
+        }
+        if ($status->serviceUnknown(ServerService::MYSQL)) {
+            // The agent couldn't read it: the row and the databases stay as they are.
             return false;
         }
         $mysql = $status->service(ServerService::MYSQL) ?? ['installed' => false, 'version' => '', 'active' => false];
@@ -47,7 +51,7 @@ final class SyncMysql
     public function runForSite(Site $site): bool
     {
         $status = ServerStatus::current();
-        if ($status === null) {
+        if ($status === null || $status->serviceUnknown(ServerService::MYSQL)) {
             return false;
         }
 

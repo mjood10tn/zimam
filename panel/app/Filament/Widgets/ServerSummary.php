@@ -38,6 +38,9 @@ class ServerSummary extends Widget
     {
         $mysql = $data['services']['mysql'] ?? [];
         $valkey = $data['services']['valkey'] ?? [];
+        // A status with a services list that leaves one out: the agent couldn't read it.
+        $mysqlUnknown = array_key_exists('services', $data) && ($data['services']['mysql'] ?? null) === null;
+        $valkeyUnknown = array_key_exists('services', $data) && ($data['services']['valkey'] ?? null) === null;
 
         return array_values(array_filter([
             [__('zimam.server.agent'), __('zimam.server.agent_value', [
@@ -48,6 +51,8 @@ class ServerSummary extends Widget
             [__('zimam.server.php'), $this->php($data['php'] ?? [])],
             // Nothing is said of a service that isn't installed.
             ($mysql['installed'] ?? false) ? [__('zimam.server.mysql'), __($mysql['active'] ? 'zimam.server.mysql_active' : 'zimam.server.mysql_inactive', ['version' => $mysql['version']])] : null,
+            $mysqlUnknown ? [__('zimam.server.mysql'), __('zimam.server.mysql_unknown')] : null,
+            $valkeyUnknown ? [__('zimam.server.valkey'), __('zimam.server.valkey_unknown')] : null,
             ($valkey['installed'] ?? false) ? [__('zimam.server.valkey'), __($valkey['active'] ? 'zimam.server.valkey_active' : 'zimam.server.valkey_inactive', ['version' => $valkey['version']])] : null,
             [__('zimam.server.panel_domain'), (string) ($data['panel_domain'] ?? '')],
             [__('zimam.server.acme'), match ($data['acme_directory'] ?? null) {

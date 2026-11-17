@@ -53,6 +53,12 @@ class Cache extends Page
         return ServerStatus::current()?->service(ServerService::VALKEY)['installed'] ?? ServerService::named(ServerService::VALKEY)?->status === ServerService::INSTALLED;
     }
 
+    /** Whether the agent couldn't say if Valkey is installed, and the panel has no row that does. */
+    public function valkeyUnknown(): bool
+    {
+        return ServerStatus::current()?->serviceUnknown(ServerService::VALKEY) === true && ! $this->valkeyInstalled();
+    }
+
     public function content(Schema $schema): Schema
     {
         return $schema->components([
@@ -68,7 +74,7 @@ class Cache extends Page
                     return __('zimam.cache.failed', ['reason' => (string) $service->last_error]);
                 }
 
-                return __('zimam.cache.not_installed');
+                return $this->valkeyUnknown() ? __('zimam.cache.unknown') : __('zimam.cache.not_installed');
             }),
         ]);
     }
@@ -79,7 +85,7 @@ class Cache extends Page
             AgentHealth::guard(
                 Action::make('install')
                     ->label(__('zimam.cache.install.label'))
-                    ->visible(fn (): bool => ! $this->valkeyInstalled() && ServerService::named(ServerService::VALKEY)?->status !== ServerService::INSTALLING)
+                    ->visible(fn (): bool => ! $this->valkeyInstalled() && ! $this->valkeyUnknown() && ServerService::named(ServerService::VALKEY)?->status !== ServerService::INSTALLING)
                     ->requiresConfirmation()
                     ->modalHeading(__('zimam.cache.install.heading'))
                     ->modalDescription(__('zimam.cache.install.description'))

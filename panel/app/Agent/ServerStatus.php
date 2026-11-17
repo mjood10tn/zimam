@@ -95,6 +95,17 @@ final class ServerStatus
         return $this->data['services'][$name] ?? null;
     }
 
+    /**
+     * Whether the agent answered with a services list that leaves this one out:
+     * it could not read it, so whether it is installed is unknown. A status with
+     * no services at all is from an agent that predates them, and means none is
+     * installed.
+     */
+    public function serviceUnknown(string $name): bool
+    {
+        return array_key_exists('services', $this->data) && ($this->data['services'][$name] ?? null) === null;
+    }
+
     /** When the next answer is due, for the bulletin's "Next" time. */
     public function nextAt(): CarbonImmutable
     {

@@ -84,11 +84,9 @@ class AdminPanelProvider extends PanelProvider
                 Authenticate::class,
             ])
             // Livewire update requests re-run only persistent middleware; without
-            // the first they skip the 2FA check, and without the second the
-            // update that reveals a new password would be stored by the browser.
+            // this one they skip the 2FA check (Task 3, step 3).
             ->persistentMiddleware([
                 EnsureMultiFactorAuthenticationIsEnabled::class,
-                NoStorePanelPages::class,
             ]);
     }
 }
