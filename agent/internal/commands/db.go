@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"slices"
+	"strings"
 	"time"
 
 	"zimam/agent/contract"
@@ -78,4 +79,82 @@ func withoutDatabase(dbs []contract.DatabaseName, name contract.DatabaseName) []
 		return nil // an empty list leaves the field out of the file
 	}
 	return out
+}
+
+// siteAccount is the site a MySQL account belongs to, if it has the shape of
+// one of Zimam's: the user s_<site name> on localhost or 127.0.0.1. The
+// account's text comes from MySQL, so the site name is checked before it
+// reaches a statement.
+func siteAccount(g mysql.Grantee) (contract.SiteName, bool) {
+	name, ok := strings.CutPrefix(g.User, "s_")
+	if !ok || (g.Host != "localhost" && g.Host != "127.0.0.1") {
+		return "", false
+	}
+	site := contract.SiteName(name)
+	if site.Validate() != nil {
+		return "", false
+	}
+	return site, true
+}
+
+// clearStaleGrants makes sure no account holds privileges on the database
+// before the site's own grant is made. A grant outlives its database, and a
+// database made by hand can carry grants, so a name that is free in the
+// state can still be reachable by another account, which would break the
+// isolation of sites. The accounts that hold a grant fall in two kinds:
+//
+//   - a site's own accounts, with the grant on exactly this name (escaped, as
+//     Zimam writes it, or as it is): what an earlier create left behind when
+//     its cleanup failed. These are revoked, and the site's grant is made anew
+//     afterwards;
+//   - anything else, another user or host or a wildcard pattern such as
+//     s\_shop\_%: a conflict, and nothing is changed for it.
+//
+// The query is asked again after the revokes, and anything left refuses.
+func clearStaleGrants(ctx context.Context, d sysexec.Deps, db contract.DatabaseName) error {
+	grantees, err := mysql.Grantees(ctx, d, db)
+	if err != nil {
+		return dbError(err)
+	}
+	escaped := strings.ReplaceAll(string(db), "_", `\_`)
+	type leftover struct {
+		site    contract.SiteName
+		escaped bool
+	}
+	var todo []leftover
+	for _, g := range grantees {
+		site, ok := siteAccount(g)
+		if !ok || (g.Pattern != escaped && g.Pattern != string(db)) {
+			return foreignGrant(db, g)
+		}
+		l := leftover{site, g.Pattern == escaped}
+		if !slices.Contains(todo, l) {
+			todo = append(todo, l)
+		}
+	}
+	if len(todo) == 0 {
+		return nil
+	}
+	for _, l := range todo {
+		d.Logf("Revoking the grant on %s that site %s's user was left with", db, l.site)
+		revoke := mysql.RevokeAllUnescaped(l.site, db)
+		if l.escaped {
+			revoke = mysql.RevokeAll(l.site, db)
+		}
+		if _, err := mysql.Exec(ctx, d, revoke); err != nil {
+			return dbError(err)
+		}
+	}
+	if grantees, err = mysql.Grantees(ctx, d, db); err != nil {
+		return dbError(err)
+	}
+	if len(grantees) > 0 {
+		return foreignGrant(db, grantees[0])
+	}
+	return nil
+}
+
+func foreignGrant(db contract.DatabaseName, g mysql.Grantee) error {
+	return conflict("The database %s exists in MySQL with privileges that Zimam did not give: the account '%s'@'%s' holds a grant on %s. Zimam won't use it until that grant is removed.",
+		db, g.User, g.Host, g.Pattern)
 }

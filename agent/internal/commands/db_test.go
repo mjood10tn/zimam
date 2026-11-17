@@ -189,6 +189,7 @@ func TestCreateWithoutUser(t *testing.T) {
 	st.Databases = []contract.DatabaseName{"s_blog_b"}
 	e.saveSite(t, st)
 	e.answer("", "")
+	e.answer("", "")
 	res, err := e.job(t, "db.create", create("blog", "s_blog_a"))
 	if err != nil {
 		t.Fatal(err)
@@ -196,7 +197,7 @@ func TestCreateWithoutUser(t *testing.T) {
 	if res != (contract.DatabaseResult{Site: "blog", Database: "s_blog_a"}) {
 		t.Errorf("result %+v", res)
 	}
-	if got := e.sql(); len(got) != 1 || got[0] != "CREATE DATABASE `s_blog_a` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;" {
+	if got := e.sql(); len(got) != 2 || got[0] != "CREATE DATABASE `s_blog_a` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;" || !strings.Contains(got[1], "FROM mysql.db") {
 		t.Errorf("SQL = %q", got)
 	}
 	got := e.site(t, "blog")
@@ -212,13 +213,15 @@ func TestCreateGrantsToExistingUser(t *testing.T) {
 	e.saveSite(t, st)
 	e.answer("", "")
 	e.answer("", "")
+	e.answer("", "")
 	if _, err := e.job(t, "db.create", create("blog", "s_blog_main")); err != nil {
 		t.Fatal(err)
 	}
 	got := e.sql()
-	if len(got) != 2 || !strings.HasPrefix(got[0], "CREATE DATABASE `s_blog_main`") {
+	if len(got) != 3 || !strings.HasPrefix(got[0], "CREATE DATABASE `s_blog_main`") || !strings.Contains(got[1], "FROM mysql.db") {
 		t.Fatalf("SQL = %q", got)
 	}
+	got = got[1:]
 	wantGrant := "GRANT ALL PRIVILEGES ON `s" + `\_blog\_main` + "`.* TO 's_blog'@'localhost', 's_blog'@'127.0.0.1';"
 	if got[1] != wantGrant {
 		t.Errorf("grant = %s\nwant    %s", got[1], wantGrant)
@@ -274,6 +277,7 @@ func TestCreateUndoesTheDatabaseWhenTheGrantFails(t *testing.T) {
 	e.saveSite(t, st)
 	before := e.stateFile(t, "blog")
 	e.answer("", "")
+	e.answer("", "")
 	e.answer("", "ERROR 1396 (HY000) at line 1: Operation GRANT failed")
 	e.answer("", "")
 	e.answer("", "")
@@ -282,7 +286,7 @@ func TestCreateUndoesTheDatabaseWhenTheGrantFails(t *testing.T) {
 		t.Fatal("no error")
 	}
 	got := e.sql()
-	if len(got) != 4 || !strings.HasPrefix(got[1], "GRANT ") || !strings.HasPrefix(got[2], "REVOKE IF EXISTS") || got[3] != "DROP DATABASE IF EXISTS `s_blog_a`;" {
+	if len(got) != 5 || !strings.HasPrefix(got[2], "GRANT ") || !strings.HasPrefix(got[3], "REVOKE IF EXISTS") || got[4] != "DROP DATABASE IF EXISTS `s_blog_a`;" {
 		t.Fatalf("SQL = %q", got)
 	}
 	if e.stateFile(t, "blog") != before {
@@ -298,7 +302,7 @@ func TestCreateUndoesTheDatabaseWhenTheStateCannotBeSaved(t *testing.T) {
 	e.saveSite(t, st)
 	// Once the grant has run, make the state file impossible to replace.
 	e.run = sysexec.NewFakeRunner()
-	hook := &hookRunner{Runner: e.run, after: 2, do: func() {
+	hook := &hookRunner{Runner: e.run, after: 3, do: func() {
 		if err := os.Remove(e.p.SiteState("blog")); err != nil {
 			t.Fatal(err)
 		}
@@ -306,7 +310,7 @@ func TestCreateUndoesTheDatabaseWhenTheStateCannotBeSaved(t *testing.T) {
 			t.Fatal(err)
 		}
 	}}
-	for range 4 {
+	for range 5 {
 		e.run.Add(sysexec.Script{Path: mysqlClient, Args: mysqlClientArgs})
 	}
 	j := &jobs.Context{ID: "01JBX7Q3A1B2C3D4E5F6G7H8J9", Logf: t.Logf, Paths: e.p, Run: hook}
@@ -318,8 +322,8 @@ func TestCreateUndoesTheDatabaseWhenTheStateCannotBeSaved(t *testing.T) {
 	for _, c := range e.run.Calls() {
 		stmts = append(stmts, strings.TrimSpace(string(c.Stdin)))
 	}
-	if len(stmts) != 4 || !strings.HasPrefix(stmts[0], "CREATE DATABASE") || !strings.HasPrefix(stmts[1], "GRANT") ||
-		!strings.HasPrefix(stmts[2], "REVOKE IF EXISTS") || !strings.HasPrefix(stmts[3], "DROP DATABASE IF EXISTS `s_blog_a`") {
+	if len(stmts) != 5 || !strings.HasPrefix(stmts[0], "CREATE DATABASE") || !strings.HasPrefix(stmts[2], "GRANT") ||
+		!strings.HasPrefix(stmts[3], "REVOKE IF EXISTS") || !strings.HasPrefix(stmts[4], "DROP DATABASE IF EXISTS `s_blog_a`") {
 		t.Errorf("SQL = %q", stmts)
 	}
 }
@@ -605,6 +609,7 @@ func jsonEqual(t *testing.T, a, b any) bool {
 func TestCreateByTheLongerSiteSucceeds(t *testing.T) {
 	e := newDBEnv(t)
 	e.answer("", "")
+	e.answer("", "")
 	if _, err := e.job(t, "db.create", create("shop-x", "s_shop_x_main")); err != nil {
 		t.Fatal(err)
 	}
@@ -630,6 +635,7 @@ func TestCreateTakesOverAnEmptyExistingDatabase(t *testing.T) {
 	e.answer("", errExists)
 	e.answer("0\n", "")
 	e.answer("", "")
+	e.answer("", "")
 	res, err := e.job(t, "db.create", create("blog", "s_blog_a"))
 	if err != nil {
 		t.Fatal(err)
@@ -638,8 +644,9 @@ func TestCreateTakesOverAnEmptyExistingDatabase(t *testing.T) {
 		t.Errorf("result %+v", res)
 	}
 	got := e.sql()
-	if len(got) != 3 || !strings.HasPrefix(got[0], "CREATE DATABASE `s_blog_a`") ||
-		!strings.Contains(got[1], "information_schema.tables WHERE table_schema = 's_blog_a'") || !strings.HasPrefix(got[2], "GRANT ALL PRIVILEGES ON ") {
+	if len(got) != 4 || !strings.HasPrefix(got[0], "CREATE DATABASE `s_blog_a`") ||
+		!strings.Contains(got[1], "information_schema.tables WHERE table_schema = 's_blog_a'") || !strings.Contains(got[2], "FROM mysql.db") ||
+		!strings.HasPrefix(got[3], "GRANT ALL PRIVILEGES ON ") {
 		t.Fatalf("SQL = %q", got)
 	}
 	if after := e.site(t, "blog"); len(after.Databases) != 1 || after.Databases[0] != "s_blog_a" {
@@ -700,6 +707,7 @@ func TestCreateAfterACancelledCreateTakesTheDatabaseOver(t *testing.T) {
 	}
 	e.answer("", errExists)
 	e.answer("0\n", "")
+	e.answer("", "")
 	if _, err := e.job(t, "db.create", create("blog", "s_blog_a")); err != nil {
 		t.Fatal(err)
 	}

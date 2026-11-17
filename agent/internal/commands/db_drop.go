@@ -63,7 +63,7 @@ func dbDrop(ctx context.Context, j *jobs.Context, p contract.Params) (any, error
 		if errors.As(err, &ae) {
 			return nil, &contract.AgentError{Code: ae.Code, Message: ae.Message + revokedNotDropped(db)}
 		}
-		return nil, fmt.Errorf("%w. %s", err, revokedNotDropped(db))
+		return nil, fmt.Errorf("%w.%s", err, revokedNotDropped(db))
 	}
 	d.Logf("Dropped database %s", db)
 	st.Databases = withoutDatabase(st.Databases, db)

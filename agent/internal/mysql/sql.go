@@ -120,7 +120,11 @@ func Exec(ctx context.Context, d sysexec.Deps, statements ...Statement) ([][]str
 		}
 		for line := range strings.SplitSeq(out, "\n") {
 			if line != "" {
-				rows = append(rows, strings.Split(line, "\t"))
+				fields := strings.Split(line, "\t")
+				for i, f := range fields {
+					fields[i] = unescapeBatch(f)
+				}
+				rows = append(rows, fields)
 			}
 		}
 	}
@@ -154,4 +158,16 @@ func (s Statement) failure(err error) error {
 		e.msg = s.kind + " failed: " + stderr
 	}
 	return e
+}
+
+// batchUnescaper undoes what the client's batch mode does to a value: it
+// writes a backslash as two, and a tab, newline and NUL as a backslash and a
+// letter. A grant on s\_a_x comes back as s\\_a_x.
+var batchUnescaper = strings.NewReplacer("\\\\", "\\", "\\t", "\t", "\\n", "\n", "\\0", "\x00")
+
+func unescapeBatch(s string) string {
+	if !strings.Contains(s, "\\") {
+		return s
+	}
+	return batchUnescaper.Replace(s)
 }

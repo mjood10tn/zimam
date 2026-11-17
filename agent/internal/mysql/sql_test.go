@@ -91,8 +91,11 @@ func TestStatementWithUnvalidatedValueIsRefused(t *testing.T) {
 // returns its text.
 func TestNoRawStatementConstructor(t *testing.T) {
 	files, err := filepath.Glob("*.go")
-	if err != nil || len(files) == 0 {
-		t.Fatalf("Glob: %v, %v", files, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) == 0 {
+		t.Skip("the package's source files are not here, as when a compiled test binary runs elsewhere")
 	}
 	fset := token.NewFileSet()
 	checked := 0

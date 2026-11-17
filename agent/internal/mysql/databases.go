@@ -61,6 +61,53 @@ func RevokeAll(site contract.SiteName, name contract.DatabaseName) Statement {
 	return Statement{kind: kind, sql: "REVOKE IF EXISTS ALL PRIVILEGES ON " + grantTarget(name) + " FROM " + accounts(site) + " IGNORE UNKNOWN USER;"}
 }
 
+// RevokeAllUnescaped is RevokeAll for a grant that was written with the name
+// as it is, underscores unescaped. Such a grant is a pattern that also covers
+// other names, and RevokeAll's escaped name does not match its row. Only a
+// grant someone else made can be like that.
+func RevokeAllUnescaped(site contract.SiteName, name contract.DatabaseName) Statement {
+	const kind = "revoke on a database name as written"
+	if st, ok := checkSiteAndDatabase(kind, site, name); !ok {
+		return st
+	}
+	return Statement{kind: kind, sql: "REVOKE IF EXISTS ALL PRIVILEGES ON " + quote(string(name)) + ".* FROM " + accounts(site) + " IGNORE UNKNOWN USER;"}
+}
+
+// DatabaseGrantees selects the accounts that hold privileges on the
+// database itself (not on a table, and not global): the user, the host and
+// the database pattern of every row of mysql.db that covers the name. MySQL
+// does the matching, so a grant written with escaped underscores, one with
+// the name as it is and one with a wildcard such as s\_shop\_% all show up.
+func DatabaseGrantees(name contract.DatabaseName) Statement {
+	const kind = "list grants on a database"
+	if err := name.Validate(); err != nil {
+		return invalid(kind, "the database name", err)
+	}
+	return Statement{kind: kind, sql: "SELECT User, Host, Db FROM mysql.db WHERE '" + string(name) + "' LIKE Db ORDER BY User, Host, Db;"}
+}
+
+// Grantee is one row of mysql.db that covers a database: an account, and
+// the pattern the grant was written with.
+type Grantee struct {
+	User, Host, Pattern string
+}
+
+// Grantees returns the accounts that hold privileges on the database.
+func Grantees(ctx context.Context, d sysexec.Deps, name contract.DatabaseName) ([]Grantee, error) {
+	rows, err := Exec(ctx, d, DatabaseGrantees(name))
+	if err != nil {
+		return nil, err
+	}
+	var out []Grantee
+	for _, r := range rows {
+		if len(r) != 3 {
+			return nil, fmt.Errorf("MySQL answered %q to the query for a database's grants", strings.Join(r, "\t"))
+		}
+		out = append(out, Grantee{User: r[0], Host: r[1], Pattern: r[2]})
+	}
+	return out, nil
+}
+
 // DatabaseSizes selects every schema's name and its size in bytes (data and
 // indexes), an empty schema as 0. The statistics are cached for a day unless
 // the session turns the cache off, so it does.
@@ -121,12 +168,20 @@ func Sizes(ctx context.Context, d sysexec.Deps) (map[string]int64, error) {
 	return sizes, nil
 }
 
+// maxGrantNameLength is MySQL's limit on a database name in a GRANT or
+// REVOKE, where every underscore is written with a backslash: a longer one
+// fails with error 1059.
+const maxGrantNameLength = 64
+
 func checkSiteAndDatabase(kind string, site contract.SiteName, name contract.DatabaseName) (Statement, bool) {
 	if err := site.Validate(); err != nil {
 		return invalid(kind, "the site name", err), false
 	}
 	if err := name.Validate(); err != nil {
 		return invalid(kind, "the database name", err), false
+	}
+	if n := len(name) + strings.Count(string(name), "_"); n > maxGrantNameLength {
+		return invalid(kind, "the database name", fmt.Errorf("is %d characters with its underscores escaped, over MySQL's limit of %d for a grant", n, maxGrantNameLength)), false
 	}
 	return Statement{}, true
 }

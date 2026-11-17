@@ -57,20 +57,25 @@ func checkDbCreate(d sysexec.Deps, p contract.DbCreateParams) (sites.State, erro
 	return st, nil
 }
 
-// dbCreate creates a database for a site: CREATE DATABASE, then the grant
-// to the site's user if it has one, then the state file.
+// dbCreate creates a database for a site: CREATE DATABASE, then the grants
+// that already cover the name are cleared, then the grant to the site's user
+// if it has one, then the state file.
 //
 // A name that already exists in MySQL, though no site lists it, is taken
 // over when it is empty: it can be what an earlier create left behind when
 // its job was cancelled or its cleanup failed. One that holds a table, view,
 // routine or event is a conflict, and is never touched.
 //
+// Whether the database is new or taken over, no account but the site's own
+// may hold privileges on it when the job ends (clearStaleGrants).
+//
 // If a step after the create fails, the database, which is still empty, is
-// dropped again and its grant revoked, so MySQL and the state file agree. If
-// that cleanup fails too, the error says so, and creating the name again
-// takes the empty database over. The create itself is not undone when its
-// outcome is unknown (the job was cancelled or timed out): the next create
-// finds the database and takes it over.
+// dropped again and its grant revoked, so MySQL and the state file agree. A
+// database that was taken over existed before: only the grant is revoked,
+// and the database stays as it was. If that cleanup fails too, the error says
+// so, and creating the name again finishes it. The create itself is not
+// undone when its outcome is unknown (the job was cancelled or timed out):
+// the next create finds the database and takes it over.
 func dbCreate(ctx context.Context, j *jobs.Context, p contract.Params) (any, error) {
 	params := *p.(*contract.DbCreateParams)
 	d := j.Deps()
@@ -79,6 +84,7 @@ func dbCreate(ctx context.Context, j *jobs.Context, p contract.Params) (any, err
 		return nil, err
 	}
 	db := params.Database
+	created := true
 	if _, err := mysql.Exec(ctx, d, mysql.CreateDatabase(db)); err != nil {
 		var me *mysql.Error
 		if !errors.As(err, &me) || me.Errno() != mysql.ErrDatabaseExists {
@@ -91,6 +97,7 @@ func dbCreate(ctx context.Context, j *jobs.Context, p contract.Params) (any, err
 		if n > 0 {
 			return nil, conflict("A database named %s already exists in MySQL with content in it, and no site lists it, so Zimam won't use it.", db)
 		}
+		created = false
 		d.Logf("Database %s already exists in MySQL, empty, and no site lists it; taking it over", db)
 	} else {
 		d.Logf("Created database %s", db)
@@ -98,13 +105,27 @@ func dbCreate(ctx context.Context, j *jobs.Context, p contract.Params) (any, err
 	undo := func(cause error) error {
 		uctx, cancel := undoCtx(ctx)
 		defer cancel()
-		_, uerr := mysql.Exec(uctx, d, mysql.RevokeAll(params.Site, db), mysql.DropDatabase(db))
+		statements := []mysql.Statement{mysql.RevokeAll(params.Site, db)}
+		if created {
+			statements = append(statements, mysql.DropDatabase(db))
+		}
+		_, uerr := mysql.Exec(uctx, d, statements...)
 		if uerr == nil {
-			d.Logf("Dropped the new database %s again", db)
+			if created {
+				d.Logf("Dropped the new database %s again", db)
+			} else {
+				d.Logf("Revoked the grant on %s again; the database existed before and is left as it was", db)
+			}
 			return cause
 		}
-		d.Logf("Could not drop the new database %s again: %v", db, uerr)
-		extra := fmt.Sprintf("The empty database %s was left in MySQL (cleaning up failed: %v); creating it again will take it over.", db, uerr)
+		var extra string
+		if created {
+			d.Logf("Could not drop the new database %s again: %v", db, uerr)
+			extra = fmt.Sprintf("The empty database %s was left in MySQL (cleaning up failed: %v); creating it again will take it over.", db, uerr)
+		} else {
+			d.Logf("Could not revoke the grant on %s again: %v", db, uerr)
+			extra = fmt.Sprintf("The site's grant on the existing database %s may remain (cleaning up failed: %v); creating it again will clear it.", db, uerr)
+		}
 		// The job records only an AgentError's own message, so the text goes
 		// into a copy of it.
 		var ae *contract.AgentError
@@ -112,6 +133,12 @@ func dbCreate(ctx context.Context, j *jobs.Context, p contract.Params) (any, err
 			return &contract.AgentError{Code: ae.Code, Message: ae.Message + " " + extra}
 		}
 		return fmt.Errorf("%w. %s", cause, extra)
+	}
+	if err := clearStaleGrants(ctx, d, db); err != nil {
+		if created {
+			return nil, undo(err)
+		}
+		return nil, err
 	}
 	if st.DBUser {
 		if _, err := mysql.Exec(ctx, d, mysql.GrantAll(params.Site, db)); err != nil {
