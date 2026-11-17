@@ -103,7 +103,6 @@ func boolText(b bool) string {
 }
 
 // cursorOfFirstPurge is the cursor argument of the first purge call made.
-// callsOf are the valkey-cli calls that scan, in order.
 func cursorOfFirstPurge(r *removal) string {
 	for _, c := range r.e.run.Calls() {
 		if i := slices.Index(c.Args, "EVAL"); i >= 0 {
