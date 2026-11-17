@@ -53,6 +53,8 @@ var production = map[string]string{
 	"ValkeyDropIn":          "/etc/systemd/system/valkey-server.service.d/50-zimam.conf",
 	"ValkeyACLLock":         "/run/zimam/locks/valkey-acl.lock",
 	"ValkeyTestDir":         "/run/zimam-valkey-test",
+	"ValkeyDataDir":         "/var/lib/valkey",
+	"ProcPID":               "/proc/site:shop",
 	"LogrotateState":        "/var/lib/zimam/logrotate.state",
 	"RebootRequired":        "/run/reboot-required",
 	"AptCheck":              "/usr/lib/update-notifier/apt-check",

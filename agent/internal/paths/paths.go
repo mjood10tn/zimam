@@ -334,3 +334,9 @@ func (p Paths) SitePHPErrorLog(name contract.SiteName) string {
 // UIDLock is held while a new site user's uid is chosen and used, so two
 // provisions never take the same one (root 0600).
 func (p Paths) UIDLock() string { return p.at("run/zimam/locks/uid.lock") }
+
+// ValkeyDataDir is where the package's Valkey keeps its dump and append-only
+// files. ProcPID is one process's directory in /proc, which the config test
+// reads to find a candidate server a killed job left running.
+func (p Paths) ValkeyDataDir() string     { return p.at("var/lib/valkey") }
+func (p Paths) ProcPID(pid string) string { return p.at("proc", pid) }

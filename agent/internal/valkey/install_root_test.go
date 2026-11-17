@@ -6,13 +6,18 @@ import (
 	"bufio"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
+	"zimam/agent/contract"
 	"zimam/agent/internal/metrics"
 	"zimam/agent/internal/paths"
 	"zimam/agent/internal/services"
@@ -124,6 +129,81 @@ func TestRootValkeyInstall(t *testing.T) {
 	d := rootDeps(t)
 	ctx := context.Background()
 
+	// From before the package is installed until the bad-file cases below (which
+	// start servers with the default user on on purpose, to see them refused),
+	// nobody may get a reply to an unauthenticated PING: the package server on its
+	// own settings would let any local user in.
+	anon := watchAnonymous()
+	checkAnonymous := func() {
+		samples, pongs, errs := anon.finish()
+		t.Logf("unauthenticated PINGs: %d samples, %d refused, %d with no server, %d answered", samples, samples-pongs-errs, errs, pongs)
+		if pongs > 0 {
+			t.Errorf("%d unauthenticated PINGs were answered with PONG", pongs)
+		}
+		if samples < 50 {
+			t.Errorf("only %d samples were taken", samples)
+		}
+	}
+
+	// Data from before Zimam managed Valkey is refused, with the service
+	// masked and nothing listening.
+	if err := os.MkdirAll(d.Paths.ValkeyDataDir(), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	planted := filepath.Join(d.Paths.ValkeyDataDir(), "dump.rdb")
+	if err := os.WriteFile(planted, []byte("REDIS0012"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Install(ctx, d, noUsers)
+	var ae *contract.AgentError
+	if !errors.As(err, &ae) || ae.Code != contract.ErrConflict {
+		t.Fatalf("Install over a dump = %v, want a conflict", err)
+	}
+	t.Logf("refused: %v", err)
+	if got := shell(t, "/usr/bin/dpkg-query", "-W", "-f=${db:Status-Abbrev}", packageName); got != "ii" {
+		t.Errorf("with the unit masked, the package is %q, want ii (installed)", got)
+	}
+	assertHeld(t, d)
+	if _, err := os.Stat(planted); err != nil {
+		t.Errorf("the planted dump is gone: %v", err)
+	}
+	if _, err := os.Stat("/var/log/valkey/valkey-server.log"); err == nil {
+		t.Error("a server ran and logged, though the unit was masked")
+	}
+	for _, p := range []string{d.Paths.ValkeyConf(), d.Paths.ValkeyACL(), d.Paths.ValkeyDropIn(), d.Paths.ServicesState()} {
+		if _, err := os.Stat(p); err == nil {
+			t.Errorf("%s was written", p)
+		}
+	}
+	if err := os.Remove(planted); err != nil {
+		t.Fatal(err)
+	}
+
+	// A first install that fails at the start leaves the service stopped and
+	// masked, never the package's settings running.
+	breakIn := filepath.Join(d.Paths.ValkeyDropInDir(), "99-break.conf")
+	if err := os.MkdirAll(d.Paths.ValkeyDropInDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(breakIn, []byte("[Service]\nExecStartPre=/bin/false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Install(ctx, d, noUsers); err == nil {
+		t.Fatal("a first install whose service can't start succeeded")
+	} else {
+		t.Logf("failed as it should: %v", err)
+	}
+	assertHeld(t, d)
+	for _, p := range []string{d.Paths.ValkeyConf(), d.Paths.ValkeyACL(), d.Paths.ValkeyDropIn(), d.Paths.ValkeyAdminPass(), d.Paths.ServicesState(), planted} {
+		if _, err := os.Stat(p); err == nil {
+			t.Errorf("%s is there after a failed first install", p)
+		}
+	}
+	if err := os.Remove(breakIn); err != nil {
+		t.Fatal(err)
+	}
+
+	// The next run continues from there.
 	version, err := Install(ctx, d, noUsers)
 	if err != nil {
 		t.Fatalf("Install: %v", err)
@@ -173,6 +253,18 @@ func TestRootValkeyInstall(t *testing.T) {
 	if !isActive() {
 		t.Fatal("valkey-server is not active")
 	}
+	if out := shell(t, "/usr/bin/systemctl", "is-enabled", unit); out != "enabled" {
+		t.Errorf("the service is %s after the install, want enabled", out)
+	}
+	if out := shell(t, "/usr/bin/dpkg-query", "-W", "-f=${db:Status-Abbrev}", packageName); out != "ii" {
+		t.Errorf("the package is %q, want ii", out)
+	}
+	if out := shell(t, "/usr/bin/systemctl", "show", "-p", "ExecStart", "--value", unit); !strings.Contains(out, "/etc/zimam/valkey/valkey.conf") {
+		t.Errorf("ExecStart = %s, want the unit to run Zimam's config", out)
+	}
+	if out := shell(t, "/usr/bin/systemctl", "show", "-p", "ExecStartPre", "--value", unit); strings.Contains(out, "false") {
+		t.Errorf("the break-in drop-in is still read: %s", out)
+	}
 	if out := shell(t, "/usr/bin/systemctl", "show", "-p", "ExecStart", "--value", unit); !strings.Contains(out, "/etc/zimam/valkey/valkey.conf") {
 		t.Errorf("ExecStart = %s, want the unit to run Zimam's config", out)
 	}
@@ -201,6 +293,8 @@ func TestRootValkeyInstall(t *testing.T) {
 		t.Error("the re-run changed the admin password")
 	}
 
+	checkAnonymous()
+
 	// Bad files are refused: the previous files come back and the server
 	// runs on.
 	conf, acl, dropIn := readFile(t, d.Paths.ValkeyConf()), readFile(t, d.Paths.ValkeyACL()), readFile(t, d.Paths.ValkeyDropIn())
@@ -225,7 +319,7 @@ func TestRootValkeyInstall(t *testing.T) {
 		"the default user on":        with(conf, strings.Replace(acl, "user default off", "user default on nopass ~* &* +@all", 1)),
 	} {
 		before := mainPID(t)
-		_, err := applyFiles(ctx, d, bad, uid, gid, memMiB)
+		_, err := applyFiles(ctx, d, bad, target{uid: uid, gid: gid, memMiB: memMiB})
 		t.Logf("%s: %v", name, err)
 		if err == nil {
 			t.Errorf("%s: applyFiles accepted it", name)
@@ -273,6 +367,16 @@ func TestRootValkeyInstall(t *testing.T) {
 		t.Errorf("Valkey restarted on a re-run with the same users: pid %s, then %s", pid, now)
 	}
 
+	// A candidate server that a killed job left running is ended by the next
+	// test of the files.
+	leftover := startLeftoverCandidate(t, d)
+	if err := testCandidate(ctx, d, uid, gid); err != nil {
+		t.Fatalf("testCandidate: %v", err)
+	}
+	if !leftover.gone() {
+		t.Error("the leftover candidate server is still running")
+	}
+
 	// Nothing of the candidate server is left behind.
 	if _, err := os.Stat(d.Paths.ValkeyTestDir()); err == nil {
 		t.Errorf("%s is still there", d.Paths.ValkeyTestDir())
@@ -283,4 +387,108 @@ func TestRootValkeyInstall(t *testing.T) {
 	if entries, _ := os.ReadDir(d.Paths.ValkeyDir()); len(entries) != 3 {
 		t.Errorf("%s holds %d entries, want valkey.conf, users.acl and admin.pass", d.Paths.ValkeyDir(), len(entries))
 	}
+}
+
+// assertHeld checks that the service is masked and stopped, that nothing
+// listens on 6379 and that no valkey-server runs.
+func assertHeld(t *testing.T, d sysexec.Deps) {
+	t.Helper()
+	if out, _ := exec.Command("/usr/bin/systemctl", "is-enabled", unit).Output(); strings.TrimSpace(string(out)) != "masked" {
+		t.Errorf("the service is %q, want masked", strings.TrimSpace(string(out)))
+	}
+	if isActive() {
+		t.Error("the service is active")
+	}
+	if v4, v6 := listeners(t); len(v4)+len(v6) != 0 {
+		t.Errorf("port 6379 listens on %v and %v", v4, v6)
+	}
+	if out, _ := exec.Command("/usr/bin/pgrep", "-x", "valkey-server").Output(); strings.TrimSpace(string(out)) != "" {
+		t.Errorf("a valkey-server runs: %s", out)
+	}
+}
+
+// anonymousWatcher asks 127.0.0.1:6379 PING without credentials in a loop.
+type anonymousWatcher struct {
+	stop                  chan struct{}
+	wg                    sync.WaitGroup
+	samples, pongs, noSrv int
+}
+
+func watchAnonymous() *anonymousWatcher {
+	w := &anonymousWatcher{stop: make(chan struct{})}
+	w.wg.Add(1)
+	go func() {
+		defer w.wg.Done()
+		for {
+			select {
+			case <-w.stop:
+				return
+			default:
+			}
+			out, _ := exec.Command("/usr/bin/valkey-cli", "-e", "-h", "127.0.0.1", "-p", "6379", "PING").CombinedOutput()
+			w.samples++
+			switch s := string(out); {
+			case strings.Contains(s, "PONG"):
+				w.pongs++
+			case strings.Contains(s, "Could not connect") || strings.Contains(s, "Connection refused"):
+				w.noSrv++
+			}
+		}
+	}()
+	return w
+}
+
+// finish stops the watcher and returns how many samples it took, how many
+// were answered PONG, and how many found no server.
+func (w *anonymousWatcher) finish() (samples, pongs, noServer int) {
+	close(w.stop)
+	w.wg.Wait()
+	return w.samples, w.pongs, w.noSrv
+}
+
+// leftoverCandidate is a candidate server as a killed job leaves it.
+type leftoverCandidate struct{ pid int }
+
+func startLeftoverCandidate(t *testing.T, d sysexec.Deps) leftoverCandidate {
+	t.Helper()
+	p := d.Paths
+	uid, gid, err := serviceIDs(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := p.ValkeyTestDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(dir, uid, gid); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(runuser, "-u", serviceUser, "--", valkeyServer, p.ValkeyConf(), "--aclfile", p.ValkeyACL(),
+		"--port", "0", "--unixsocket", filepath.Join(dir, "s.sock"), "--daemonize", "no", "--supervised", "no",
+		"--pidfile", filepath.Join(dir, "p"), "--logfile", "", "--dir", dir, "--save", "", "--appendonly", "no")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	go cmd.Wait()
+	for range 100 {
+		if b, err := os.ReadFile(filepath.Join(dir, "p")); err == nil {
+			if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil {
+				return leftoverCandidate{pid}
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("the leftover candidate never wrote its pidfile")
+	return leftoverCandidate{}
+}
+
+func (l leftoverCandidate) gone() bool {
+	for range 40 {
+		if _, err := os.Stat("/proc/" + strconv.Itoa(l.pid)); err != nil {
+			return true
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return false
 }

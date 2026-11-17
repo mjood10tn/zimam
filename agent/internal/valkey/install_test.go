@@ -12,9 +12,11 @@ import (
 	"slices"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
+	"zimam/agent/contract"
 	"zimam/agent/internal/configtx"
 	"zimam/agent/internal/paths"
 	"zimam/agent/internal/services"
@@ -39,6 +41,13 @@ var (
 	restart = sysexec.Script{Path: systemctl, Args: []string{"restart", "valkey-server"}}
 	// resetFailed clears systemd's start counter before a restore's restart.
 	resetFailed = sysexec.Script{Path: systemctl, Args: []string{"reset-failed", "valkey-server"}}
+	// The service is held before the packages on a first install, and let go
+	// only after the files passed their test.
+	mask     = sysexec.Script{Path: systemctl, Args: []string{"mask", "valkey-server"}}
+	unmask   = sysexec.Script{Path: systemctl, Args: []string{"unmask", "valkey-server"}}
+	stop     = sysexec.Script{Path: systemctl, Args: []string{"stop", "valkey-server"}}
+	enable   = sysexec.Script{Path: systemctl, Args: []string{"enable", "valkey-server"}}
+	inactive = sysexec.Script{Path: systemctl, Args: []string{"is-active", "--quiet", "valkey-server"}, Result: sysexec.Result{ExitCode: 3}}
 )
 
 // live is a script for a valkey-cli call to the running server as the admin.
@@ -144,12 +153,18 @@ func (e *testEnv) add(ss ...sysexec.Script) {
 	}
 }
 
-// scriptInstall scripts a whole successful install: the packages, the
-// candidate server, the reload and restart, and the live checks.
+// hold is what a first install does before the packages: mask the service,
+// stop it and see that it is stopped.
+func (e *testEnv) hold() []sysexec.Script { return []sysexec.Script{mask, stop, inactive} }
+
+// scriptInstall scripts a whole successful first install: the service held,
+// the packages, the candidate server, the service let go, started and
+// checked.
 func (e *testEnv) scriptInstall() {
+	e.add(e.hold()...)
 	e.add(aptUpdate, aptInstall)
 	e.add(e.throwaway()...)
-	e.add(reload, restart, livePing, liveCfg, liveACL, liveServer)
+	e.add(unmask, reload, enable, restart, livePing, liveCfg, liveACL, liveServer)
 }
 
 func noUsers() ([]SiteUser, error) { return nil, nil }
@@ -204,11 +219,16 @@ func TestInstallSequence(t *testing.T) {
 		t.Errorf("version = %q, want 9.0.4", version)
 	}
 	want := []string{
+		line(mask), // the package's server must never start on the package's settings
+		line(stop),
+		line(inactive),
 		line(aptUpdate),
 		line(aptInstall),
 		line(e.throwaway()[0]), // the candidate files, tested on a server of their own
 		line(e.throwaway()[1]),
-		line(reload), // the drop-in is new
+		line(unmask), // only now
+		line(reload),
+		line(enable),
 		line(restart),
 		line(livePing),
 		line(liveCfg),
@@ -219,7 +239,7 @@ func TestInstallSequence(t *testing.T) {
 	if got := lines(calls); !slices.Equal(got, want) {
 		t.Fatalf("ran\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
-	for _, c := range calls[:2] {
+	for _, c := range calls[3:5] {
 		if !slices.Contains(c.Env, "DEBIAN_FRONTEND=noninteractive") {
 			t.Errorf("%s ran with env %q", c.Path, c.Env)
 		}
@@ -246,7 +266,7 @@ func TestInstallSequence(t *testing.T) {
 	wantMode(t, e.p.ValkeyDir(), 0o750)
 
 	// What the candidate server was started on is what stays.
-	for _, c := range calls[2:4] {
+	for _, c := range calls[5:7] {
 		if c.Path == runuser && !slices.Contains(c.Args, e.p.ValkeyConf()) {
 			t.Errorf("the candidate server read %v, not Zimam's config", c.Args)
 		}
@@ -312,9 +332,10 @@ func TestInstallRendersMaxmemoryFromMemory(t *testing.T) {
 	if err := os.WriteFile(e.p.ProcMeminfo(), []byte(fmt.Sprintf("MemTotal: %d kB\nMemAvailable: 1 kB\nSwapTotal: 0 kB\nSwapFree: 0 kB\n", 2*gib/1024)), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	e.add(e.hold()...)
 	e.add(aptUpdate, aptInstall)
 	e.add(e.throwaway()...)
-	e.add(reload, restart, livePing, live(strings.Replace(liveConfig, "106954752", "213909504", 1), "CONFIG", "GET", "bind", "port", "aclfile", "maxmemory", "maxmemory-policy"), liveACL, liveServer)
+	e.add(unmask, reload, enable, restart, livePing, live(strings.Replace(liveConfig, "106954752", "213909504", 1), "CONFIG", "GET", "bind", "port", "aclfile", "maxmemory", "maxmemory-policy"), liveACL, liveServer)
 	if _, err := Install(context.Background(), e.d, noUsers); err != nil {
 		t.Fatal(err)
 	}
@@ -339,6 +360,7 @@ func TestInstallRefusesAnUnreadableMeminfo(t *testing.T) {
 
 func TestInstallAptFailureWritesNothing(t *testing.T) {
 	e := newEnv(t)
+	e.add(e.hold()...)
 	e.add(aptUpdate, failing(aptInstall, 100, "E: Unable to locate package valkey-server\n"))
 	_, err := Install(context.Background(), e.d, noUsers)
 	if err == nil || !strings.Contains(err.Error(), "Unable to locate package") {
@@ -347,8 +369,13 @@ func TestInstallAptFailureWritesNothing(t *testing.T) {
 	for _, p := range []string{e.p.ValkeyDir(), e.p.ValkeyDropInDir(), e.p.ServicesState()} {
 		missing(t, p)
 	}
-	if n := len(e.run.Calls()); n != 2 {
-		t.Errorf("ran %d commands, want only apt-get update and install", n)
+	// The service was masked and stopped before the packages, and nothing
+	// let it go.
+	if n := len(e.run.Calls()); n != 5 {
+		t.Errorf("ran %d commands, want the hold and apt-get update and install", n)
+	}
+	if units := unitCalls(lines(e.run.Calls())); !slices.Equal(units, []string{line(mask), line(stop)}) {
+		t.Errorf("the service was changed by %v, want it masked and stopped only", units)
 	}
 }
 
@@ -395,7 +422,7 @@ func TestAdminPasswordGeneratedOnceAndNeverInArgv(t *testing.T) {
 	if cliRuns == 0 {
 		t.Error("valkey-cli never ran")
 	}
-	for _, f := range []string{e.p.ValkeyConf(), e.p.ValkeyDropIn(), e.p.ValkeyACL(), e.logs.String()} {
+	for _, f := range []string{readFile(t, e.p.ValkeyConf()), readFile(t, e.p.ValkeyDropIn()), readFile(t, e.p.ValkeyACL()), e.logs.String()} {
 		if strings.Contains(f, pass) {
 			t.Error("the password is in a rendered file or the job log")
 		}
@@ -433,6 +460,7 @@ func TestAdminPasswordKeptOrReplaced(t *testing.T) {
 			if tc.wantErr == "" {
 				e.scriptInstall()
 			} else {
+				e.add(e.hold()...)
 				e.add(aptUpdate, aptInstall)
 			}
 			_, err := Install(context.Background(), e.d, noUsers)
@@ -549,105 +577,141 @@ func withPrevious(t *testing.T, e *testEnv) {
 	}
 }
 
+// unitUp is what brings the real server up on the candidate files: for a
+// first install the service is unmasked and enabled first.
+func unitUp(first bool) []sysexec.Script {
+	if first {
+		return []sysexec.Script{unmask, reload, enable, restart}
+	}
+	return []sysexec.Script{reload, restart}
+}
+
+// undoScripts is what puts the service back after the server read the files.
+func undoScripts(first bool) []sysexec.Script {
+	if first {
+		return []sysexec.Script{reload, stop, mask}
+	}
+	return []sysexec.Script{reload, resetFailed, restart}
+}
+
+// unitCalls are the calls that change the service.
+func unitCalls(calls []string) []string {
+	var out []string
+	for _, c := range calls {
+		if slices.Contains([]string{line(mask), line(unmask), line(stop), line(enable), line(restart)}, c) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// The same failures, on a first install (nothing of Zimam's in place, the
+// service masked) and on a re-run (Zimam's files in place and running).
 func TestBadConfigRestoresPrevious(t *testing.T) {
 	badConfig := "*** FATAL CONFIG FILE ERROR (Version 9.0.4) ***\n>>> 'maxmemory lots'\n"
-	runuserFails := func(e *testEnv) sysexec.Script { return failing(e.throwaway()[0], 1, badConfig) }
-	pingBad := func(e *testEnv) sysexec.Script {
-		s := e.throwaway()[1]
-		return failing(s, 1, "AUTH failed: WRONGPASS invalid username-password pair or user is disabled.\n")
-	}
 	cfgWith := func(old, new string) sysexec.Script {
 		return live(strings.Replace(liveConfig, old, new, 1), "CONFIG", "GET", "bind", "port", "aclfile", "maxmemory", "maxmemory-policy")
 	}
 	restartFails := failing(restart, 1, "Job for valkey-server.service failed because the control process exited with error code.\n")
+	aclDefaultOn := live("user default on nopass ~* &* +@all\nuser zimam-admin on #abc ~* &* +@all\n", "ACL", "LIST")
 	type tc struct {
-		script func(e *testEnv) []sysexec.Script // after the packages
-		want   string                            // in the error
-		calls  func(e *testEnv) []string         // after the packages
-		small  bool                              // run with a short wait for the candidate server
+		steps func(e *testEnv, first bool) []sysexec.Script // after the packages, in the order they run
+		want  string                                        // in the error
+		small bool                                          // run with a short wait for the candidate server
 	}
 	for name, tc := range map[string]tc{
 		"the candidate server refuses the file": {
-			script: func(e *testEnv) []sysexec.Script { return []sysexec.Script{runuserFails(e)} },
-			want:   "FATAL CONFIG FILE ERROR",
-			// Nothing restarted or reloaded: the real server never read the file.
-			calls: func(e *testEnv) []string { return []string{line(e.throwaway()[0])} },
+			// Nothing else runs: the real server never read the file.
+			steps: func(e *testEnv, _ bool) []sysexec.Script {
+				return []sysexec.Script{failing(e.throwaway()[0], 1, badConfig)}
+			},
+			want: "FATAL CONFIG FILE ERROR",
 		},
 		"the candidate server never answers": {
-			script: func(e *testEnv) []sysexec.Script { return []sysexec.Script{e.throwaway()[0], pingBad(e)} },
-			want:   "WRONGPASS",
-			calls:  func(e *testEnv) []string { return []string{line(e.throwaway()[0]), line(e.throwaway()[1])} },
-			small:  true,
+			steps: func(e *testEnv, _ bool) []sysexec.Script {
+				return []sysexec.Script{e.throwaway()[0], failing(e.throwaway()[1], 1, "AUTH failed: WRONGPASS invalid username-password pair or user is disabled.\n")}
+			},
+			want:  "WRONGPASS",
+			small: true,
 		},
 		"systemd can't reload": {
-			script: func(e *testEnv) []sysexec.Script {
-				return append(e.throwaway(), failing(reload, 1, "Failed to reload daemon\n"), reload, resetFailed, restart)
+			steps: func(e *testEnv, first bool) []sysexec.Script {
+				s := e.throwaway()
+				if first {
+					s = append(s, unmask)
+				}
+				// The server never read the files, so a re-run restarts nothing.
+				s = append(s, failing(reload, 1, "Failed to reload daemon\n"), reload)
+				if first {
+					s = append(s, stop, mask)
+				}
+				return s
 			},
 			want: "Failed to reload",
-			calls: func(e *testEnv) []string {
-				return []string{line(e.throwaway()[0]), line(e.throwaway()[1]), line(reload), line(reload), line(resetFailed), line(restart)}
-			},
 		},
 		"the restart fails": {
-			script: func(e *testEnv) []sysexec.Script {
-				return append(e.throwaway(), reload, restartFails, reload, resetFailed, restart)
+			steps: func(e *testEnv, first bool) []sysexec.Script {
+				up := unitUp(first)
+				up[len(up)-1] = restartFails
+				return append(append(e.throwaway(), up...), undoScripts(first)...)
 			},
 			want: "Job for valkey-server.service failed",
-			// The server starts again from the previous files.
-			calls: func(e *testEnv) []string {
-				return []string{line(e.throwaway()[0]), line(e.throwaway()[1]), line(reload), line(restart), line(reload), line(resetFailed), line(restart)}
-			},
 		},
 		"the admin can't log in after the restart": {
-			script: func(e *testEnv) []sysexec.Script {
-				return append(e.throwaway(), reload, restart, failing(livePing, 1, "AUTH failed: WRONGPASS invalid username-password pair\n"), reload, resetFailed, restart)
+			steps: func(e *testEnv, first bool) []sysexec.Script {
+				s := append(e.throwaway(), unitUp(first)...)
+				return append(append(s, failing(livePing, 1, "AUTH failed: WRONGPASS invalid username-password pair\n")), undoScripts(first)...)
 			},
 			want: "WRONGPASS",
-			calls: func(e *testEnv) []string {
-				return []string{line(e.throwaway()[0]), line(e.throwaway()[1]), line(reload), line(restart), line(livePing), line(reload), line(resetFailed), line(restart)}
-			},
 		},
 		"it listens on every address": {
-			script: func(e *testEnv) []sysexec.Script {
-				return append(e.throwaway(), reload, restart, livePing, cfgWith("127.0.0.1 -::1", "* -::*"), liveACL, liveServer, reload, resetFailed, restart)
+			steps: func(e *testEnv, first bool) []sysexec.Script {
+				s := append(e.throwaway(), unitUp(first)...)
+				return append(append(s, livePing, cfgWith("127.0.0.1 -::1", "* -::*"), liveACL, liveServer), undoScripts(first)...)
 			},
 			want: "bind is",
-			calls: func(e *testEnv) []string {
-				return []string{line(e.throwaway()[0]), line(e.throwaway()[1]), line(reload), line(restart), line(livePing), line(cfgWith("", "")), line(liveACL), line(liveServer), line(reload), line(resetFailed), line(restart)}
-			},
 		},
 		"it has no memory limit": {
-			script: func(e *testEnv) []sysexec.Script {
-				return append(e.throwaway(), reload, restart, livePing, cfgWith("106954752", "0"), liveACL, liveServer, reload, resetFailed, restart)
+			steps: func(e *testEnv, first bool) []sysexec.Script {
+				s := append(e.throwaway(), unitUp(first)...)
+				return append(append(s, livePing, cfgWith("106954752", "0"), liveACL, liveServer), undoScripts(first)...)
 			},
 			want: "maxmemory is",
-			calls: func(e *testEnv) []string {
-				return []string{line(e.throwaway()[0]), line(e.throwaway()[1]), line(reload), line(restart), line(livePing), line(cfgWith("", "")), line(liveACL), line(liveServer), line(reload), line(resetFailed), line(restart)}
-			},
 		},
 		"its default user is still on": {
-			script: func(e *testEnv) []sysexec.Script {
-				return append(e.throwaway(), reload, restart, livePing, liveCfg, live("user default on nopass ~* &* +@all\n", "ACL", "LIST"), liveServer, reload, resetFailed, restart)
+			steps: func(e *testEnv, first bool) []sysexec.Script {
+				s := append(e.throwaway(), unitUp(first)...)
+				return append(append(s, livePing, liveCfg, aclDefaultOn, liveServer), undoScripts(first)...)
 			},
 			want: "default user",
-			calls: func(e *testEnv) []string {
-				return []string{line(e.throwaway()[0]), line(e.throwaway()[1]), line(reload), line(restart), line(livePing), line(liveCfg), line(liveACL), line(liveServer), line(reload), line(resetFailed), line(restart)}
+		},
+		"it has users the file doesn't": {
+			steps: func(e *testEnv, first bool) []sysexec.Script {
+				s := append(e.throwaway(), unitUp(first)...)
+				extra := live("user default off\nuser zimam-admin on #abc ~* &* +@all\nuser s_x on #abc ~* +@all\n", "ACL", "LIST")
+				return append(append(s, livePing, liveCfg, extra, liveServer), undoScripts(first)...)
 			},
+			want: "its users are",
 		},
 	} {
-		for _, previous := range []bool{true, false} {
-			t.Run(fmt.Sprintf("%s (previous files: %v)", name, previous), func(t *testing.T) {
+		for _, first := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s (first install: %v)", name, first), func(t *testing.T) {
 				if tc.small {
 					old := startTimeout
 					startTimeout = 300 * time.Millisecond
 					t.Cleanup(func() { startTimeout = old })
 				}
 				e := newEnv(t)
-				if previous {
+				pre := 0
+				if first {
+					e.add(e.hold()...)
+					pre = 3
+				} else {
 					withPrevious(t, e)
 				}
 				e.add(aptUpdate, aptInstall)
-				e.add(tc.script(e)...)
+				steps := tc.steps(e, first)
+				e.add(steps...)
 				_, err := Install(context.Background(), e.d, noUsers)
 				if err == nil || !strings.Contains(err.Error(), tc.want) {
 					t.Fatalf("Install = %v, want an error holding %q", err, tc.want)
@@ -656,7 +720,7 @@ func TestBadConfigRestoresPrevious(t *testing.T) {
 					t.Errorf("the restore failed too: %v", err)
 				}
 				for path, content := range map[string]string{e.p.ValkeyConf(): prevConf, e.p.ValkeyACL(): prevACL, e.p.ValkeyDropIn(): prevDropIn} {
-					if !previous {
+					if first {
 						missing(t, path)
 						continue
 					}
@@ -665,22 +729,40 @@ func TestBadConfigRestoresPrevious(t *testing.T) {
 					}
 					missing(t, path+".zimam-prev")
 				}
-				got := lines(e.run.Calls())[2:]
+				got := lines(e.run.Calls())[pre+2:]
 				if tc.small {
 					got = slices.Compact(got) // the candidate's PING is retried until the wait ends
 				}
-				want := tc.calls(e)
+				var want []string
+				for _, s := range steps {
+					want = append(want, line(s))
+				}
 				if !slices.Equal(got, want) {
 					t.Errorf("after the packages ran\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+				}
+				if first {
+					// The package's server never runs on its own settings: after a failed
+					// first install the service is stopped and masked, and nothing
+					// started it again after the failure.
+					units := unitCalls(lines(e.run.Calls()))
+					if slices.Contains(units, line(unmask)) {
+						if last := units[len(units)-1]; last != line(mask) {
+							t.Errorf("the last change to the service was %s, want it masked again", last)
+						}
+					} else if slices.Contains(units, line(restart)) || slices.Contains(units, line(enable)) {
+						t.Errorf("the service was started without being unmasked: %v", units)
+					}
+					if n := slices.Index(units, line(restart)); n >= 0 && slices.Contains(units[n+1:], line(restart)) {
+						t.Errorf("the package's settings were started again after the failure: %v", units)
+					}
 				}
 				missing(t, e.p.ServicesState())
 				missing(t, e.p.ValkeyTestDir())
 				if e.killed.Load() > 1 {
 					t.Errorf("the candidate server was stopped %d times", e.killed.Load())
 				}
-				if _, err := os.Stat(e.p.ValkeyAdminPass()); err != nil {
-					t.Errorf("admin.pass: %v", err)
-				}
+				// A new admin password is part of the files that were refused.
+				missing(t, e.p.ValkeyAdminPass())
 			})
 		}
 	}
@@ -812,9 +894,22 @@ func TestFailedRestoreSaysTheServerMayRunOtherSettings(t *testing.T) {
 	}
 }
 
+// aclWith is ACL LIST for a server with the default user off, the admin and
+// these site users.
+func aclWith(names ...string) sysexec.Script {
+	out := "user default off sanitize-payload resetchannels -@all\nuser zimam-admin on sanitize-payload #abc ~* &* +@all\n"
+	for _, n := range names {
+		out += "user " + n + " on sanitize-payload #abc resetkeys ~" + n + ":* +@all\n"
+	}
+	return live(out, "ACL", "LIST")
+}
+
 func TestSiteUsersAreKeptAndSorted(t *testing.T) {
 	e := newEnv(t)
-	e.scriptInstall()
+	e.add(e.hold()...)
+	e.add(aptUpdate, aptInstall)
+	e.add(e.throwaway()...)
+	e.add(unmask, reload, enable, restart, livePing, liveCfg, aclWith("s_blog", "s_shop"), liveServer)
 	a, b := sha256.Sum256([]byte("a password")), sha256.Sum256([]byte("b password"))
 	users := func() ([]SiteUser, error) {
 		return []SiteUser{{Name: "shop", Hash: b}, {Name: "blog", Hash: a}}, nil
@@ -846,7 +941,7 @@ func TestRerunKeepsSiteUsers(t *testing.T) {
 	// A site user appeared since: the ACL file changes, so the server restarts.
 	e.add(aptUpdate, aptInstall)
 	e.add(e.throwaway()...)
-	e.add(restart, livePing, liveCfg, liveACL, liveServer)
+	e.add(reload, restart, livePing, liveCfg, aclWith("s_blog"), liveServer)
 	if _, err := Install(context.Background(), e.d, users); err != nil {
 		t.Fatal(err)
 	}
@@ -855,7 +950,7 @@ func TestRerunKeepsSiteUsers(t *testing.T) {
 	}
 	// And with it in place, the next run changes nothing.
 	before := len(e.run.Calls())
-	e.add(aptUpdate, aptInstall, livePing, liveCfg, liveACL, liveServer)
+	e.add(aptUpdate, aptInstall, livePing, liveCfg, aclWith("s_blog"), liveServer)
 	if _, err := Install(context.Background(), e.d, users); err != nil {
 		t.Fatal(err)
 	}
@@ -866,6 +961,7 @@ func TestRerunKeepsSiteUsers(t *testing.T) {
 
 func TestSiteUsersFailingChangesNothing(t *testing.T) {
 	e := newEnv(t)
+	e.add(e.hold()...)
 	e.add(aptUpdate, aptInstall)
 	_, err := Install(context.Background(), e.d, func() ([]SiteUser, error) { return nil, errors.New("shop.json is corrupt") })
 	if err == nil || !strings.Contains(err.Error(), "shop.json is corrupt") {
@@ -874,8 +970,8 @@ func TestSiteUsersFailingChangesNothing(t *testing.T) {
 	missing(t, e.p.ValkeyConf())
 	missing(t, e.p.ValkeyACL())
 	missing(t, e.p.ServicesState())
-	if n := len(e.run.Calls()); n != 2 {
-		t.Errorf("ran %d commands, want only the packages", n)
+	if n := len(e.run.Calls()); n != 5 {
+		t.Errorf("ran %d commands, want only the hold and the packages", n)
 	}
 }
 
@@ -883,6 +979,7 @@ func TestSiteUsersFailingChangesNothing(t *testing.T) {
 // one lock, so they never interleave.
 func TestInstallWaitsForTheACLLock(t *testing.T) {
 	e := newEnv(t)
+	e.add(e.hold()...)
 	e.add(aptUpdate, aptInstall)
 	unlock, err := sysexec.Lock(context.Background(), e.p.ValkeyACLLock())
 	if err != nil {
@@ -917,6 +1014,7 @@ func TestStaleCandidateDirectoryIsCleared(t *testing.T) {
 
 func TestTestFailureIsAConfigTestError(t *testing.T) {
 	e := newEnv(t)
+	e.add(e.hold()...)
 	e.add(aptUpdate, aptInstall, failing(e.throwaway()[0], 1, "*** FATAL CONFIG FILE ERROR ***\n"))
 	_, err := Install(context.Background(), e.d, noUsers)
 	var tf *configtx.TestFailed
@@ -952,5 +1050,276 @@ func TestRestoreRestartsEvenIfResetFailedFails(t *testing.T) {
 	got := lines(e.run.Calls())
 	if got[len(got)-1] != line(restart) || got[len(got)-2] != line(resetFailed) {
 		t.Errorf("the last calls were\n%s\nwant reset-failed and then a restart", strings.Join(got[len(got)-3:], "\n"))
+	}
+}
+
+// Data left in the package's data directory from before Zimam managed Valkey
+// could hold keys planted by anyone, so Zimam's server must not load it.
+func TestExistingDataIsRefused(t *testing.T) {
+	for name, plant := range map[string]func(t *testing.T, dir string){
+		"a dump": func(t *testing.T, dir string) {
+			if err := os.WriteFile(filepath.Join(dir, "dump.rdb"), []byte("REDIS"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"an append-only directory with files": func(t *testing.T, dir string) {
+			if err := os.MkdirAll(filepath.Join(dir, "appendonlydir"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "appendonlydir", "appendonly.aof.1.base.rdb"), []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			if err := os.MkdirAll(e.p.ValkeyDataDir(), 0o750); err != nil {
+				t.Fatal(err)
+			}
+			plant(t, e.p.ValkeyDataDir())
+			e.add(e.hold()...)
+			e.add(aptUpdate, aptInstall)
+			_, err := Install(context.Background(), e.d, noUsers)
+			var ae *contract.AgentError
+			if !errors.As(err, &ae) || ae.Code != contract.ErrConflict {
+				t.Fatalf("Install = %v, want a conflict", err)
+			}
+			if !strings.Contains(err.Error(), "dump.rdb") && !strings.Contains(err.Error(), "appendonlydir") {
+				t.Errorf("the error doesn't name the data: %v", err)
+			}
+			// The service stays stopped and masked, nothing is written, and the
+			// data is where it was.
+			if units := unitCalls(lines(e.run.Calls())); !slices.Equal(units, []string{line(mask), line(stop)}) {
+				t.Errorf("the service was changed by %v, want it masked and stopped only", units)
+			}
+			for _, p := range []string{e.p.ValkeyDir(), e.p.ValkeyConf(), e.p.ServicesState()} {
+				missing(t, p)
+			}
+			if entries, _ := os.ReadDir(e.p.ValkeyDataDir()); len(entries) != 1 {
+				t.Errorf("the data directory holds %d entries, want what was there", len(entries))
+			}
+			if !strings.Contains(e.logs.String(), "stopped and masked") {
+				t.Errorf("the job log doesn't say the service is masked:\n%s", e.logs.String())
+			}
+		})
+	}
+}
+
+func TestAnEmptyAppendOnlyDirectoryIsNoData(t *testing.T) {
+	e := newEnv(t)
+	if err := os.MkdirAll(filepath.Join(e.p.ValkeyDataDir(), "appendonlydir"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	e.scriptInstall()
+	if _, err := Install(context.Background(), e.d, noUsers); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+}
+
+// A server an administrator left running on the package's settings is
+// stopped first; one that won't stop stops the install before anything else.
+func TestARunningServerThatWontStopStopsTheInstall(t *testing.T) {
+	e := newEnv(t)
+	running := sysexec.Script{Path: systemctl, Args: inactive.Args} // exit 0: active
+	e.add(mask, stop, running)
+	_, err := Install(context.Background(), e.d, noUsers)
+	if err == nil || !strings.Contains(err.Error(), "still running") {
+		t.Fatalf("Install = %v, want it to refuse a server it can't stop", err)
+	}
+	if n := len(e.run.Calls()); n != 3 {
+		t.Errorf("ran %d commands, want only the hold", n)
+	}
+}
+
+// The dump a first start leaves when the service is stopped again is Zimam's
+// own, and is removed so that the next install doesn't refuse it.
+func TestFailedFirstInstallRemovesTheDumpItCaused(t *testing.T) {
+	e := newEnv(t)
+	e.add(e.hold()...)
+	e.add(aptUpdate, aptInstall)
+	e.add(e.throwaway()...)
+	e.add(unmask, reload, enable, failing(restart, 1, "Job failed\n"), reload, stop, mask)
+	dump := filepath.Join(e.p.ValkeyDataDir(), "dump.rdb")
+	var stops int
+	e.srv.onCall = func(c sysexec.Cmd, _ context.Context) error {
+		if c.Path == systemctl && slices.Equal(c.Args, stop.Args) {
+			stops++
+			if stops == 2 {
+				// The server saves a dump as it stops: this is the stop of the
+				// undo, after the hold's.
+				_ = os.MkdirAll(e.p.ValkeyDataDir(), 0o750)
+				_ = os.WriteFile(dump, []byte("REDIS"), 0o600)
+			}
+		}
+		return nil
+	}
+	e.d.Run = e.srv
+	if _, err := Install(context.Background(), e.d, noUsers); err == nil {
+		t.Fatal("Install succeeded with a restart that fails")
+	}
+	if stops != 2 {
+		t.Fatalf("the service was stopped %d times, want the hold's and the undo's", stops)
+	}
+	missing(t, dump)
+}
+
+// The undo of a failure may not be cut off by the job's time limit, so a
+// deadline that leaves less than it can need ends the install before any file
+// is staged.
+func TestShortDeadlineStopsTheInstallBeforeStagingFiles(t *testing.T) {
+	e := newEnv(t)
+	e.add(e.hold()...)
+	e.add(aptUpdate, aptInstall)
+	ctx, cancel := context.WithTimeout(context.Background(), needed()-time.Minute)
+	defer cancel()
+	_, err := Install(ctx, e.d, noUsers)
+	if err == nil || !strings.Contains(err.Error(), "of this job's time is left") {
+		t.Fatalf("Install = %v, want it to refuse for lack of time", err)
+	}
+	for _, p := range []string{e.p.ValkeyConf(), e.p.ValkeyACL(), e.p.ValkeyAdminPass(), e.p.ServicesState()} {
+		missing(t, p)
+	}
+	if units := unitCalls(lines(e.run.Calls())); !slices.Equal(units, []string{line(mask), line(stop)}) {
+		t.Errorf("the service was changed by %v, want it masked and stopped only", units)
+	}
+	// With the time there, the same install goes through.
+	e2 := newEnv(t)
+	e2.scriptInstall()
+	ctx2, cancel2 := context.WithTimeout(context.Background(), needed()+time.Minute)
+	defer cancel2()
+	if _, err := Install(ctx2, e2.d, noUsers); err != nil {
+		t.Fatalf("Install with enough time: %v", err)
+	}
+}
+
+func TestNeededFitsTheJobLimit(t *testing.T) {
+	// Outside needed() are the hold before the packages (10 + 60 + 10 s) and
+	// apt-get's lock wait (300 s); the job's 900 s must hold them all, with
+	// the lock on Valkey's users.
+	total := lockWait + 80*time.Second + needed() + 300*time.Second
+	if total > 900*time.Second {
+		t.Errorf("the steps add up to %s, more than the job's 900 s", total)
+	}
+}
+
+// A new admin password is written with the other files, so a failed test
+// puts back the one that matches the ACL file it restores.
+func TestFailedTestKeepsTheOldAdminPassword(t *testing.T) {
+	e := newEnv(t)
+	withPrevious(t, e)
+	writePass(t, e, "not a password\n")
+	e.add(aptUpdate, aptInstall)
+	e.add(failing(e.throwaway()[0], 1, "*** FATAL CONFIG FILE ERROR ***\n"))
+	if _, err := Install(context.Background(), e.d, noUsers); err == nil {
+		t.Fatal("Install succeeded")
+	}
+	if got := readFile(t, e.p.ValkeyAdminPass()); got != "not a password\n" {
+		t.Errorf("admin.pass = %q, want the file that was there", got)
+	}
+	missing(t, e.p.ValkeyAdminPass()+".zimam-prev")
+	if got := readFile(t, e.p.ValkeyACL()); got != prevACL {
+		t.Errorf("users.acl = %q, want the previous one", got)
+	}
+}
+
+// A candidate server that a killed job left running is ended before its
+// directory is removed, if /proc shows it is a valkey-server of user valkey.
+func TestStaleCandidateServerIsKilled(t *testing.T) {
+	for name, tc := range map[string]struct {
+		exe  string // the process name
+		uid  int
+		kill bool
+	}{
+		"a valkey-server": {"valkey-server", os.Getuid(), true},
+		"another program": {"sleep", os.Getuid(), false},
+		"another user's":  {"valkey-server", os.Getuid() + 1, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			var killed []int
+			old := killProcess
+			killProcess = func(pid int, _ syscall.Signal) error { killed = append(killed, pid); return nil }
+			t.Cleanup(func() { killProcess = old })
+			dir := e.p.ValkeyTestDir()
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "p"), []byte("4242\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			proc := e.p.ProcPID("4242")
+			if err := os.MkdirAll(proc, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(proc, "comm"), []byte(tc.exe+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			status := fmt.Sprintf("Name:\tvalkey-server\nUid:\t%d\t%d\t%d\t%d\n", tc.uid, tc.uid, tc.uid, tc.uid)
+			if err := os.WriteFile(filepath.Join(proc, "status"), []byte(status), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			e.scriptInstall()
+			if _, err := Install(context.Background(), e.d, noUsers); err != nil {
+				t.Fatal(err)
+			}
+			if got := slices.Equal(killed, []int{4242}); got != tc.kill {
+				t.Errorf("killed %v, want a kill of 4242: %v", killed, tc.kill)
+			}
+			missing(t, dir)
+		})
+	}
+}
+
+// A pidfile with nonsense, or the pid of init, kills nothing.
+func TestStalePidfileNeverKillsInit(t *testing.T) {
+	e := newEnv(t)
+	old := killProcess
+	killProcess = func(pid int, _ syscall.Signal) error { t.Errorf("killed %d", pid); return nil }
+	t.Cleanup(func() { killProcess = old })
+	for _, content := range []string{"1\n", "0\n", "-5\n", "abc\n", ""} {
+		dir := e.p.ValkeyTestDir()
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "p"), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		killStale(e.d, dir, os.Getuid())
+	}
+}
+
+// A server whose users in memory differ from the file, such as one an
+// administrator changed with ACL commands, is not converged.
+func TestSkipPathComparesTheLiveUsers(t *testing.T) {
+	e := newEnv(t)
+	h := sha256.Sum256([]byte("x"))
+	users := func() ([]SiteUser, error) { return []SiteUser{{Name: "blog", Hash: h}}, nil }
+	e.add(e.hold()...)
+	e.add(aptUpdate, aptInstall)
+	e.add(e.throwaway()...)
+	e.add(unmask, reload, enable, restart, livePing, liveCfg, aclWith("s_blog"), liveServer)
+	if _, err := Install(context.Background(), e.d, users); err != nil {
+		t.Fatal(err)
+	}
+	before := len(e.run.Calls())
+	// The file is as before, but the server has lost the site's user.
+	e.add(aptUpdate, aptInstall, livePing, liveCfg, aclWith(), liveServer)
+	e.add(e.throwaway()...)
+	e.add(restart, livePing, liveCfg, aclWith("s_blog"), liveServer)
+	if _, err := Install(context.Background(), e.d, users); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(lines(e.run.Calls()[before:]), line(restart)) {
+		t.Error("a server missing a user of the file was not restarted")
+	}
+}
+
+func TestFailureNotes(t *testing.T) {
+	if got := failureNote(true, false); !strings.Contains(got, "stopped and masked") {
+		t.Errorf("first install: %q", got)
+	}
+	got := failureNote(false, true)
+	if strings.Contains(got, "not recorded") || strings.Contains(got, "masked") {
+		t.Errorf("a re-run on a recorded server says %q", got)
 	}
 }

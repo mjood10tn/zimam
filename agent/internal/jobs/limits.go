@@ -30,7 +30,7 @@ var limits = map[string]Limits{
 	"db.create":      {MemoryMax: "256M", RuntimeMaxSec: 120},
 	"db.drop":        {MemoryMax: "256M", RuntimeMaxSec: 300},
 	"db.user":        {MemoryMax: "256M", RuntimeMaxSec: 120},
-	"valkey.install": {MemoryMax: "512M", RuntimeMaxSec: 600},
+	"valkey.install": {MemoryMax: "512M", RuntimeMaxSec: 900},
 	"cache.user":     {MemoryMax: "256M", RuntimeMaxSec: 120},
 }
 
