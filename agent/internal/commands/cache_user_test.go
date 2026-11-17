@@ -20,6 +20,7 @@ import (
 
 const (
 	valkeyCli = "/usr/bin/valkey-cli"
+	runA      = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	adminPass = "k9Qm2ZxL0vB7tR4nYc8WdE1aHs5UjP3fGoIq6XyTz_A"
 )
 
@@ -51,6 +52,7 @@ func withValkey(t *testing.T, e *dbEnv) *dbEnv {
 	if err := os.WriteFile(e.p.ValkeyACL(), []byte("user default off\nuser zimam-admin on #"+hex.EncodeToString(h[:])+" ~* &* +@all\n"), 0o640); err != nil {
 		t.Fatal(err)
 	}
+	e.run.Add(cliInfo)
 	return e
 }
 
@@ -63,6 +65,8 @@ func cli(out string, code int, args ...string) sysexec.Script {
 var (
 	cliPing = cli("PONG\n", 0, "PING")
 	cliLoad = cli("OK\n", 0, "ACL", "LOAD")
+	// INFO server tells the process apart: a SCAN cursor is good only for one.
+	cliInfo = cli("# Server\r\nvalkey_version:9.0.4\r\nrun_id:"+runA+"\r\n", 0, "INFO", "server")
 )
 
 func cliKill(site string, out string, code int) sysexec.Script {

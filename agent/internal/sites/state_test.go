@@ -293,7 +293,7 @@ func TestStateCachePurge(t *testing.T) {
 		t.Errorf("the bytes changed:\n%s\nwas\n%s", after, before)
 	}
 	withPurge := base
-	withPurge.CachePurge = &CachePurge{Pass: 2, Cursor: "18446744073709551615"}
+	withPurge.CachePurge = &CachePurge{Pass: 2, Cursor: "18446744073709551615", RunID: strings.Repeat("0f", 20)}
 	if err := Save(p, withPurge); err != nil {
 		t.Fatal(err)
 	}
@@ -305,6 +305,7 @@ func TestStateCachePurge(t *testing.T) {
 		"pass 0": {Pass: 0, Cursor: "1"}, "pass 3": {Pass: 3, Cursor: "1"},
 		"no cursor": {Pass: 1}, "letters": {Pass: 1, Cursor: "1a"}, "negative": {Pass: 1, Cursor: "-1"},
 		"too long": {Pass: 1, Cursor: strings.Repeat("9", 21)}, "a newline": {Pass: 1, Cursor: "1\n"},
+		"a short run id": {Pass: 1, Cursor: "1", RunID: "abc"}, "an upper-case run id": {Pass: 1, Cursor: "1", RunID: strings.Repeat("AB", 20)},
 	} {
 		bad := base
 		bad.CachePurge = c

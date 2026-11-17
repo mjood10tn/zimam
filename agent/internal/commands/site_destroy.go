@@ -126,7 +126,7 @@ func siteDestroy(ctx context.Context, j *jobs.Context, p contract.Params) (any, 
 		if work == requiredMySQL {
 			// The Valkey steps can't be undone; MySQL, which comes after them, must
 			// be known to answer first.
-			if _, err := mysql.Exec(ctx, d, mysql.Ping()); err != nil {
+			if err := mysql.Ping(ctx, d); err != nil {
 				return nil, dbError(err)
 			}
 		}

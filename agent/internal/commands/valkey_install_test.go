@@ -56,3 +56,24 @@ func TestCacheUsersRefusesAnUnreadableSiteState(t *testing.T) {
 		t.Errorf("cacheUsers = %v, want an error naming the site", err)
 	}
 }
+
+// The users loader is the one valkey.install and every apply use: a site
+// whose destroy has begun removing its keys gets no user from it.
+func TestCacheUsersSkipASiteBeingDestroyed(t *testing.T) {
+	p := paths.Paths{Root: t.TempDir()}
+	sum := sha256.Sum256([]byte("pw"))
+	saveSite(t, p, "shop", hex.EncodeToString(sum[:]))
+	saveSite(t, p, "blog", hex.EncodeToString(sum[:]))
+	st, err := sites.Load(p, "shop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.CachePurge = &sites.CachePurge{Pass: 2, Cursor: "5"}
+	if err := sites.Save(p, st); err != nil {
+		t.Fatal(err)
+	}
+	users, err := cacheUsers(p)()
+	if err != nil || len(users) != 1 || users[0].Name != "blog" {
+		t.Errorf("cacheUsers = %+v, %v; want only blog", users, err)
+	}
+}

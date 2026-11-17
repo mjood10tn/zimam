@@ -39,6 +39,12 @@ func cacheUsers(p paths.Paths) func() ([]valkey.SiteUser, error) {
 			if st.CacheUserHash == "" {
 				continue
 			}
+			// A site whose destroy has begun removing its keys gets no user back
+			// from another change: it would write keys behind the saved cursor.
+			// cache.user on the site ends that, by clearing the progress.
+			if st.CachePurge != nil {
+				continue
+			}
 			hash, err := valkey.ParseHash(st.CacheUserHash)
 			if err != nil {
 				return nil, err

@@ -63,9 +63,14 @@ var KeyFingerprint = regexp.MustCompile(`^SHA256:[A-Za-z0-9+/]{43}$`)
 type CachePurge struct {
 	Pass   int    `json:"pass"`   // 1: before the user is removed, 2: after
 	Cursor string `json:"cursor"` // the SCAN cursor to continue from, in digits
+	// RunID is the Valkey process that gave the cursor, which is good only for
+	// that process. A progress without one is rescanned from the start.
+	RunID string `json:"run_id,omitempty"`
 }
 
 var purgeCursorRe = regexp.MustCompile(`^[0-9]{1,20}\z`)
+
+var runIDRe = regexp.MustCompile(`^[0-9a-f]{40}\z`)
 
 // cacheUserHashRe is a SHA-256 in lowercase hex, the form Valkey's ACL file
 // takes after "#".
@@ -125,6 +130,8 @@ func (s State) validate() error {
 			f["cache_purge"] = "pass must be 1 or 2"
 		case !purgeCursorRe.MatchString(c.Cursor):
 			f["cache_purge"] = "cursor must be digits"
+		case c.RunID != "" && !runIDRe.MatchString(c.RunID):
+			f["cache_purge"] = "run_id must be 40 lowercase hex digits"
 		case s.CacheUserHash == "":
 			f["cache_purge"] = "needs a cache user hash"
 		}

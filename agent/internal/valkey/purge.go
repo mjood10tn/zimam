@@ -43,15 +43,16 @@ var purgePages = 5
 // and needs 120 s of them for MySQL and its own steps, which leaves 180 s for
 // everything Valkey does before them:
 //
-//	the admin PING and, if the site has databases, MySQL's check  2 x 10 s
+//	the admin PING, MySQL's check (its own 10 s bound) and the
+//	server's run id                                               3 x 10 s
 //	waiting for the lock on Valkey's users                        60 s
-//	two purges, each purgeBudget plus its last call (10 s)        2 x (30 + 10) s
+//	two purges, each purgeBudget plus its last call (10 s)        2 x (25 + 10) s
 //	loading the users, and the restore if Valkey refuses them     2 x 10 s
 //	saving the progress (local file writes)                       negligible
 //
 // which is 180 s. A purge that doesn't finish saves where it got to, so a
 // smaller budget only means more runs.
-var purgeBudget = 30 * time.Second
+var purgeBudget = 25 * time.Second
 
 var (
 	purgeReply = regexp.MustCompile(`^([0-9]+) ([0-9]+)$`)
@@ -87,8 +88,11 @@ func PurgeArgs(cursor string, site contract.SiteName) []string {
 // purgeFrom removes the site's keys from a cursor until the scan ends (done)
 // or purgeBudget is spent, and returns the cursor to continue from. The budget
 // is checked between calls, so every run makes at least one call of progress.
-// SCAN returns every key that is there from the first call to the last, so
-// continuing from a saved cursor in a later run loses none.
+// SCAN returns every key that is there from the first call to the last only
+// within one server process: the hash seed is chosen at each start and the
+// tables are rebuilt when the data is loaded, so a cursor from before a restart
+// skips keys. A saved cursor is therefore used only by the process that gave it
+// (see RemoveSiteUser).
 func purgeFrom(ctx context.Context, d sysexec.Deps, site contract.SiteName, cursor string) (next string, removed int, done bool, err error) {
 	if err := site.Validate(); err != nil {
 		return cursor, 0, false, fmt.Errorf("site %q %v", site, err)
@@ -134,12 +138,35 @@ func PurgeSiteKeys(ctx context.Context, d sysexec.Deps, site contract.SiteName) 
 	return n, nil
 }
 
+var runIDRe = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+// runID is the id of the server process that answers, from INFO server. It
+// changes at every start, and a SCAN cursor is good only within one process.
+func runID(ctx context.Context, d sysexec.Deps) (string, error) {
+	out, err := cliAdmin(ctx, d, "INFO", "server")
+	if err != nil {
+		return "", err
+	}
+	for line := range strings.Lines(out) {
+		if id, ok := strings.CutPrefix(strings.TrimRight(line, "\r\n"), "run_id:"); ok {
+			if !runIDRe.MatchString(id) {
+				return "", fmt.Errorf("Valkey reported the run id %q", id)
+			}
+			return id, nil
+		}
+	}
+	return "", errors.New("Valkey's INFO server has no run id")
+}
+
 // Progress is how far RemoveSiteUser got: Pass 0 is nothing yet, 1 is the
 // purge before the user is removed, 2 the purge after; Cursor is where the
-// purge in progress continues.
+// purge in progress continues, and RunID the server process it belongs to.
 type Progress struct {
 	Pass   int
 	Cursor string
+	// RunID is the id of the server process that gave the cursor. A cursor is
+	// good only for that process.
+	RunID string
 }
 
 // Removal is what RemoveSiteUser needs of the caller's state. Load and Save
@@ -169,7 +196,10 @@ type Removal struct {
 // finished, so a failure at any step leaves a state that makes the next run
 // carry on, and every step can be repeated. Pass 2 is only saved once the user
 // is removed, and a run that resumes it loads the users without the site again
-// before it continues. Until the hash is cleared the state is ahead of the live
+// before it continues. A cursor is good only for the server process that
+// gave it, so a run that finds a different run id (or none) in the saved progress,
+// after a restart of Valkey, scans that pass again from 0; pass 2 stays pass 2,
+// since the user is already removed. Until the hash is cleared the state is ahead of the live
 // users: another change to Valkey's users renders the user back from the state,
 // which is what a site that is not gone should have. Step 2 is applyLocked, the
 // one writer of the users file, so a refused file is put back and loaded again.
@@ -190,12 +220,22 @@ func RemoveSiteUser(ctx context.Context, d sysexec.Deps, users func() ([]SiteUse
 	if saved.Pass < 0 || saved.Pass > 2 || (saved.Pass > 0 && !cursorRe.MatchString(saved.Cursor)) {
 		return fmt.Errorf("the saved progress of removing site %s's keys is %+v", site, saved)
 	}
+	// Read before anything is scanned: a restart after this makes the run id
+	// that is saved differ from the live one, which only costs a rescan.
+	rid, err := runID(ctx, d)
+	if err != nil {
+		return err
+	}
 
 	// run is one pass: from the saved cursor, or from the start.
 	run := func(pass int) error {
 		cursor := "0"
 		if saved.Pass == pass {
-			cursor = saved.Cursor
+			if saved.RunID == rid {
+				cursor = saved.Cursor
+			} else {
+				d.Logf("Valkey has restarted since the progress of removing site %s's keys was saved, and a cursor is good only for the process that gave it; scanning this pass again from the start", site)
+			}
 		}
 		next, n, done, err := purgeFrom(ctx, d, site, cursor)
 		if n > 0 {
@@ -204,7 +244,7 @@ func RemoveSiteUser(ctx context.Context, d sysexec.Deps, users func() ([]SiteUse
 		if done {
 			return nil
 		}
-		if serr := rem.Save(Progress{Pass: pass, Cursor: next}); serr != nil {
+		if serr := rem.Save(Progress{Pass: pass, Cursor: next, RunID: rid}); serr != nil {
 			return errors.Join(fmt.Errorf("removing the keys of site %s stopped and its progress could not be saved; run the command again", site), err, serr)
 		}
 		switch {
@@ -239,7 +279,7 @@ func RemoveSiteUser(ctx context.Context, d sysexec.Deps, users func() ([]SiteUse
 		return err
 	}
 	if saved.Pass != 2 {
-		if err := rem.Save(Progress{Pass: 2, Cursor: "0"}); err != nil {
+		if err := rem.Save(Progress{Pass: 2, Cursor: "0", RunID: rid}); err != nil {
 			return fmt.Errorf("the Valkey user of site %s is removed, but the progress could not be saved; run the command again: %w", site, err)
 		}
 	}

@@ -159,13 +159,13 @@ func cachePurgeState(d sysexec.Deps, site contract.SiteName) valkey.Removal {
 			if err != nil || st.CachePurge == nil {
 				return valkey.Progress{}, err
 			}
-			return valkey.Progress{Pass: st.CachePurge.Pass, Cursor: st.CachePurge.Cursor}, nil
+			return valkey.Progress{Pass: st.CachePurge.Pass, Cursor: st.CachePurge.Cursor, RunID: st.CachePurge.RunID}, nil
 		},
 		Save: func(p valkey.Progress) error {
 			return update(func(st *sites.State) {
 				st.CachePurge = nil
 				if p.Pass != 0 {
-					st.CachePurge = &sites.CachePurge{Pass: p.Pass, Cursor: p.Cursor}
+					st.CachePurge = &sites.CachePurge{Pass: p.Pass, Cursor: p.Cursor, RunID: p.RunID}
 				}
 			})
 		},

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"zimam/agent/contract"
 	"zimam/agent/internal/services"
@@ -199,8 +200,15 @@ func grantTarget(name contract.DatabaseName) string {
 	return quote(strings.ReplaceAll(string(name), "_", `\_`)) + ".*"
 }
 
-// Ping is a statement that does nothing but show that MySQL answers, for a
-// caller that must know before it changes something else.
-func Ping() Statement {
-	return Statement{kind: "ping", sql: "SELECT 1;"}
+// pingTimeout bounds Ping, whatever a statement may take (queryTimeout), since
+// callers budget for it.
+var pingTimeout = 10 * time.Second
+
+// Ping shows that MySQL answers, for a caller that must know before it
+// changes something else that can't be undone.
+func Ping(ctx context.Context, d sysexec.Deps) error {
+	ctx, cancel := context.WithTimeout(ctx, pingTimeout)
+	defer cancel()
+	_, err := Exec(ctx, d, Statement{kind: "ping", sql: "SELECT 1;"})
+	return err
 }
