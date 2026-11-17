@@ -83,3 +83,7 @@ type LaravelEnv struct {
 type SitePlaceholder struct {
 	Name contract.SiteName
 }
+
+// MySQLConf fills mysql/99-zimam.cnf. The buffer pool is a whole number of
+// MiB, which the agent works out from the server's memory.
+type MySQLConf struct{ BufferPoolMiB int }

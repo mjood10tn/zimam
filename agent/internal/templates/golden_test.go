@@ -52,6 +52,10 @@ var goldenCases = map[string][]goldenFile{
 	"apt-sury-mirror": suryRepo("https://mirror.example.com/sury/php/", "mirror.example.com"),
 	// What php.install writes for each version on the allowlist (§8.3).
 	"php-base": phpBase(),
+	// What mysql.install writes beside the package's own files.
+	"mysql-99-zimam": {
+		{path: paths.Paths{}.MySQLConf(), tmpl: "mysql/99-zimam.cnf", data: func() any { return MySQLConf{BufferPoolMiB: 256} }},
+	},
 	// The panel's vhost and pool (§7.1, §9.3), before and after its
 	// certificate exists.
 	"panel-http":  panel(false),

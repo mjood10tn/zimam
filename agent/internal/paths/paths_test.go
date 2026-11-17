@@ -43,6 +43,8 @@ var production = map[string]string{
 	"CertsDir":              "/var/lib/zimam/certs",
 	"UpdatesCache":          "/var/lib/zimam/updates.json",
 	"KeyringRefresh":        "/var/lib/zimam/keyring-refresh.json",
+	"ServicesState":         "/var/lib/zimam/services.json",
+	"MySQLConf":             "/etc/mysql/mysql.conf.d/99-zimam.cnf",
 	"LogrotateState":        "/var/lib/zimam/logrotate.state",
 	"RebootRequired":        "/run/reboot-required",
 	"AptCheck":              "/usr/lib/update-notifier/apt-check",

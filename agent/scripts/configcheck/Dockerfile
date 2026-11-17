@@ -1,8 +1,8 @@
 # The config check image (design §14.1): Ubuntu 26.04 with Nginx, logrotate,
-# systemd and PHP 8.2–8.5 FPM, where check.sh tests the golden files. PHP
+# systemd, MySQL and PHP 8.2–8.5 FPM, where check.sh tests the golden files. PHP
 # comes from packages.sury.org, set up as §8.2 does it, and the keyring is
 # trusted only if its primary key has the fingerprint the agent checks
-# (php.SuryFingerprint).
+# (php.SuryFingerprint). MySQL comes from Ubuntu main.
 FROM ubuntu:26.04
 
 ARG SURY_FINGERPRINT=15058500A0235D97F5D10063B188E2B695BD4743
@@ -11,7 +11,7 @@ ARG PHP_VERSIONS="8.2 8.3 8.4 8.5"
 RUN set -eux; \
 	export DEBIAN_FRONTEND=noninteractive; \
 	apt-get update; \
-	apt-get install -y --no-install-recommends ca-certificates curl gpg nginx logrotate systemd openssl; \
+	apt-get install -y --no-install-recommends ca-certificates curl gpg nginx logrotate systemd openssl mysql-server; \
 	curl -fsSL https://packages.sury.org/php/apt.gpg -o /tmp/sury.gpg; \
 	fingerprint="$(gpg --show-keys --with-colons /tmp/sury.gpg | awk -F: '$1 == "fpr" { print $10; exit }')"; \
 	test "$fingerprint" = "$SURY_FINGERPRINT"; \

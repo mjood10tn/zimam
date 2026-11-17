@@ -12,6 +12,7 @@ import (
 
 	"zimam/agent/contract"
 	"zimam/agent/internal/paths"
+	"zimam/agent/internal/services"
 	"zimam/agent/internal/sysexec"
 )
 
@@ -176,5 +177,64 @@ func TestServicesParsing(t *testing.T) {
 	failing := sysexec.NewFakeRunner(sysexec.Script{Path: "/usr/bin/systemctl", Args: showArgs(units...), Result: sysexec.Result{ExitCode: 1}})
 	if _, err := Services(context.Background(), testDeps(t, failing)); err == nil {
 		t.Error("Services ignored a failed systemctl")
+	}
+}
+
+// MySQL is monitored once mysql.install has recorded it, and not before: a
+// server that never installed it has no mysql unit to report.
+func TestServicesIncludeMySQLOnceInstalled(t *testing.T) {
+	for name, installed := range map[string]bool{"installed": true, "not installed": false} {
+		t.Run(name, func(t *testing.T) {
+			units := []string{"nginx.service"}
+			blocks := [][3]string{{"nginx.service", "active", "enabled"}}
+			if installed {
+				units = append(units, "mysql.service")
+				blocks = append(blocks, [3]string{"mysql.service", "failed", "enabled"})
+			}
+			units = append(units, alwaysUnits...)
+			blocks = append(blocks, fixedBlocks()...)
+			run := sysexec.NewFakeRunner(sysexec.Script{Path: "/usr/bin/systemctl", Args: showArgs(units...), Result: sysexec.Result{Stdout: show(blocks...)}})
+			d := testDeps(t, run)
+			if installed {
+				if err := services.Update(d.Paths, func(s *services.State) { s.MySQL = services.Entry{Installed: true, Version: "8.4.13"} }); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := Services(context.Background(), d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var mysql []contract.ServiceState
+			for _, s := range got {
+				if s.Unit == "mysql.service" {
+					mysql = append(mysql, s)
+				}
+			}
+			var want []contract.ServiceState
+			if installed {
+				want = []contract.ServiceState{{Unit: "mysql.service", ActiveState: "failed", UnitFileState: "enabled"}}
+			}
+			if !reflect.DeepEqual(mysql, want) {
+				t.Errorf("mysql units = %+v, want %+v", mysql, want)
+			}
+			if got[0].Unit != "nginx.service" || len(got) != len(units)-1 {
+				t.Errorf("Services = %+v", got)
+			}
+		})
+	}
+}
+
+// A services.json that can't be read is an error, not a silent gap in the
+// monitored units.
+func TestServicesRefusesACorruptServicesFile(t *testing.T) {
+	d := testDeps(t, sysexec.NewFakeRunner())
+	if err := os.MkdirAll(d.Paths.StateDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(d.Paths.ServicesState(), []byte(`{"mysql":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Services(context.Background(), d); err == nil {
+		t.Error("Services ignored a corrupt services.json")
 	}
 }

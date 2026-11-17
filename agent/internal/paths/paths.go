@@ -101,6 +101,10 @@ func (p Paths) CertRecord(name string) string { return p.at("var/lib/zimam/certs
 func (p Paths) UpdatesCache() string          { return p.at("var/lib/zimam/updates.json") }
 func (p Paths) LogrotateState() string        { return p.at("var/lib/zimam/logrotate.state") }
 
+// ServicesState (root 0600) records which optional services, MySQL and
+// Valkey, Zimam installed, and their versions.
+func (p Paths) ServicesState() string { return p.at("var/lib/zimam/services.json") }
+
 // KeyringRefresh records maintenance's last try at refreshing the sury
 // keyring (D23).
 func (p Paths) KeyringRefresh() string { return p.at("var/lib/zimam/keyring-refresh.json") }
@@ -256,6 +260,11 @@ func (p Paths) PHPGlobalConf(v contract.PHPVersion) string {
 func (p Paths) PHPWwwPool(v contract.PHPVersion) string {
 	return filepath.Join(p.PHPPoolDir(v), "www.conf")
 }
+
+// MySQL: Zimam's drop-in beside the package's own files, which are never
+// edited (§11.3).
+
+func (p Paths) MySQLConf() string { return p.at("etc/mysql/mysql.conf.d/99-zimam.cnf") }
 
 // systemd: Zimam's own units (§7.1) and the journal's limits (§11.3)
 

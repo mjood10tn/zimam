@@ -13,6 +13,7 @@ import (
 	"zimam/agent/internal/maintenance"
 	"zimam/agent/internal/php"
 	"zimam/agent/internal/release"
+	"zimam/agent/internal/services"
 	"zimam/agent/internal/sysexec"
 )
 
@@ -33,6 +34,10 @@ func systemStatus(d sysexec.Deps) Handler {
 		if err != nil {
 			return nil, err
 		}
+		svc, err := servicesStatus(ctx, d)
+		if err != nil {
+			return nil, err
+		}
 		reboot, err := exists(d.Paths.RebootRequired())
 		if err != nil {
 			return nil, err
@@ -42,6 +47,7 @@ func systemStatus(d sysexec.Deps) Handler {
 			Protocols:      slices.Clone(contract.SupportedProtocols),
 			NginxVersion:   nginxVersion(ctx, d),
 			PHP:            php,
+			Services:       svc,
 			RebootRequired: reboot,
 			Updates:        updateCounts(d),
 			PanelDomain:    cfg.PanelDomain,
@@ -139,4 +145,29 @@ func exists(path string) (bool, error) {
 	default:
 		return false, err
 	}
+}
+
+// servicesStatus reports MySQL and Valkey from services.json, with each
+// installed one's unit state read live. A service that was never installed
+// costs no systemctl call, and a server without the file reports neither.
+func servicesStatus(ctx context.Context, d sysexec.Deps) (contract.ServicesStatus, error) {
+	st, err := services.Load(d.Paths)
+	if err != nil {
+		return contract.ServicesStatus{}, err
+	}
+	one := func(e services.Entry, unit string) (contract.ServiceStatus, error) {
+		if !e.Installed {
+			return contract.ServiceStatus{}, nil
+		}
+		active, err := unitActive(ctx, d, unit)
+		return contract.ServiceStatus{Installed: true, Version: e.Version, Active: active}, err
+	}
+	var out contract.ServicesStatus
+	if out.MySQL, err = one(st.MySQL, "mysql"); err != nil {
+		return contract.ServicesStatus{}, err
+	}
+	if out.Valkey, err = one(st.Valkey, "valkey-server"); err != nil {
+		return contract.ServicesStatus{}, err
+	}
+	return out, nil
 }

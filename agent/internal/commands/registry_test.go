@@ -19,3 +19,12 @@ func TestNewAddsJobCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestMySQLInstallHasAHandlerAndNoPrecheck(t *testing.T) {
+	if JobHandlers()["mysql.install"] == nil {
+		t.Error("JobHandlers has no mysql.install")
+	}
+	if _, ok := Prechecks(sysexec.Deps{})["mysql.install"]; ok {
+		t.Error("mysql.install has a precheck: running it again must converge, not conflict")
+	}
+}

@@ -124,6 +124,20 @@ if [ -d "$src/etc/apt" ]; then
 	echo "every source and pin parses"
 fi
 
+if [ -f "$src/etc/mysql/mysql.conf.d/99-zimam.cnf" ]; then
+	echo "== mysqld --validate-config"
+	out=$(mysqld --validate-config 2>&1) || {
+		printf '%s\n' "$out"
+		fail "mysqld --validate-config failed"
+	}
+	printf '%s\n' "$out"
+	# It exits 0 for some broken files, such as a broken group header, and
+	# reports them only as [ERROR] lines.
+	if grep -qF '[ERROR]' <<<"$out"; then
+		fail "mysqld --validate-config reported an error"
+	fi
+fi
+
 # The image keeps each version's stock www.conf, so a version whose case
 # holds no pool (only ini files or the global config) still has one, and
 # php-fpm -t can run.

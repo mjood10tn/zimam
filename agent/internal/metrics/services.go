@@ -7,6 +7,7 @@ import (
 
 	"zimam/agent/contract"
 	"zimam/agent/internal/php"
+	"zimam/agent/internal/services"
 	"zimam/agent/internal/sysexec"
 )
 
@@ -27,9 +28,10 @@ var fixedUnits = []string{
 
 // Services reports the state of every monitored unit (§7.5) from one
 // systemctl show call: nginx, php<v>-fpm for each version with a Zimam
-// pool (a version without one is stopped on purpose, §8.3), Zimam's own
-// units, certbot's timer, and ssh.socket or ssh.service, whichever is
-// enabled, preferring the socket that Ubuntu 26.04 starts sshd from.
+// pool (a version without one is stopped on purpose, §8.3), mysql once it
+// is installed, Zimam's own units, certbot's timer, and ssh.socket or
+// ssh.service, whichever is enabled, preferring the socket that Ubuntu 26.04
+// starts sshd from.
 func Services(ctx context.Context, d sysexec.Deps) ([]contract.ServiceState, error) {
 	units := []string{"nginx.service"}
 	for _, r := range contract.PHPAllowlist {
@@ -40,6 +42,15 @@ func Services(ctx context.Context, d sysexec.Deps) ([]contract.ServiceState, err
 		if pools {
 			units = append(units, "php"+string(r.Version)+"-fpm.service")
 		}
+	}
+	// MySQL is monitored once mysql.install has recorded it; a server without
+	// it has no such unit to report.
+	installed, err := services.Load(d.Paths)
+	if err != nil {
+		return nil, err
+	}
+	if installed.MySQL.Installed {
+		units = append(units, "mysql.service")
 	}
 	units = append(units, fixedUnits...)
 	res, err := d.Run.Run(ctx, sysexec.Cmd{Path: systemctl, Args: append([]string{"show", "-p", "Id,ActiveState,UnitFileState", "--"}, units...)})

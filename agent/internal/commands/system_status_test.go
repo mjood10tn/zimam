@@ -21,6 +21,7 @@ import (
 	"zimam/agent/internal/paths"
 	"zimam/agent/internal/release"
 	"zimam/agent/internal/server"
+	"zimam/agent/internal/services"
 	"zimam/agent/internal/sysexec"
 )
 
@@ -353,4 +354,52 @@ func exchange(t *testing.T, sock, line string) string {
 		t.Fatal(err)
 	}
 	return out.String()
+}
+
+func mysqlActive(active bool) sysexec.Script {
+	s := sysexec.Script{Path: "/usr/bin/systemctl", Args: []string{"is-active", "--quiet", "mysql"}}
+	if !active {
+		s.Result.ExitCode = 3
+	}
+	return s
+}
+
+// A server that never ran mysql.install reports no service installed, and
+// asks systemd about none.
+func TestStatusWithoutServices(t *testing.T) {
+	run := sysexec.NewFakeRunner(nginxV(t))
+	st := getStatus(t, statusDeps(t, run))
+	if st.Services != (contract.ServicesStatus{}) {
+		t.Errorf("services = %+v, want none", st.Services)
+	}
+	if n := len(run.Calls()); n != 1 {
+		t.Errorf("ran %d commands, want only nginx -v", n)
+	}
+}
+
+func TestStatusReportsMySQL(t *testing.T) {
+	for _, active := range []bool{true, false} {
+		run := sysexec.NewFakeRunner(nginxV(t), mysqlActive(active))
+		d := statusDeps(t, run)
+		if err := services.Update(d.Paths, func(s *services.State) { s.MySQL = services.Entry{Installed: true, Version: "8.4.13"} }); err != nil {
+			t.Fatal(err)
+		}
+		want := contract.ServicesStatus{MySQL: contract.ServiceStatus{Installed: true, Version: "8.4.13", Active: active}}
+		if got := getStatus(t, d).Services; got != want {
+			t.Errorf("active = %v: services = %+v, want %+v", active, got, want)
+		}
+	}
+}
+
+func TestStatusRefusesACorruptServicesFile(t *testing.T) {
+	d := statusDeps(t, sysexec.NewFakeRunner(nginxV(t)))
+	if err := os.MkdirAll(d.Paths.StateDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(d.Paths.ServicesState(), []byte(`{"mysql":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := statusHandler(t, d)(context.Background(), &contract.SystemStatusParams{}); err == nil {
+		t.Error("system.status ignored a corrupt services.json")
+	}
 }
