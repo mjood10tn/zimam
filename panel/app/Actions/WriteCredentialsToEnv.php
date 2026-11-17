@@ -49,6 +49,25 @@ final class WriteCredentialsToEnv
     }
 
     /**
+     * The keys for a site's Valkey connection. The prefix is the site's own,
+     * the only keys its user can reach. CACHE_STORE, QUEUE_CONNECTION and
+     * SESSION_DRIVER stay as the site has them.
+     *
+     * @return array<string, string>
+     */
+    public static function valkeyValues(string $siteName, #[SensitiveParameter] string $password): array
+    {
+        return [
+            'REDIS_CLIENT' => 'phpredis',
+            'REDIS_HOST' => '127.0.0.1',
+            'REDIS_PORT' => '6379',
+            'REDIS_USERNAME' => SiteCredential::usernameFor($siteName),
+            'REDIS_PASSWORD' => $password,
+            'REDIS_PREFIX' => SiteCredential::usernameFor($siteName).':',
+        ];
+    }
+
+    /**
      * @param  array<string, string>  $values
      *
      * @throws AgentException when the site can't take a job now, the .env can't be read, the

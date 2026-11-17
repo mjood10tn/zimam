@@ -65,7 +65,7 @@ final class DatabaseOutcomes
         });
     }
 
-    private static function reason(AgentJobStatus $status, string $cancelledKey): string
+    public static function reason(AgentJobStatus $status, string $cancelledKey): string
     {
         return $status->status === AgentJob::CANCELLED ? __("zimam.{$cancelledKey}") : $status->message;
     }

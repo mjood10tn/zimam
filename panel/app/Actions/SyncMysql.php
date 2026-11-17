@@ -38,7 +38,7 @@ final class SyncMysql
             return false;
         }
         $mysql = $status->data['services']['mysql'];
-        $this->syncService($mysql);
+        SyncServiceRow::run(ServerService::MYSQL, $mysql);
 
         return ! $mysql['installed'] || $this->syncDatabases(new DbList);
     }
@@ -52,26 +52,6 @@ final class SyncMysql
         }
 
         return ! $status->data['services']['mysql']['installed'] || $this->syncDatabases(new DbList($site->name), $site);
-    }
-
-    /** @param array{installed: bool, version: string, active: bool} $mysql */
-    private function syncService(array $mysql): void
-    {
-        $row = ServerService::named(ServerService::MYSQL);
-        if ($row !== null && $row->jobs()->whereNotIn('status', AgentJob::FINISHED)->exists()) {
-            return;
-        }
-        if ($mysql['installed']) {
-            ServerService::updateOrCreate(
-                ['name' => ServerService::MYSQL],
-                ['status' => ServerService::INSTALLED, 'version' => $mysql['version'], 'last_error' => null],
-            );
-        } elseif ($row !== null && in_array($row->status, [ServerService::INSTALLING, ServerService::FAILED], true)) {
-            // An install that ended without installing it, outcome or not.
-            $row->update(['status' => ServerService::FAILED]);
-        } else {
-            $row?->delete();
-        }
     }
 
     private function syncDatabases(DbList $command, ?Site $scope = null): bool

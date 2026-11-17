@@ -14,6 +14,7 @@ use App\Filament\Actions\ConfirmsPassword;
 use App\Filament\Resources\SiteResource;
 use App\Models\Certificate;
 use App\Models\Site;
+use App\Models\SiteCredential;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\Select;
@@ -73,7 +74,9 @@ class ViewSite extends ViewRecord
                         ->label(__('zimam.sites.delete.label'))
                         ->color('danger')
                         ->modalHeading(fn (Site $record): string => __('zimam.sites.delete.heading', ['name' => $record->name]))
-                        ->modalDescription(__('zimam.sites.delete.description'))
+                        ->modalDescription(fn (Site $record): string => $record->credentials()->where('kind', SiteCredential::VALKEY)->exists()
+                            ? __('zimam.sites.delete.description').' '.__('zimam.sites.delete.cache_keys')
+                            : __('zimam.sites.delete.description'))
                         ->modalSubmitActionLabel(__('zimam.sites.delete.label'))
                         ->visible(fn (Site $record): bool => in_array($record->status, [Site::ACTIVE, Site::FAILED], true))
                         ->action(fn (Site $record, array $data) => $this->delete($record, (bool) ($data['drop_databases'] ?? false))),

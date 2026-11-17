@@ -2,27 +2,19 @@
 
 namespace App\Filament\Resources\SiteResource\Pages;
 
-use App\Actions\SubmitAgentCommand;
 use App\Actions\SyncMysql;
 use App\Actions\WriteCredentialsToEnv;
 use App\Agent\AgentHealth;
 use App\Agent\Commands\DbUser;
-use App\Agent\Exceptions\AgentBusy;
-use App\Agent\Exceptions\AgentException;
-use App\Agent\Exceptions\AgentUnavailable;
-use App\Agent\Exceptions\AgentValidationFailed;
-use App\Filament\Actions\ConfirmsPassword;
-use App\Models\AgentJob;
+use App\Agent\Commands\ServiceUserCommand;
+use App\Filament\Concerns\RotatesServicePassword;
 use App\Models\ServerService;
 use App\Models\Site;
 use App\Models\SiteCredential;
-use Filament\Actions\Action;
 use Filament\Actions\Concerns\InteractsWithActions;
 use Filament\Actions\Contracts\HasActions;
-use Filament\Notifications\Notification;
 use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
-use Filament\Support\Exceptions\Halt;
 use Illuminate\Contracts\View\View;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
@@ -30,64 +22,20 @@ use SensitiveParameter;
 
 /**
  * A site's Database tab: its databases, its MySQL user, a new password and
- * writing the connection to .env.
- *
- * The password is made in the rotate request, sent to the agent once and
- * never kept. It is only in that response's HTML, inside a wire:ignore
- * block the browser keeps until the block is closed, and hidden there until
- * the job has succeeded. Writing it to .env sends the browser's copy as
- * writeEnv()'s argument, so it is only in that request. No snapshot,
- * table, log, notification, session or queue payload ever carries it.
+ * writing the connection to .env. The password is handled as
+ * RotatesServicePassword describes.
  */
 class DatabaseTab extends Component implements HasActions, HasSchemas
 {
     use InteractsWithActions;
     use InteractsWithSchemas;
+    use RotatesServicePassword;
 
     #[Locked]
     public Site $site;
 
-    /** The agent_jobs row of the password being set; null when no password is on screen. */
-    #[Locked]
-    public ?int $rotationJobId = null;
-
-    /** Changes with each rotation, so the browser swaps in the newly made password block. */
-    #[Locked]
-    public ?string $rotationKey = null;
-
-    /** The password is active: the job succeeded. */
-    #[Locked]
-    public bool $rotationDone = false;
-
-    /** Whether the user existed before this rotation, for what a failure says. */
-    #[Locked]
-    public bool $hadUser = false;
-
-    /** Why the last rotation failed, in words; the password is gone with it. */
-    #[Locked]
-    public ?string $rotationFailure = null;
-
-    /** When the password was confirmed (a Unix time): writing .env needs it as fresh as a confirmation lasts. */
-    #[Locked]
-    public ?int $confirmedAt = null;
-
-    /**
-     * A keyed hash of the password made here, so writeEnv() takes only that
-     * password back from the browser, not any string of the right shape. The
-     * key is the app key, so the hash of a 256-bit random value reveals nothing.
-     */
-    #[Locked]
-    public ?string $passwordProof = null;
-
-    /** The .env was written with this password. */
-    #[Locked]
-    public bool $envWritten = false;
-
-    /** The database for DB_DATABASE; checked against the site's own in writeEnv(). */
+    /** The database for DB_DATABASE; checked against the site's own in envValues(). */
     public ?string $envDatabase = null;
-
-    /** The new password, only in the response of the request that made it. */
-    private ?string $password = null;
 
     public function mount(): void
     {
@@ -102,181 +50,49 @@ class DatabaseTab extends Component implements HasActions, HasSchemas
         return ServerService::named(ServerService::MYSQL)?->status === ServerService::INSTALLED;
     }
 
-    public function rotateAction(): Action
+    protected function credentialKind(): string
     {
-        return AgentHealth::guard(
-            ConfirmsPassword::apply(
-                Action::make('rotate')
-                    ->label(fn (): string => $this->credential() === null ? __('zimam.databases.rotate.label_first') : __('zimam.databases.rotate.label'))
-                    ->modalHeading(fn (): string => __('zimam.databases.rotate.heading', ['user' => SiteCredential::usernameFor($this->site->name)]))
-                    ->modalDescription(__('zimam.databases.rotate.description'))
-                    ->modalSubmitActionLabel(__('zimam.databases.rotate.submit'))
-                    ->action(fn () => $this->rotate()),
-            ),
-            fn (): ?string => match (true) {
-                ! $this->mysqlInstalled() => __('zimam.databases.rotate.not_installed'),
-                ($blocker = $this->site->jobBlocker()) !== null => $blocker,
-                default => null,
-            },
-        );
+        return SiteCredential::MYSQL;
     }
 
-    private function credential(): ?SiteCredential
+    protected function lang(): string
     {
-        return $this->site->credentials()->where('kind', SiteCredential::MYSQL)->first();
+        return 'databases';
     }
 
-    /**
-     * Makes the password, sends it as db.user and keeps it for this
-     * response's HTML only. A busy site is refused instead of queued, since
-     * a queued command would hold the password.
-     */
-    private function rotate(): void
+    protected function serviceInstalled(): bool
     {
-        if (($blocker = $this->site->jobBlocker()) !== null) {
-            Notification::make()->title($blocker)->warning()->send();
-
-            return;
-        }
-        $user = SiteCredential::usernameFor($this->site->name);
-        $password = DbUser::generatePassword();
-        $hadUser = $this->credential() !== null;
-        try {
-            $job = app(SubmitAgentCommand::class)->run(new DbUser($this->site->name, $password), $this->site, waitWhenBusy: false);
-        } catch (Halt) {
-            return;
-        } catch (AgentBusy) {
-            Notification::make()->title(__('zimam.databases.rotate.busy'))->warning()->send();
-
-            return;
-        } catch (AgentException $e) {
-            Notification::make()
-                ->title(__('zimam.databases.rotate.refused'))
-                ->body($e instanceof AgentValidationFailed && $e->fields() !== [] ? implode(' ', $e->fields()) : $e->getMessage())
-                ->danger()
-                ->send();
-
-            return;
-        }
-        $this->rotationJobId = $job->id;
-        $this->rotationKey = bin2hex(random_bytes(8));
-        $this->rotationDone = false;
-        $this->rotationFailure = null;
-        $this->hadUser = $hadUser;
-        $this->confirmedAt = now()->getTimestamp();
-        $this->envWritten = false;
-        $this->passwordProof = self::proof($password);
-        $this->password = $password;
-        Notification::make()->title(__('zimam.databases.rotate.submitted', ['user' => $user]))->success()->send();
+        return $this->mysqlInstalled();
     }
 
-    /** Polled while the password is being set: follows its job, and drops the password block if the job failed. */
-    public function refreshRotation(): void
+    protected function passwordCommand(#[SensitiveParameter] string $password): ServiceUserCommand
     {
-        $job = $this->rotationJobId === null ? null : AgentJob::find($this->rotationJobId);
-        if ($job === null || ! $job->isFinished()) {
-            return;
-        }
-        if ($job->status === AgentJob::SUCCEEDED) {
-            $this->rotationDone = true;
-
-            return;
-        }
-        $reason = (string) $job->error_message;
-        $this->rotationFailure = __($this->hadUser ? 'zimam.databases.rotate.failed_kept' : 'zimam.databases.rotate.failed_new', ['reason' => $reason]);
-        $this->closeRotation();
+        return new DbUser($this->site->name, $password);
     }
 
-    /** The password is shown once: closing it removes it from the page for good. */
-    public function closeRotation(): void
+    protected function envValues(#[SensitiveParameter] string $password): ?array
     {
-        $this->rotationJobId = null;
-        $this->rotationKey = null;
-        $this->rotationDone = false;
-        $this->confirmedAt = null;
-        $this->envWritten = false;
-        $this->passwordProof = null;
-        $this->password = null;
-    }
-
-    /**
-     * Sets the connection in the site's .env, with the password the browser
-     * still holds. Only after the job succeeded and while the confirmation
-     * of the password still holds; the browser's text is the only copy.
-     */
-    public function writeEnv(#[SensitiveParameter] mixed $password): void
-    {
-        $this->refreshRotation();
-        if ($this->rotationJobId === null || ! $this->rotationDone) {
-            return;
-        }
-        if ($this->confirmedAt === null || now()->getTimestamp() - $this->confirmedAt > (int) config('auth.password_timeout')) {
-            $this->closeRotation();
-            Notification::make()->title(__('zimam.databases.write_env.expired'))->warning()->send();
-
-            return;
-        }
         $this->resetErrorBag('envDatabase');
-        if (! is_string($password) || ! preg_match(DbUser::PASSWORD_PATTERN, $password)) {
-            return;
-        }
-        if ($this->passwordProof === null || ! hash_equals($this->passwordProof, self::proof($password))) {
-            Notification::make()->title(__('zimam.databases.write_env.mismatch'))->warning()->send();
-
-            return;
-        }
         $databases = $this->site->databases()->orderBy('name')->pluck('name')->all();
         if ($databases === []) {
             $this->addError('envDatabase', __('zimam.databases.write_env.no_database'));
 
-            return;
+            return null;
         }
         if (! in_array($this->envDatabase, $databases, true)) {
             $this->addError('envDatabase', __('zimam.databases.write_env.invalid_database'));
 
-            return;
+            return null;
         }
-        if (! app(AgentHealth::class)->isReachable()) {
-            Notification::make()->title(__('zimam.agent.paused'))->warning()->send();
 
-            return;
-        }
-        try {
-            app(WriteCredentialsToEnv::class)->run($this->site, WriteCredentialsToEnv::mysqlValues($this->site->name, $this->envDatabase, $password));
-        } catch (Halt) {
-            return;
-        } catch (AgentBusy) {
-            Notification::make()->title(__('zimam.databases.rotate.busy'))->warning()->send();
-
-            return;
-        } catch (AgentUnavailable) {
-            Notification::make()->title(__('zimam.agent.paused'))->warning()->send();
-
-            return;
-        } catch (AgentException $e) {
-            Notification::make()->title(__('zimam.databases.write_env.refused'))->body($e->getMessage())->danger()->send();
-
-            return;
-        }
-        $this->envWritten = true;
-        Notification::make()->title(__('zimam.databases.write_env.submitted', ['name' => $this->site->name]))->body(__('zimam.databases.submitted_body'))->success()->send();
-    }
-
-    private static function proof(#[SensitiveParameter] string $password): string
-    {
-        return hash_hmac('sha256', $password, (string) config('app.key'));
+        return WriteCredentialsToEnv::mysqlValues($this->site->name, $this->envDatabase, $password);
     }
 
     public function render(): View
     {
-        $job = $this->rotationJobId === null ? null : AgentJob::find($this->rotationJobId);
-
         return view('filament.sites.database-tab', [
-            'password' => $this->password,
+            ...$this->rotationViewData(),
             'databases' => $this->site->databases()->orderBy('name')->get(),
-            'credential' => $this->credential(),
-            'installed' => $this->mysqlInstalled(),
-            'pending' => $job !== null && ! $job->isFinished(),
         ]);
     }
 }

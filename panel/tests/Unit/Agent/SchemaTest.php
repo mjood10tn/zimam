@@ -5,6 +5,7 @@ namespace Tests\Unit\Agent;
 use App\Agent\AgentCommand;
 use App\Agent\AgentCommandKind;
 use App\Agent\Commands\AgentVersion;
+use App\Agent\Commands\CacheUser;
 use App\Agent\Commands\CertIssue;
 use App\Agent\Commands\DbCreate;
 use App\Agent\Commands\DbDrop;
@@ -34,6 +35,7 @@ use App\Agent\Commands\SiteRollback;
 use App\Agent\Commands\SiteSecurity;
 use App\Agent\Commands\SystemMetrics;
 use App\Agent\Commands\SystemStatus;
+use App\Agent\Commands\ValkeyInstall;
 use App\Agent\Exceptions\AgentException;
 use App\Agent\Exceptions\AgentNotFound;
 use App\Agent\Exceptions\AgentValidationFailed;
@@ -72,6 +74,8 @@ final class SchemaTest extends TestCase
         'db.create' => 120,
         'db.drop' => 300,
         'db.user' => 120,
+        'valkey.install' => 600,
+        'cache.user' => 120,
         'e2e.sleep' => 180,
     ];
 
@@ -98,6 +102,8 @@ final class SchemaTest extends TestCase
             new DbCreate('shop', 's_shop_main'),
             new DbDrop('shop', 's_shop_main'),
             new DbUser('shop', DbUser::generatePassword()),
+            new ValkeyInstall,
+            new CacheUser('shop', CacheUser::generatePassword()),
             new CertIssue('shop'),
             new SiteRepo('shop', 'octo/shop', 'release/2.x', rotateKey: true),
             new SiteDeploy('shop', 'manual', composer: true, keepReleases: 5, script: "php artisan migrate --force\n", commit: str_repeat('a1', 20)),
@@ -122,7 +128,12 @@ final class SchemaTest extends TestCase
     {
         $checked = array_map(fn (array $c): string => $c[0]::class, self::commands());
         foreach (glob(app_path('Agent/Commands/*.php')) as $file) {
-            $this->assertContains('App\\Agent\\Commands\\'.basename($file, '.php'), $checked);
+            $class = 'App\\Agent\\Commands\\'.basename($file, '.php');
+            // The abstract base of the commands that set a service user's password sends nothing itself.
+            if ((new \ReflectionClass($class))->isAbstract()) {
+                continue;
+            }
+            $this->assertContains($class, $checked);
         }
     }
 
@@ -188,6 +199,14 @@ final class SchemaTest extends TestCase
         $final = $bare->follow($bare->submit(new MysqlInstall)->id, 0, function (): void {});
         $this->assertSame('succeeded', $final->status);
         $this->assertResult('mysql.install', $final->result, 'fake mysql.install result');
+
+        $valkey = (new FakeAgentClient)->installValkey();
+        $final = $valkey->follow($valkey->submit(new CacheUser('shop', CacheUser::generatePassword()))->id, 0, function (): void {});
+        $this->assertSame('succeeded', $final->status);
+        $this->assertResult('cache.user', $final->result, 'fake cache.user result');
+        $final = $bare->follow($bare->submit(new ValkeyInstall)->id, 0, function (): void {});
+        $this->assertSame('succeeded', $final->status);
+        $this->assertResult('valkey.install', $final->result, 'fake valkey.install result');
 
         $fake->database('shop', 's_shop_main', 4096);
         $this->assertResult('db.list', $fake->call(new DbList('shop'))->data, 'db.list with a database');

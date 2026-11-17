@@ -10,6 +10,7 @@ use App\Agent\FakeJobLogReader;
 use App\Agent\FileJobLogReader;
 use App\Agent\JobLogReader;
 use App\Agent\JobOutcomes;
+use App\Agent\Outcomes\CacheOutcomes;
 use App\Agent\Outcomes\CertificateOutcomes;
 use App\Agent\Outcomes\DatabaseOutcomes;
 use App\Agent\Outcomes\DeploymentOutcomes;
@@ -39,6 +40,7 @@ class AgentServiceProvider extends ServiceProvider
             CertificateOutcomes::register($outcomes);
             DeploymentOutcomes::register($outcomes);
             DatabaseOutcomes::register($outcomes);
+            CacheOutcomes::register($outcomes);
 
             return $outcomes;
         });

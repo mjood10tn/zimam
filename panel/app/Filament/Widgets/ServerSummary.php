@@ -37,6 +37,7 @@ class ServerSummary extends Widget
     protected function rows(array $data): array
     {
         $mysql = $data['services']['mysql'] ?? [];
+        $valkey = $data['services']['valkey'] ?? [];
 
         return array_values(array_filter([
             [__('zimam.server.agent'), __('zimam.server.agent_value', [
@@ -47,6 +48,7 @@ class ServerSummary extends Widget
             [__('zimam.server.php'), $this->php($data['php'] ?? [])],
             // Nothing is said of a service that isn't installed.
             ($mysql['installed'] ?? false) ? [__('zimam.server.mysql'), __($mysql['active'] ? 'zimam.server.mysql_active' : 'zimam.server.mysql_inactive', ['version' => $mysql['version']])] : null,
+            ($valkey['installed'] ?? false) ? [__('zimam.server.valkey'), __($valkey['active'] ? 'zimam.server.valkey_active' : 'zimam.server.valkey_inactive', ['version' => $valkey['version']])] : null,
             [__('zimam.server.panel_domain'), (string) ($data['panel_domain'] ?? '')],
             [__('zimam.server.acme'), match ($data['acme_directory'] ?? null) {
                 self::LETS_ENCRYPT => __('zimam.server.acme_production'),

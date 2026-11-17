@@ -85,6 +85,9 @@ final class FakeAgentClient implements AgentClient
     /** @var array<string, true> the sites with a MySQL user, as succeeded db.user jobs left them */
     private array $dbUsers = [];
 
+    /** @var array<string, true> the sites with a Valkey user, as succeeded cache.user jobs left them */
+    private array $cacheUsers = [];
+
     /** How many deploys took the branch's head: each gets its own commit. */
     private int $heads = 0;
 
@@ -164,6 +167,28 @@ final class FakeAgentClient implements AgentClient
         $this->systemStatus['services']['mysql'] = ['installed' => true, 'version' => $version, 'active' => true];
 
         return $this;
+    }
+
+    /** Installs Valkey on the fake's server, as a succeeded valkey.install would. */
+    public function installValkey(string $version = '9.0.4'): static
+    {
+        $this->systemStatus['services']['valkey'] = ['installed' => true, 'version' => $version, 'active' => true];
+
+        return $this;
+    }
+
+    /** Gives a site a Valkey user on the fake's server, as a succeeded cache.user would. */
+    public function cacheUser(string $site): static
+    {
+        $this->cacheUsers[$site] = true;
+
+        return $this;
+    }
+
+    /** The sites that have a Valkey user on the fake's server. */
+    public function cacheUserNames(): array
+    {
+        return array_keys($this->cacheUsers);
     }
 
     /** Puts a database on the fake's MySQL, as a succeeded db.create would. */
@@ -297,6 +322,9 @@ final class FakeAgentClient implements AgentClient
                 throw new AgentConflict("Site {$name} still has databases. Delete them first, or delete the site with its databases.");
             }
         }
+        if (str_starts_with($command->name(), 'cache.') && ! $this->systemStatus['services']['valkey']['installed']) {
+            throw new AgentConflict("Valkey isn't installed on this server. Install it first.");
+        }
         if (str_starts_with($command->name(), 'db.')) {
             $this->precheckDatabase($command);
 
@@ -374,7 +402,8 @@ final class FakeAgentClient implements AgentClient
             'site.destroy', 'site.security', 'site.env.write' => ['name' => $params['name']],
             'mysql.install' => ['version' => '8.4.13'],
             'db.create', 'db.drop' => ['site' => $params['site'], 'database' => $params['database']],
-            'db.user' => ['site' => $params['site']],
+            'db.user', 'cache.user' => ['site' => $params['site']],
+            'valkey.install' => ['version' => '9.0.4'],
             'security.check' => self::securityFindings($params),
             'logs.policy' => $params,
             // Let's Encrypt's certificates last 90 days.
@@ -548,6 +577,8 @@ final class FakeAgentClient implements AgentClient
             'db.create' => $this->database($params['site'], $params['database']),
             'db.drop' => $this->databases = array_diff_key($this->databases, [$params['database'] => true]),
             'db.user' => $this->dbUsers[$params['site']] = true,
+            'valkey.install' => $this->installValkey($result['version'] ?? '9.0.4'),
+            'cache.user' => $this->cacheUser($params['site']),
             default => null,
         };
     }
@@ -574,7 +605,7 @@ final class FakeAgentClient implements AgentClient
 
     private function forget(string $name): void
     {
-        unset($this->repositories[$name], $this->releases[$name], $this->envs[$name], $this->dbUsers[$name]);
+        unset($this->repositories[$name], $this->releases[$name], $this->envs[$name], $this->dbUsers[$name], $this->cacheUsers[$name]);
         $this->databases = array_filter($this->databases, fn (array $database): bool => $database['site'] !== $name);
     }
 
@@ -680,7 +711,7 @@ final class FakeAgentClient implements AgentClient
 
             return;
         }
-        if (in_array($command->name(), ['db.create', 'db.drop', 'db.user'], true)) {
+        if (in_array($command->name(), ['db.create', 'db.drop', 'db.user', 'cache.user'], true)) {
             $this->validateDatabase($command->name(), $params);
 
             return;
@@ -740,7 +771,7 @@ final class FakeAgentClient implements AgentClient
     }
 
     /**
-     * The agent's checks of the db.* params: the site, the password's
+     * The agent's checks of the db.* and cache.user params: the site, the password's
      * alphabet, and a database name with its site's prefix, within
      * MySQL's limit on a grant's database name.
      *
@@ -752,10 +783,10 @@ final class FakeAgentClient implements AgentClient
         if (! is_string($params['site'] ?? null) || ! preg_match(self::SITE_NAME, $params['site']) || in_array($params['site'], self::RESERVED_NAMES, true)) {
             $fields['site'] = 'must be 2–24 lowercase letters, digits or hyphens, start with a letter and not end with a hyphen';
         }
-        if ($command === 'db.user' && ! preg_match('/^[A-Za-z0-9_-]{24,64}\z/', (string) ($params['password'] ?? ''))) {
+        if (in_array($command, ['db.user', 'cache.user'], true) && ! preg_match('/^[A-Za-z0-9_-]{24,64}\z/', (string) ($params['password'] ?? ''))) {
             $fields['password'] = 'must be 24–64 letters, digits, underscores or hyphens';
         }
-        if ($command !== 'db.user') {
+        if (! in_array($command, ['db.user', 'cache.user'], true)) {
             $name = (string) ($params['database'] ?? '');
             $prefix = 's_'.str_replace('-', '_', (string) ($params['site'] ?? '')).'_';
             if (! preg_match('/^[a-z][a-z0-9_]{0,63}\z/', $name)) {
@@ -1027,6 +1058,9 @@ final class FakeAgentClient implements AgentClient
         // MySQL is monitored once it is installed, and not before.
         if ($this->systemStatus['services']['mysql']['installed']) {
             $services[] = ['unit' => 'mysql.service', 'active_state' => 'active', 'unit_file_state' => 'enabled'];
+        }
+        if ($this->systemStatus['services']['valkey']['installed']) {
+            $services[] = ['unit' => 'valkey-server.service', 'active_state' => 'active', 'unit_file_state' => 'enabled'];
         }
         foreach (['zimam-agent.socket', 'zimam-panel-queue.service', 'zimam-panel-scheduler.timer', 'zimam-maintenance.timer', 'certbot.timer', 'ssh.socket'] as $unit) {
             $services[] = ['unit' => $unit, 'active_state' => 'active', 'unit_file_state' => 'enabled'];
