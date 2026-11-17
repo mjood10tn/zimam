@@ -72,10 +72,13 @@ func checkDbCreate(d sysexec.Deps, p contract.DbCreateParams) (sites.State, erro
 // If a step after the create fails, the database, which is still empty, is
 // dropped again and its grant revoked, so MySQL and the state file agree. A
 // database that was taken over existed before: only the grant is revoked,
-// and the database stays as it was. If that cleanup fails too, the error says
-// so, and creating the name again finishes it. The create itself is not
-// undone when its outcome is unknown (the job was cancelled or timed out):
-// the next create finds the database and takes it over.
+// and the database stays as it was. If that cleanup fails too, the database is
+// listed in the state anyway, as the site's, and the error says so (and that
+// db.drop removes it); if the state cannot be saved either, the error says the
+// database was left and that creating the name again adopts it.
+// The create itself is not undone when its outcome is unknown (the job was
+// cancelled or timed out): the next create finds the database and takes it
+// over.
 func dbCreate(ctx context.Context, j *jobs.Context, p contract.Params) (any, error) {
 	params := *p.(*contract.DbCreateParams)
 	d := j.Deps()
@@ -118,13 +121,21 @@ func dbCreate(ctx context.Context, j *jobs.Context, p contract.Params) (any, err
 			}
 			return cause
 		}
-		var extra string
 		if created {
 			d.Logf("Could not drop the new database %s again: %v", db, uerr)
-			extra = fmt.Sprintf("The empty database %s was left in MySQL (cleaning up failed: %v); creating it again will take it over.", db, uerr)
 		} else {
 			d.Logf("Could not revoke the grant on %s again: %v", db, uerr)
-			extra = fmt.Sprintf("The site's grant on the existing database %s may remain (cleaning up failed: %v); creating it again will clear it.", db, uerr)
+		}
+		// The database is in MySQL, and may hold the site's grant. Listing it in
+		// the state makes it the site's: db.list shows it, db.user accepts its
+		// grant and db.drop removes it.
+		var extra string
+		if serr := keepDatabase(d, st, db); serr == nil {
+			d.Logf("Listed %s in site %s's state, since cleaning up failed", db, params.Site)
+			extra = fmt.Sprintf("The database %s was kept (cleaning up failed: %v) and is listed under the site; drop it with db.drop if it isn't wanted.", db, uerr)
+		} else {
+			d.Logf("Could not list %s in site %s's state: %v", db, params.Site, serr)
+			extra = fmt.Sprintf("The database %s was left in MySQL, not in the site's state (cleaning up failed: %v; saving the state failed: %v). Running db.create for %s again adopts it.", db, uerr, serr, db)
 		}
 		// The job records only an AgentError's own message, so the text goes
 		// into a copy of it.
@@ -152,4 +163,13 @@ func dbCreate(ctx context.Context, j *jobs.Context, p contract.Params) (any, err
 		return nil, undo(fmt.Errorf("saving site %s's state: %w", params.Site, err))
 	}
 	return contract.DatabaseResult{Site: params.Site, Database: db}, nil
+}
+
+// keepDatabase saves the site's state with db added to its databases.
+func keepDatabase(d sysexec.Deps, st sites.State, db contract.DatabaseName) error {
+	if !slices.Contains(st.Databases, db) {
+		st.Databases = append(slices.Clone(st.Databases), db)
+		slices.Sort(st.Databases)
+	}
+	return sites.Save(d.Paths, st)
 }

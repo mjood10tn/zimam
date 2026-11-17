@@ -177,7 +177,7 @@ func TestFailedUndoAfterATakeoverIsInTheRecordedMessage(t *testing.T) {
 	e.answer("", "ERROR 2013 (HY000): Lost connection to MySQL server")
 	_, err := e.job(t, "db.create", create("blog", "s_blog_a"))
 	ae := wantCode(t, err, contract.ErrConflict)
-	for _, want := range []string{"isn't running", "may remain", "creating it again will clear it"} {
+	for _, want := range []string{"isn't running", "s_blog_a was kept", "db.drop"} {
 		if !strings.Contains(ae.Message, want) {
 			t.Errorf("message %q lacks %q", ae.Message, want)
 		}

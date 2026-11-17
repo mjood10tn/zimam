@@ -682,7 +682,7 @@ func TestCreateCleanupFailureIsInTheRecordedMessage(t *testing.T) {
 	e.answer("", "ERROR 2013 (HY000): Lost connection to MySQL server")
 	_, err := e.job(t, "db.create", create("blog", "s_blog_a"))
 	ae := wantCode(t, err, contract.ErrConflict)
-	for _, want := range []string{"isn't running", "s_blog_a was left in MySQL", "take it over"} {
+	for _, want := range []string{"isn't running", "s_blog_a was kept", "db.drop"} {
 		if !strings.Contains(ae.Message, want) {
 			t.Errorf("message %q lacks %q", ae.Message, want)
 		}

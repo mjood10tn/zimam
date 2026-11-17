@@ -126,6 +126,11 @@ func requireOnlyOwnPrivileges(ctx context.Context, d sysexec.Deps, site contract
 			if ownEscaped[p.Object] {
 				continue
 			}
+			// The site's own grant, in Zimam's form, on a database its state
+			// doesn't list: a create that didn't finish.
+			if name := unescapedGrant(p.Object); name != "" && name.BelongsTo(site) {
+				return conflict("The MySQL account '%s'@'%s' holds a grant on the database %s, which site %s doesn't list: an earlier db.create didn't finish. Run db.create for %s to finish it.", p.User, p.Host, name, site, name)
+			}
 		case mysql.PrivTable, mysql.PrivRoutine, mysql.PrivColumn:
 			if ownEscaped[p.Object] || ownPlain[p.Object] {
 				continue
@@ -138,4 +143,15 @@ func requireOnlyOwnPrivileges(ctx context.Context, d sysexec.Deps, site contract
 		return conflict("The MySQL account '%s'@'%s' holds a %s that Zimam did not give. Zimam won't give it a password until that is removed.", p.User, p.Host, what)
 	}
 	return nil
+}
+
+// unescapedGrant is the database a grant pattern names when the pattern is
+// Zimam's own form of a valid database name (every underscore escaped), and
+// empty for anything else.
+func unescapedGrant(pattern string) contract.DatabaseName {
+	name := contract.DatabaseName(strings.ReplaceAll(pattern, `\_`, "_"))
+	if name.Validate() != nil || strings.ReplaceAll(string(name), "_", `\_`) != pattern {
+		return ""
+	}
+	return name
 }
