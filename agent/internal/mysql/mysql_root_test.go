@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -259,5 +260,17 @@ func TestObjectCountAgainstRealMySQL(t *testing.T) {
 	mustQuery(t, d, "DROP FUNCTION s_aa_cnt.f; CREATE EVENT s_aa_cnt.ev ON SCHEDULE EVERY 1 DAY DO SELECT 1;")
 	if n := count(); n != 1 {
 		t.Errorf("one event: %d", n)
+	}
+}
+
+// Every privilege column of mysql.user is one the account check reads.
+func TestGlobalPrivilegeColumnsMatchTheServer(t *testing.T) {
+	d := rootDeps(t)
+	if _, err := Install(context.Background(), d); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	cols := strings.Fields(mustQuery(t, d, "SELECT GROUP_CONCAT(COLUMN_NAME SEPARATOR ' ') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = 'mysql' AND TABLE_NAME = 'user' AND COLUMN_NAME LIKE '%\\_priv';"))
+	if !slices.Equal(slices.Sorted(slices.Values(cols)), slices.Sorted(slices.Values(globalPrivilegeColumns))) {
+		t.Errorf("mysql.user's privilege columns\n%v\ndiffer from the ones checked\n%v", cols, globalPrivilegeColumns)
 	}
 }

@@ -173,7 +173,7 @@ func TestDbCreateClearsOrRefusesOtherGrantsAgainstRealMySQL(t *testing.T) {
 		t.Fatalf("Install: %v", err)
 	}
 	cleanup := func() {
-		for _, db := range []string{"s_shop_x_a", "s_shop_x_c", "s_shop_x_d", "s_shop_x_pat"} {
+		for _, db := range []string{"s_shop_x_a", "s_shop_x_c", "s_shop_x_d", "s_shop_x_pat", "s_shop_x_t", "s_shop_x_r"} {
 			exec.Command("/usr/bin/mysql", "--protocol=socket", "--user=root", "--execute=DROP DATABASE IF EXISTS "+db).Run()
 		}
 		for _, u := range []string{"s_shop'@'localhost", "s_shop'@'127.0.0.1", "s_shop-x'@'localhost", "s_shop-x'@'127.0.0.1", "hand'@'localhost", "hand2'@'localhost"} {
@@ -235,8 +235,8 @@ func TestDbCreateClearsOrRefusesOtherGrantsAgainstRealMySQL(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("grantees of %s after the takeover: %v", db, after)
-		if len(after) != 2 || after[0] != (mysql.Grantee{User: "s_shop-x", Host: "127.0.0.1", Pattern: strings.ReplaceAll(string(db), "_", `\_`)}) ||
-			after[1] != (mysql.Grantee{User: "s_shop-x", Host: "localhost", Pattern: strings.ReplaceAll(string(db), "_", `\_`)}) {
+		if len(after) != 2 || after[0] != (mysql.Grantee{Kind: mysql.PrivDatabase, User: "s_shop-x", Host: "127.0.0.1", Pattern: strings.ReplaceAll(string(db), "_", `\_`)}) ||
+			after[1] != (mysql.Grantee{Kind: mysql.PrivDatabase, User: "s_shop-x", Host: "localhost", Pattern: strings.ReplaceAll(string(db), "_", `\_`)}) {
 			t.Errorf("grantees of %s after the takeover: %v, want only shop-x's two accounts", db, after)
 		}
 		if out, err := asMySQLUser(t, "s_shop", pwShop, "SHOW TABLES FROM "+string(db)); err == nil || !strings.Contains(out, "ERROR 1044") {
@@ -259,6 +259,39 @@ func TestDbCreateClearsOrRefusesOtherGrantsAgainstRealMySQL(t *testing.T) {
 	}
 	if g, _ := mysql.Grantees(ctx, d, "s_shop_x_d"); len(g) != 1 || g[0].User != "hand" {
 		t.Errorf("grantees of s_shop_x_d after the refusal: %v", g)
+	}
+
+	// Grants on a table or a routine of the name, which Zimam never makes,
+	// refuse a takeover too, even on a site's own account, and are not
+	// revoked. MySQL keeps them after the database is gone, so they are
+	// found by name alone.
+	rootSQL(t, "CREATE DATABASE s_shop_x_t")
+	rootSQL(t, "CREATE TABLE s_shop_x_t.t (id INT)")
+	rootSQL(t, "GRANT SELECT ON s_shop_x_t.t TO 's_shop'@'localhost'")
+	// The table goes, its grant stays, and the database is empty again.
+	rootSQL(t, "DROP TABLE s_shop_x_t.t")
+	err = run("shop-x", "s_shop_x_t")
+	if !errors.As(err, &ae) || ae.Code != contract.ErrConflict || !strings.Contains(ae.Message, "'s_shop'@'localhost'") || !strings.Contains(ae.Message, "table grant") {
+		t.Errorf("db.create over a table grant: %v", err)
+	}
+	if g, _ := mysql.Grantees(ctx, d, "s_shop_x_t"); len(g) != 1 || g[0].Kind != mysql.PrivTable || g[0].User != "s_shop" {
+		t.Errorf("grantees of s_shop_x_t after the refusal: %v", g)
+	}
+	rootSQL(t, "CREATE DATABASE s_shop_x_r")
+	// A routine grant whose routine is gone, as a hand-made row leaves it.
+	rootSQL(t, "INSERT INTO mysql.procs_priv (Host, Db, User, Routine_name, Routine_type, Grantor, Proc_priv) VALUES ('127.0.0.1', 's_shop_x_r', 's_shop', 'p', 'PROCEDURE', 'root@localhost', 'Execute')")
+	rootSQL(t, "FLUSH PRIVILEGES")
+	err = run("shop-x", "s_shop_x_r")
+	if !errors.As(err, &ae) || ae.Code != contract.ErrConflict || !strings.Contains(ae.Message, "routine grant") {
+		t.Errorf("db.create over a routine grant: %v", err)
+	}
+	// Dropping the table and the database does not remove the grant: it is
+	// still found, and still refuses.
+	rootSQL(t, "DROP DATABASE s_shop_x_t")
+	rootSQL(t, "DELETE FROM mysql.procs_priv WHERE Db = 's_shop_x_r'")
+	rootSQL(t, "FLUSH PRIVILEGES")
+	if g, _ := mysql.Grantees(ctx, d, "s_shop_x_t"); len(g) != 1 || g[0].Kind != mysql.PrivTable {
+		t.Errorf("grantees of the dropped s_shop_x_t: %v, want the table grant to outlive it", g)
 	}
 
 	// A wildcard grant that covers a new name refuses it, and the database

@@ -441,3 +441,63 @@ func TestLockedUntilThePasswordStatementAgainstRealMySQL(t *testing.T) {
 		t.Error("the new password works after a failed alter")
 	}
 }
+
+// db.user refuses an account that someone gave more than the site's own
+// grants, whatever it was given, and leaves it with the password it had; a
+// clean account is unlocked as before.
+func TestDbUserRefusesForeignPrivilegesAgainstRealMySQL(t *testing.T) {
+	const (
+		pwOne contract.ServicePassword = "Ff1_ffffffffffffffffffffffffff-F"
+		pwTwo contract.ServicePassword = "Gg2-gggggggggggggggggggggggggg_G"
+	)
+	e := newUserEnv(t)
+	e.wipe("uf")
+	t.Cleanup(func() { e.wipe("uf") })
+	e.newSite("uf")
+	if err := e.run("db.create", &contract.DbCreateParams{Site: "uf", Database: "s_uf_main"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.run("db.user", &contract.DbUserParams{Site: "uf", Password: pwOne}); err != nil {
+		t.Fatalf("a clean account: %v", err)
+	}
+	e.mustReach("s_uf", pwOne, "SELECT 1")
+
+	// The grants of the site's own database, as Zimam gives them, hold no
+	// foreign privilege.
+	held, err := mysql.AccountPrivileges(e.ctx, e.d, "uf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range held {
+		if p.Kind != mysql.PrivDatabase || p.Object != `s\_uf\_main` {
+			t.Errorf("a clean site account holds %+v", p)
+		}
+	}
+
+	for name, tc := range map[string]struct{ grant, revoke, want string }{
+		"a global privilege":         {"GRANT PROCESS ON *.* TO 's_uf'@'localhost'", "REVOKE PROCESS ON *.* FROM 's_uf'@'localhost'", "global privilege"},
+		"a dynamic privilege":        {"GRANT SYSTEM_VARIABLES_ADMIN ON *.* TO 's_uf'@'127.0.0.1'", "REVOKE SYSTEM_VARIABLES_ADMIN ON *.* FROM 's_uf'@'127.0.0.1'", "dynamic privilege on SYSTEM_VARIABLES_ADMIN"},
+		"a database that is not its": {"GRANT SELECT ON `mysql`.* TO 's_uf'@'localhost'", "REVOKE SELECT ON `mysql`.* FROM 's_uf'@'localhost'", "database privilege on mysql"},
+		"a table elsewhere":          {"GRANT SELECT ON mysql.user TO 's_uf'@'localhost'", "REVOKE SELECT ON mysql.user FROM 's_uf'@'localhost'", "table privilege on mysql"},
+		"a wildcard database":        {"GRANT SELECT ON `s\\_uf\\_%`.* TO 's_uf'@'localhost'", "REVOKE SELECT ON `s\\_uf\\_%`.* FROM 's_uf'@'localhost'", "database privilege on s\\_uf\\_%"},
+		"the grant option":           {"GRANT SELECT ON `s\\_uf\\_main`.* TO 's_uf'@'localhost' WITH GRANT OPTION", "REVOKE GRANT OPTION ON `s\\_uf\\_main`.* FROM 's_uf'@'localhost'", "grant option privilege"},
+	} {
+		rootSQL(t, tc.grant)
+		err := e.run("db.user", &contract.DbUserParams{Site: "uf", Password: pwTwo})
+		var ae *contract.AgentError
+		if !errors.As(err, &ae) || ae.Code != contract.ErrConflict || !strings.Contains(ae.Message, tc.want) {
+			t.Errorf("%s: db.user = %v, want a conflict naming %q", name, err, tc.want)
+		}
+		// The old password still works and the new one doesn't.
+		e.mustReach("s_uf", pwOne, "SELECT 1")
+		e.mustBeDenied("s_uf", pwTwo, "SELECT 1", 1045)
+		rootSQL(t, tc.revoke)
+		if err := e.run("db.user", &contract.DbUserParams{Site: "uf", Password: pwTwo}); err != nil {
+			t.Errorf("%s: db.user after the revoke: %v", name, err)
+		}
+		e.mustReach("s_uf", pwTwo, "SELECT 1")
+		if err := e.run("db.user", &contract.DbUserParams{Site: "uf", Password: pwOne}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

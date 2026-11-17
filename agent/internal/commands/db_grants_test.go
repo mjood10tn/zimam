@@ -10,7 +10,12 @@ import (
 // batchRow is a row of the grantee query as the client prints it: tab
 // separated, a backslash written as two.
 func batchRow(user, host, pattern string) string {
-	return user + "\t" + host + "\t" + strings.ReplaceAll(pattern, `\`, `\\`) + "\n"
+	return batchRowOfKind("database", user, host, pattern)
+}
+
+// batchRowOfKind is batchRow for a row of another grant table.
+func batchRowOfKind(kind, user, host, pattern string) string {
+	return kind + "\t" + user + "\t" + host + "\t" + strings.ReplaceAll(pattern, `\`, `\\`) + "\n"
 }
 
 // takeoverEnv is a server where blog (with a MySQL user) takes over the
@@ -178,3 +183,24 @@ func TestFailedUndoAfterATakeoverIsInTheRecordedMessage(t *testing.T) {
 		}
 	}
 }
+
+// Zimam makes no grant on a table, routine or column, so one that exists
+// was made by hand: it refuses the takeover, even on a site's own account,
+// and nothing is revoked.
+func TestTakeoverRefusesGrantsBelowTheDatabase(t *testing.T) {
+	for _, kind := range []string{mysqlPrivTable, "routine", "column"} {
+		e := takeoverEnv(t, batchRow("s_shop", "localhost", `s\_blog\_a`)+batchRowOfKind(kind, "s_shop", "127.0.0.1", "s_blog_a"))
+		before := e.stateFile(t, "blog")
+		_, err := e.job(t, "db.create", create("blog", "s_blog_a"))
+		ae := wantCode(t, err, contract.ErrConflict)
+		if !strings.Contains(ae.Message, "'s_shop'@'127.0.0.1'") || !strings.Contains(ae.Message, "a "+kind+" grant in s_blog_a") {
+			t.Errorf("%s: message %q", kind, ae.Message)
+		}
+		prefixes(t, e.sql(), "CREATE DATABASE", "SELECT (SELECT", "SET SESSION sql_mode")
+		if e.stateFile(t, "blog") != before {
+			t.Errorf("%s: state changed", kind)
+		}
+	}
+}
+
+const mysqlPrivTable = "table"

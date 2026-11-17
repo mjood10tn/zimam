@@ -26,8 +26,8 @@ const (
 	// what the live query answers on a server that runs Zimam's file with a
 	// 256M buffer pool: bind_address, local_infile, skip_name_resolve,
 	// secure_file_priv (MySQL adds the slash), innodb_buffer_pool_size,
-	// the mysqlx plugin's status and the version.
-	liveGood = "127.0.0.1\t0\t1\t/var/lib/mysql-files/\t268435456\tDISABLED\t8.4.13-0ubuntu0.26.04.2\n"
+	// log_bin, the mysqlx plugin's status and the version.
+	liveGood = "127.0.0.1\t0\t1\t/var/lib/mysql-files/\t268435456\t0\tDISABLED\t8.4.13-0ubuntu0.26.04.2\n"
 )
 
 var (
@@ -108,6 +108,7 @@ bind-address = 127.0.0.1
 mysqlx = OFF
 local_infile = OFF
 skip_name_resolve = ON
+disable_log_bin
 secure_file_priv = /var/lib/mysql-files
 innodb_buffer_pool_size = 256M
 `
@@ -148,7 +149,7 @@ func TestInstallSequence(t *testing.T) {
 	// SQL goes only on stdin. The live query reads exactly the settings that
 	// were rendered.
 	live := string(calls[5].Stdin)
-	for _, w := range []string{"@@bind_address", "@@local_infile", "@@skip_name_resolve", "@@secure_file_priv", "@@innodb_buffer_pool_size", "mysqlx", "@@version"} {
+	for _, w := range []string{"@@bind_address", "@@local_infile", "@@skip_name_resolve", "@@secure_file_priv", "@@innodb_buffer_pool_size", "@@log_bin", "mysqlx", "@@version"} {
 		if !strings.Contains(live, w) {
 			t.Errorf("the live query lacks %s:\n%s", w, live)
 		}
@@ -256,7 +257,7 @@ func TestBufferPoolFromMemTotal(t *testing.T) {
 
 func TestInstallRendersBufferPoolFromMemory(t *testing.T) {
 	e := newEnv(t, 64*gib/1024)
-	live := "127.0.0.1\t0\t1\t/var/lib/mysql-files/\t4294967296\tDISABLED\t8.4.13-0ubuntu0.26.04.2\n"
+	live := "127.0.0.1\t0\t1\t/var/lib/mysql-files/\t4294967296\t0\tDISABLED\t8.4.13-0ubuntu0.26.04.2\n"
 	for _, s := range []sysexec.Script{aptUpdate, aptInstall, client("auth_socket\n"), validate, restart, client(live)} {
 		e.run.Add(s)
 	}
@@ -281,7 +282,7 @@ func TestInstallAcceptsARoundedBufferPool(t *testing.T) {
 		"below":                {"134217728", false},
 	} {
 		e := newEnv(t, gib/1024)
-		live := "127.0.0.1\t0\t1\t/var/lib/mysql-files/\t" + tc.live + "\tDISABLED\t8.4.13-0ubuntu0.26.04.2\n"
+		live := "127.0.0.1\t0\t1\t/var/lib/mysql-files/\t" + tc.live + "\t0\tDISABLED\t8.4.13-0ubuntu0.26.04.2\n"
 		for _, s := range []sysexec.Script{aptUpdate, aptInstall, client("auth_socket\n"), validate, restart, client(live)} {
 			e.run.Add(s)
 		}
@@ -350,7 +351,7 @@ func TestBadConfigRestoresPrevious(t *testing.T) {
 			setup: func(e *testEnv) {
 				e.run.Add(validate)
 				e.run.Add(restart)
-				e.run.Add(client("0.0.0.0\t0\t1\t/var/lib/mysql-files/\t268435456\tDISABLED\t8.4.13-0ubuntu0.26.04.2\n"))
+				e.run.Add(client("0.0.0.0\t0\t1\t/var/lib/mysql-files/\t268435456\t0\tDISABLED\t8.4.13-0ubuntu0.26.04.2\n"))
 			},
 			want:  "bind_address",
 			calls: []string{line(validate), line(restart), line(client("")), line(validate), line(restart)},
@@ -359,7 +360,7 @@ func TestBadConfigRestoresPrevious(t *testing.T) {
 			setup: func(e *testEnv) {
 				e.run.Add(validate)
 				e.run.Add(restart)
-				e.run.Add(client("127.0.0.1\t0\t1\t/var/lib/mysql-files/\t268435456\tACTIVE\t8.4.13-0ubuntu0.26.04.2\n"))
+				e.run.Add(client("127.0.0.1\t0\t1\t/var/lib/mysql-files/\t268435456\t0\tACTIVE\t8.4.13-0ubuntu0.26.04.2\n"))
 			},
 			want:  "mysqlx",
 			calls: []string{line(validate), line(restart), line(client("")), line(validate), line(restart)},
@@ -401,7 +402,7 @@ func TestBadConfigWithoutPreviousFileRemovesOurs(t *testing.T) {
 	e.run.Add(client("auth_socket\n"))
 	e.run.Add(validate)
 	e.run.Add(restart)
-	e.run.Add(client("0.0.0.0\t0\t1\t/var/lib/mysql-files/\t268435456\tDISABLED\t8.4.13-0ubuntu0.26.04.2\n"))
+	e.run.Add(client("0.0.0.0\t0\t1\t/var/lib/mysql-files/\t268435456\t0\tDISABLED\t8.4.13-0ubuntu0.26.04.2\n"))
 	if _, err := Install(context.Background(), e.d); err == nil {
 		t.Fatal("Install succeeded with a live value that differs")
 	}
@@ -474,7 +475,7 @@ func TestRestoreDoesNotCompareLiveValues(t *testing.T) {
 	e.run.Add(client("auth_socket\n"))
 	e.run.Add(validate)
 	e.run.Add(restart)
-	e.run.Add(client("0.0.0.0\t0\t1\t/var/lib/mysql-files/\t268435456\tDISABLED\t8.4.13-0ubuntu0.26.04.2\n"))
+	e.run.Add(client("0.0.0.0\t0\t1\t/var/lib/mysql-files/\t268435456\t0\tDISABLED\t8.4.13-0ubuntu0.26.04.2\n"))
 	_, err := Install(context.Background(), e.d)
 	if err == nil || strings.Contains(err.Error(), "also fails") {
 		t.Fatalf("Install = %v, want only the first failure", err)
@@ -493,5 +494,19 @@ func TestInstallRefusesAnUnreadableMeminfo(t *testing.T) {
 	}
 	if _, err := os.Lstat(e.p.MySQLConf()); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("zz-zimam.cnf was written (Lstat: %v)", err)
+	}
+}
+
+// A server that still writes binary logs fails the live check: they record
+// CREATE USER statements and grow without bound.
+func TestLiveCheckRefusesBinaryLogs(t *testing.T) {
+	e := newEnv(t, gib/1024)
+	withBinlog := strings.Replace(liveGood, "268435456\t0\t", "268435456\t1\t", 1)
+	for _, s := range []sysexec.Script{aptUpdate, aptInstall, client("auth_socket\n"), validate, restart, client(withBinlog), validate} {
+		e.run.Add(s)
+	}
+	_, err := Install(context.Background(), e.d)
+	if err == nil || !strings.Contains(err.Error(), "log_bin") {
+		t.Fatalf("Install = %v, want a log_bin failure", err)
 	}
 }

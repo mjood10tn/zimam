@@ -75,24 +75,34 @@ func RevokeAllUnescaped(site contract.SiteName, name contract.DatabaseName) Stat
 }
 
 // DatabaseGrantees selects the accounts that hold privileges on the
-// database itself (not on a table, and not global): the user, the host and
-// the database pattern of every row of mysql.db that covers the name. MySQL
-// does the matching, so a grant written with escaped underscores, one with
-// the name as it is and one with a wildcard such as s\_shop\_% all show up.
-// The session sets its own sql_mode first: with NO_BACKSLASH_ESCAPES on the
-// server, the backslashes in a stored pattern would stop matching.
+// database or on something in it: the kind (a PrivDatabase, PrivTable,
+// PrivRoutine or PrivColumn constant), the user, the host and the database
+// of every row of mysql.db, mysql.tables_priv, mysql.procs_priv and
+// mysql.columns_priv that covers the name. MySQL does the matching, so a
+// grant written with escaped underscores, one with the name as it is and
+// one with a wildcard such as s\_shop\_% all show up. Global privileges are
+// not listed. The session sets its own sql_mode first: with
+// NO_BACKSLASH_ESCAPES on the server, the backslashes in a stored pattern
+// would stop matching.
 func DatabaseGrantees(name contract.DatabaseName) Statement {
 	const kind = "list grants on a database"
 	if err := name.Validate(); err != nil {
 		return invalid(kind, "the database name", err)
 	}
-	return Statement{kind: kind, sql: "SET SESSION sql_mode = '';\nSELECT User, Host, Db FROM mysql.db WHERE '" + string(name) + "' LIKE Db ORDER BY User, Host, Db;"}
+	n := "'" + string(name) + "'"
+	return Statement{kind: kind, sql: "SET SESSION sql_mode = '';\n" +
+		"SELECT 'database' AS kind, User, Host, Db FROM mysql.db WHERE " + n + " LIKE Db" +
+		" UNION ALL SELECT 'table', User, Host, Db FROM mysql.tables_priv WHERE " + n + " LIKE Db" +
+		" UNION ALL SELECT 'routine', User, Host, Db FROM mysql.procs_priv WHERE " + n + " LIKE Db" +
+		" UNION ALL SELECT 'column', User, Host, Db FROM mysql.columns_priv WHERE " + n + " LIKE Db" +
+		" ORDER BY 2, 3, 4, 1;"}
 }
 
-// Grantee is one row of mysql.db that covers a database: an account, and
-// the pattern the grant was written with.
+// Grantee is one row of a grant table that covers a database: its Kind (one
+// of the Priv constants), the account, and the pattern the grant was
+// written with.
 type Grantee struct {
-	User, Host, Pattern string
+	Kind, User, Host, Pattern string
 }
 
 // Grantees returns the accounts that hold privileges on the database.
@@ -103,10 +113,10 @@ func Grantees(ctx context.Context, d sysexec.Deps, name contract.DatabaseName) (
 	}
 	var out []Grantee
 	for _, r := range rows {
-		if len(r) != 3 {
+		if len(r) != 4 {
 			return nil, fmt.Errorf("MySQL answered %q to the query for a database's grants", strings.Join(r, "\t"))
 		}
-		out = append(out, Grantee{User: r[0], Host: r[1], Pattern: r[2]})
+		out = append(out, Grantee{Kind: r[0], User: r[1], Host: r[2], Pattern: r[3]})
 	}
 	return out, nil
 }

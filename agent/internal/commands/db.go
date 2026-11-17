@@ -107,8 +107,10 @@ func siteAccount(g mysql.Grantee) (contract.SiteName, bool) {
 //     Zimam writes it, or as it is): what an earlier create left behind when
 //     its cleanup failed. These are revoked, and the site's grant is made anew
 //     afterwards;
-//   - anything else, another user or host or a wildcard pattern such as
-//     s\_shop\_%: a conflict, and nothing is changed for it.
+//   - anything else, another user or host, a wildcard pattern such as
+//     s\_shop\_%, or a grant on a table, routine or column of the database
+//     (Zimam makes none, so one was made by hand and is never removed on
+//     its own): a conflict, and nothing is changed for it.
 //
 // The query is asked again after the revokes, and anything left refuses.
 func clearStaleGrants(ctx context.Context, d sysexec.Deps, db contract.DatabaseName) error {
@@ -124,7 +126,7 @@ func clearStaleGrants(ctx context.Context, d sysexec.Deps, db contract.DatabaseN
 	var todo []leftover
 	for _, g := range grantees {
 		site, ok := siteAccount(g)
-		if !ok || (g.Pattern != escaped && g.Pattern != string(db)) {
+		if !ok || g.Kind != mysql.PrivDatabase || (g.Pattern != escaped && g.Pattern != string(db)) {
 			return foreignGrant(db, g)
 		}
 		l := leftover{site, g.Pattern == escaped}
@@ -155,6 +157,10 @@ func clearStaleGrants(ctx context.Context, d sysexec.Deps, db contract.DatabaseN
 }
 
 func foreignGrant(db contract.DatabaseName, g mysql.Grantee) error {
-	return conflict("The database %s exists in MySQL with privileges that Zimam did not give: the account '%s'@'%s' holds a grant on %s. Zimam won't use it until that grant is removed.",
-		db, g.User, g.Host, g.Pattern)
+	what := "a grant on " + g.Pattern
+	if g.Kind != mysql.PrivDatabase {
+		what = "a " + g.Kind + " grant in " + g.Pattern
+	}
+	return conflict("The database %s exists in MySQL with privileges that Zimam did not give: the account '%s'@'%s' holds %s. Zimam won't use it until that grant is removed.",
+		db, g.User, g.Host, what)
 }

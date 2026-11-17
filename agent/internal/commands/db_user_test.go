@@ -41,12 +41,30 @@ func wantUserSQL(pw contract.ServicePassword) []string {
 		"CREATE USER IF NOT EXISTS " + both + " ACCOUNT LOCK;",
 		"GRANT ALL PRIVILEGES ON `s" + `\_shop\_a` + "`.* TO " + both + ";",
 		"GRANT ALL PRIVILEGES ON `s" + `\_shop\_b` + "`.* TO " + both + ";",
+		privilegeCheck,
 		"ALTER USER " + accounts + " ACCOUNT UNLOCK;",
 	}
 }
 
+// privilegeCheck stands for the statement that lists what the site's accounts
+// hold, which runs before the password is set. The statement itself is
+// checked in the mysql package.
+const privilegeCheck = "<account privileges>"
+
+func hideCheck(sql []string) []string {
+	out := make([]string, len(sql))
+	for i, s := range sql {
+		out[i] = s
+		if strings.HasPrefix(s, "SELECT 'global' AS kind") {
+			out[i] = privilegeCheck
+		}
+	}
+	return out
+}
+
 func equalSQL(t *testing.T, got, want []string) {
 	t.Helper()
+	got = hideCheck(got)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("SQL\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
@@ -72,7 +90,7 @@ func TestDbUserWired(t *testing.T) {
 // and the state records that the site has a user.
 func TestUserCreatedWithGrantsOnOwnDatabasesOnly(t *testing.T) {
 	e := shopWithDatabases(t)
-	for range 4 {
+	for range 5 {
 		e.answer("", "")
 	}
 	res, err := e.job(t, "db.user", userParams("shop", pwOne))
@@ -101,11 +119,12 @@ func TestUserForASiteWithoutDatabases(t *testing.T) {
 	e := newDBEnv(t)
 	e.answer("", "")
 	e.answer("", "")
+	e.answer("", "")
 	if _, err := e.job(t, "db.user", userParams("blog", pwOne)); err != nil {
 		t.Fatal(err)
 	}
 	got := e.sql()
-	if len(got) != 2 || !strings.HasPrefix(got[0], "CREATE USER IF NOT EXISTS") || !strings.HasPrefix(got[1], "ALTER USER") {
+	if len(got) != 3 || !strings.HasPrefix(got[0], "CREATE USER IF NOT EXISTS") || !strings.HasPrefix(got[1], "SELECT 'global'") || !strings.HasPrefix(got[2], "ALTER USER") {
 		t.Errorf("SQL = %q", got)
 	}
 	if !e.site(t, "blog").DBUser {
@@ -118,7 +137,7 @@ func TestUserForASiteWithoutDatabases(t *testing.T) {
 // file doesn't change.
 func TestRotateKeepsGrants(t *testing.T) {
 	e := shopWithDatabases(t)
-	for range 8 {
+	for range 10 {
 		e.answer("", "")
 	}
 	if _, err := e.job(t, "db.user", userParams("shop", pwOne)); err != nil {
@@ -128,7 +147,7 @@ func TestRotateKeepsGrants(t *testing.T) {
 	if _, err := e.job(t, "db.user", userParams("shop", pwTwo)); err != nil {
 		t.Fatal(err)
 	}
-	equalSQL(t, e.sql()[4:], wantUserSQL(pwTwo))
+	equalSQL(t, e.sql()[5:], wantUserSQL(pwTwo))
 	if got := e.stateFile(t, "shop"); got != before {
 		t.Errorf("state changed by a rotation:\n%s", got)
 	}
@@ -149,7 +168,8 @@ func TestDbUserFailurePoints(t *testing.T) {
 		"create fails":       {0, 1, "create user", false},
 		"first grant fails":  {1, 2, "grant", true},
 		"second grant fails": {2, 3, "grant", true},
-		"alter fails last":   {3, 4, "alter user", true},
+		"check fails":        {3, 4, "list account privileges", true},
+		"alter fails last":   {4, 5, "alter user", true},
 	}
 	for _, rotation := range []bool{false, true} {
 		for name, tc := range cases {
@@ -161,7 +181,7 @@ func TestDbUserFailurePoints(t *testing.T) {
 					e.saveSite(t, st)
 				}
 				before := e.stateFile(t, "shop")
-				for i := range 4 {
+				for i := range 5 {
 					if i == tc.step {
 						e.answer("", fail)
 					} else {
@@ -189,7 +209,7 @@ func TestDbUserFailurePoints(t *testing.T) {
 						alters++
 					}
 				}
-				if want := map[bool]int{true: 1, false: 0}[tc.step == 3]; alters != want {
+				if want := map[bool]int{true: 1, false: 0}[tc.step == 4]; alters != want {
 					t.Errorf("%d ALTER USER statements ran, want %d: the account is unlocked and given its password only after every grant", alters, want)
 				}
 				wantSaved := rotation || tc.savedNew
@@ -209,7 +229,7 @@ func TestDbUserFailurePoints(t *testing.T) {
 // keeps its old password (rotation).
 func TestOnlyTheLastStatementCarriesThePassword(t *testing.T) {
 	e := shopWithDatabases(t)
-	for range 4 {
+	for range 5 {
 		e.answer("", "")
 	}
 	if _, err := e.job(t, "db.user", userParams("shop", pwOne)); err != nil {
@@ -277,10 +297,10 @@ func TestDbUserWhileMySQLDownOrMissing(t *testing.T) {
 // and on each failure.
 func TestPasswordNeverInJobLogOrArgv(t *testing.T) {
 	const fail = "ERROR 1396 (HY000) at line 1: Operation failed"
-	for name, failAt := range map[string]int{"success": -1, "create fails": 0, "grant fails": 1, "alter fails": 3} {
+	for name, failAt := range map[string]int{"success": -1, "create fails": 0, "grant fails": 1, "alter fails": 4} {
 		t.Run(name, func(t *testing.T) {
 			e := shopWithDatabases(t)
-			for i := range 4 {
+			for i := range 5 {
 				if i == failAt {
 					e.answer("", fail)
 				} else {
@@ -380,5 +400,69 @@ func breakState(t *testing.T, e *dbEnv, name contract.SiteName) func() {
 		if err := os.Mkdir(e.p.SiteState(name), 0o700); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func privRow(kind, user, host, object string) string {
+	return kind + "\t" + user + "\t" + host + "\t" + strings.ReplaceAll(object, `\`, `\`) + "\n"
+}
+
+// An account that holds anything beyond grants on the site's own databases
+// (a global privilege, a role, the grant option, a grant on another
+// database, whatever the table it is in) is refused before the password is
+// set, so it stays locked or keeps its old password.
+func TestDbUserRefusesAccountsWithForeignPrivileges(t *testing.T) {
+	for name, tc := range map[string]struct{ row, want string }{
+		"a global privilege":            {privRow("global", "s_shop", "localhost", ""), "global privilege"},
+		"a dynamic privilege":           {privRow("dynamic", "s_shop", "127.0.0.1", "SYSTEM_VARIABLES_ADMIN"), "dynamic privilege on SYSTEM_VARIABLES_ADMIN"},
+		"a role":                        {privRow("role", "s_shop", "localhost", "admin"), "role privilege"},
+		"a proxy right":                 {privRow("proxy", "s_shop", "localhost", "root"), "proxy privilege"},
+		"another site's database":       {privRow("database", "s_shop", "localhost", `s\_blog\_a`), `on s\_blog\_a`},
+		"a wildcard on a database":      {privRow("database", "s_shop", "localhost", `s\_%`), `on s\_%`},
+		"a table of another database":   {privRow("table", "s_shop", "127.0.0.1", "mysql"), "table privilege on mysql"},
+		"a routine of another database": {privRow("routine", "s_shop", "127.0.0.1", "s_blog_a"), "routine privilege on s_blog_a"},
+		"a column of another database":  {privRow("column", "s_shop", "127.0.0.1", "s_blog_a"), "column privilege on s_blog_a"},
+		"the grant option":              {privRow("grant option", "s_shop", "localhost", `s\_shop\_a`), "grant option privilege on"},
+		"the database name as it is":    {privRow("database", "s_shop", "localhost", "s_shop_a"), "database privilege on s_shop_a"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := shopWithDatabases(t)
+			e.answer("", "")
+			e.answer("", "")
+			e.answer("", "")
+			e.answer(tc.row, "")
+			e.answer("", "")
+			_, err := e.job(t, "db.user", userParams("shop", pwOne))
+			ae := wantCode(t, err, contract.ErrConflict)
+			if !strings.Contains(ae.Message, tc.want) || !strings.Contains(ae.Message, "'s_shop'@'") {
+				t.Errorf("message %q, want it to hold %q", ae.Message, tc.want)
+			}
+			for _, s := range e.sql() {
+				if strings.HasPrefix(s, "ALTER USER") {
+					t.Errorf("the password was set: %s", s)
+				}
+			}
+			if n := len(e.sql()); n != 4 {
+				t.Errorf("%d statements ran, want create, two grants and the check", n)
+			}
+		})
+	}
+}
+
+// The site's own grants, as a database row and as table, routine and column
+// rows for its own databases, are no reason to refuse.
+func TestDbUserAcceptsGrantsOnItsOwnDatabases(t *testing.T) {
+	e := shopWithDatabases(t)
+	e.answer("", "")
+	e.answer("", "")
+	e.answer("", "")
+	e.answer(privRow("database", "s_shop", "localhost", `s\_shop\_a`)+privRow("database", "s_shop", "127.0.0.1", `s\_shop\_b`)+
+		privRow("table", "s_shop", "localhost", "s_shop_a")+privRow("routine", "s_shop", "localhost", `s\_shop\_b`)+privRow("column", "s_shop", "127.0.0.1", "s_shop_b"), "")
+	e.answer("", "")
+	if _, err := e.job(t, "db.user", userParams("shop", pwOne)); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(e.sql()); n != 5 {
+		t.Errorf("%d statements ran, want 5", n)
 	}
 }

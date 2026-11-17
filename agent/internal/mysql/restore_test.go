@@ -50,7 +50,7 @@ func TestInstallRestartsWhenAnUnchangedFileIsNotLive(t *testing.T) {
 	}
 }
 
-const badBind = "0.0.0.0\t0\t1\t/var/lib/mysql-files/\t268435456\tDISABLED\t8.4.13-0ubuntu0.26.04.2\n"
+const badBind = "0.0.0.0\t0\t1\t/var/lib/mysql-files/\t268435456\t0\tDISABLED\t8.4.13-0ubuntu0.26.04.2\n"
 
 // A previous file equal to the new one that still fails the live check:
 // the restore pass only puts things back, and the error is the first one.

@@ -4,5 +4,6 @@ bind-address = 127.0.0.1
 mysqlx = OFF
 local_infile = OFF
 skip_name_resolve = ON
+disable_log_bin
 secure_file_priv = /var/lib/mysql-files
 innodb_buffer_pool_size = 256M

@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -98,10 +99,10 @@ func TestRootMySQLInstall(t *testing.T) {
 	}
 
 	// The settings are live, read again here and not only by Install.
-	got := mustQuery(t, d, "SELECT @@bind_address, @@local_infile, @@skip_name_resolve, @@secure_file_priv, @@innodb_buffer_pool_size;")
+	got := mustQuery(t, d, "SELECT @@bind_address, @@local_infile, @@skip_name_resolve, @@secure_file_priv, @@innodb_buffer_pool_size, @@log_bin;")
 	t.Logf("live settings: %q", got)
 	f := strings.Split(got, "\t")
-	if len(f) != 5 || f[0] != "127.0.0.1" || f[1] != "0" || f[2] != "1" || f[3] != "/var/lib/mysql-files/" {
+	if len(f) != 6 || f[0] != "127.0.0.1" || f[1] != "0" || f[2] != "1" || f[3] != "/var/lib/mysql-files/" || f[5] != "0" {
 		t.Errorf("live settings = %q", got)
 	}
 	if user := mustQuery(t, d, "SELECT CURRENT_USER();"); user != "root@localhost" {
@@ -277,4 +278,45 @@ func mustMem(t *testing.T, d sysexec.Deps) uint64 {
 		t.Fatal(err)
 	}
 	return m
+}
+
+// An install over a server that writes binary logs, as MySQL does by
+// default, turns them off and converges.
+func TestRootMySQLBinaryLogsTurnedOff(t *testing.T) {
+	d := rootDeps(t)
+	ctx := context.Background()
+	if _, err := Install(ctx, d); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if got := mustQuery(t, d, "SELECT @@log_bin;"); got != "0" {
+		t.Fatalf("log_bin = %q after Install, want 0", got)
+	}
+	// Back to a package-default server: no Zimam file, binary logs on.
+	if err := os.Remove(d.Paths.MySQLConf()); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("/usr/bin/systemctl", "restart", "mysql").CombinedOutput(); err != nil {
+		t.Fatalf("restart: %v\n%s", err, out)
+	}
+	if got := mustQuery(t, d, "SELECT @@log_bin;"); got != "1" {
+		t.Fatalf("log_bin = %q on the package's own settings, want 1", got)
+	}
+	logs, _ := filepath.Glob("/var/lib/mysql/binlog.*")
+	if len(logs) == 0 {
+		t.Fatal("the server with binary logs on wrote no binlog files")
+	}
+	if _, err := Install(ctx, d); err != nil {
+		t.Fatalf("Install over a server with binary logs: %v", err)
+	}
+	if got := mustQuery(t, d, "SELECT @@log_bin;"); got != "0" {
+		t.Errorf("log_bin = %q after Install, want 0", got)
+	}
+	// And again, without a restart.
+	pid := mainPID(t)
+	if _, err := Install(ctx, d); err != nil {
+		t.Fatalf("second Install: %v", err)
+	}
+	if got := mainPID(t); got != pid {
+		t.Errorf("MySQL restarted on a re-run that changed nothing: pid %s, then %s", pid, got)
+	}
 }

@@ -43,7 +43,7 @@ var restartTimeout = 2 * time.Minute
 // uses, and the plugin's status shows whether the X protocol is off, since
 // mysqlx is a plugin option and not a variable.
 const (
-	liveQuery = "SELECT @@bind_address, @@local_infile, @@skip_name_resolve, @@secure_file_priv, @@innodb_buffer_pool_size, " +
+	liveQuery = "SELECT @@bind_address, @@local_infile, @@skip_name_resolve, @@secure_file_priv, @@innodb_buffer_pool_size, @@log_bin, " +
 		"(SELECT COALESCE(MAX(PLUGIN_STATUS), '') FROM information_schema.PLUGINS WHERE PLUGIN_NAME = 'mysqlx'), @@version;"
 	rootPluginQuery = "SELECT plugin FROM mysql.user WHERE user = 'root' AND host = 'localhost';"
 	rootAuthSocket  = "ALTER USER 'root'@'localhost' IDENTIFIED WITH auth_socket;"
@@ -99,9 +99,9 @@ func BufferPoolMiB(memTotalBytes uint64) int {
 
 // liveValues are what the running server reports.
 type liveValues struct {
-	bindAddress, localInfile, skipNameResolve, secureFilePriv string
-	bufferPoolBytes                                           uint64
-	mysqlx, version                                           string
+	bindAddress, localInfile, skipNameResolve, secureFilePriv, logBin string
+	bufferPoolBytes                                                   uint64
+	mysqlx, version                                                   string
 }
 
 // applyConfig writes conf as Zimam's drop-in and keeps it only if the server
@@ -208,14 +208,14 @@ func readLive(ctx context.Context, d sysexec.Deps) (liveValues, error) {
 		return liveValues{}, err
 	}
 	f := strings.Split(strings.TrimSuffix(out, "\n"), "\t")
-	if len(f) != 7 {
+	if len(f) != 8 {
 		return liveValues{}, fmt.Errorf("MySQL answered %q to the query for its settings", out)
 	}
 	var pool uint64
 	if _, err := fmt.Sscanf(f[4], "%d", &pool); err != nil {
 		return liveValues{}, fmt.Errorf("MySQL's innodb_buffer_pool_size is %q", f[4])
 	}
-	return liveValues{bindAddress: f[0], localInfile: f[1], skipNameResolve: f[2], secureFilePriv: f[3], bufferPoolBytes: pool, mysqlx: f[5], version: f[6]}, nil
+	return liveValues{bindAddress: f[0], localInfile: f[1], skipNameResolve: f[2], secureFilePriv: f[3], bufferPoolBytes: pool, logBin: f[5], mysqlx: f[6], version: f[7]}, nil
 }
 
 // check compares the live values with what the file asks for. MySQL rounds
@@ -239,6 +239,11 @@ func (v liveValues) check(poolMiB int) error {
 	}
 	if want := uint64(poolMiB) << 20; v.bufferPoolBytes < want || v.bufferPoolBytes-want >= 1<<30 {
 		wrong = append(wrong, fmt.Sprintf("innodb_buffer_pool_size is %d, want %d", v.bufferPoolBytes, want))
+	}
+	// Binary logs record every change, passwords in CREATE USER included, and
+	// grow without bound; Zimam has no use for them.
+	if v.logBin != "0" {
+		wrong = append(wrong, fmt.Sprintf("log_bin is %q, want 0", v.logBin))
 	}
 	if v.mysqlx != "DISABLED" && v.mysqlx != "" {
 		wrong = append(wrong, fmt.Sprintf("the mysqlx plugin is %s, want DISABLED", v.mysqlx))
