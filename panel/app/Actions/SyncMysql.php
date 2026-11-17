@@ -37,7 +37,7 @@ final class SyncMysql
         if ($status === null) {
             return false;
         }
-        $mysql = $status->data['services']['mysql'];
+        $mysql = $status->service(ServerService::MYSQL) ?? ['installed' => false, 'version' => '', 'active' => false];
         SyncServiceRow::run(ServerService::MYSQL, $mysql);
 
         return ! $mysql['installed'] || $this->syncDatabases(new DbList);
@@ -51,7 +51,7 @@ final class SyncMysql
             return false;
         }
 
-        return ! $status->data['services']['mysql']['installed'] || $this->syncDatabases(new DbList($site->name), $site);
+        return ! ($status->service(ServerService::MYSQL)['installed'] ?? false) || $this->syncDatabases(new DbList($site->name), $site);
     }
 
     private function syncDatabases(DbList $command, ?Site $scope = null): bool

@@ -84,6 +84,17 @@ final class ServerStatus
         return $options;
     }
 
+    /**
+     * What the status says of an optional service, or null when it says
+     * nothing: an agent from before the service has no such key.
+     *
+     * @return array{installed: bool, version: string, active: bool}|null
+     */
+    public function service(string $name): ?array
+    {
+        return $this->data['services'][$name] ?? null;
+    }
+
     /** When the next answer is due, for the bulletin's "Next" time. */
     public function nextAt(): CarbonImmutable
     {

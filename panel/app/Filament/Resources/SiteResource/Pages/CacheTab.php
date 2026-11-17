@@ -39,9 +39,8 @@ class CacheTab extends Component implements HasActions, HasSchemas
     {
         $status = ServerStatus::current();
 
-        return $status !== null
-            ? $status->data['services']['valkey']['installed']
-            : ServerService::named(ServerService::VALKEY)?->status === ServerService::INSTALLED;
+        return $status?->service(ServerService::VALKEY)['installed']
+            ?? ServerService::named(ServerService::VALKEY)?->status === ServerService::INSTALLED;
     }
 
     protected function credentialKind(): string

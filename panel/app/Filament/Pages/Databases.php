@@ -70,9 +70,8 @@ class Databases extends Page implements HasTable
     {
         $status = ServerStatus::current();
 
-        return $status !== null
-            ? $status->data['services']['mysql']['installed']
-            : ServerService::named(ServerService::MYSQL)?->status === ServerService::INSTALLED;
+        return $status?->service(ServerService::MYSQL)['installed']
+            ?? ServerService::named(ServerService::MYSQL)?->status === ServerService::INSTALLED;
     }
 
     public function content(Schema $schema): Schema

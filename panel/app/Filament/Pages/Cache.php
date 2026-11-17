@@ -50,7 +50,7 @@ class Cache extends Page
     /** Whether Valkey is on the server, as the agent last said. */
     public function valkeyInstalled(): bool
     {
-        return (bool) (ServerStatus::current()?->data['services']['valkey']['installed'] ?? ServerService::named(ServerService::VALKEY)?->status === ServerService::INSTALLED);
+        return ServerStatus::current()?->service(ServerService::VALKEY)['installed'] ?? ServerService::named(ServerService::VALKEY)?->status === ServerService::INSTALLED;
     }
 
     public function content(Schema $schema): Schema
@@ -59,7 +59,7 @@ class Cache extends Page
             Text::make(function (): string {
                 $service = ServerService::named(ServerService::VALKEY);
                 if ($this->valkeyInstalled()) {
-                    return __('zimam.cache.installed', ['version' => $service?->version ?? ServerStatus::current()?->data['services']['valkey']['version']]);
+                    return __('zimam.cache.installed', ['version' => $service?->version ?? ServerStatus::current()?->service(ServerService::VALKEY)['version'] ?? '']);
                 }
                 if ($service?->status === ServerService::INSTALLING) {
                     return __('zimam.cache.installing');

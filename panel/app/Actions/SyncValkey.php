@@ -15,7 +15,7 @@ final class SyncValkey
         if ($status === null) {
             return false;
         }
-        SyncServiceRow::run(ServerService::VALKEY, $status->data['services']['valkey']);
+        SyncServiceRow::run(ServerService::VALKEY, $status->service(ServerService::VALKEY) ?? ['installed' => false, 'version' => '', 'active' => false]);
 
         return true;
     }
