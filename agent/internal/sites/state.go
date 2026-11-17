@@ -36,6 +36,12 @@ type State struct {
 	// marked Active. A provisioned site's "initial" is not one of them.
 	KeepReleases contract.KeepReleases `json:"keep_releases,omitempty"`
 	Releases     []contract.Release    `json:"releases,omitempty"`
+	// Databases are the site's MySQL databases, sorted, set by db.create and
+	// db.drop; a database belongs to the site whose state lists it. DBUser
+	// is whether the site has its MySQL user, which db.create then grants
+	// on the new database. A site that never had a database leaves both out.
+	Databases []contract.DatabaseName `json:"databases,omitempty"`
+	DBUser    bool                    `json:"db_user,omitempty"`
 }
 
 // KeyFingerprint is the shape of an OpenSSH SHA-256 key fingerprint:
@@ -84,6 +90,9 @@ func (s State) validate() error {
 	}
 	if msg := checkReleases(s.Releases); msg != "" {
 		f["releases"] = msg
+	}
+	if msg := s.checkDatabases(); msg != "" {
+		f["databases"] = msg
 	}
 	return f.Err()
 }
@@ -204,4 +213,26 @@ func checkReleases(rs []contract.Release) string {
 		return "more than one release is active"
 	}
 	return ""
+}
+
+// checkDatabases says what is wrong with the site's databases, or "": each
+// must be a valid name with the site's prefix, and the list sorted without
+// repeats, so that it has one form.
+func (s State) checkDatabases() string {
+	for i, n := range s.Databases {
+		switch {
+		case n.Validate() != nil:
+			return fmt.Sprintf("%q is not a database name", n)
+		case s.Name.Validate() == nil && !n.BelongsTo(s.Name):
+			return fmt.Sprintf("%s doesn't start with %s", n, contract.DatabasePrefix(s.Name))
+		case i > 0 && s.Databases[i-1] >= n:
+			return fmt.Sprintf("%s is out of order or listed twice", n)
+		}
+	}
+	return ""
+}
+
+// HasDatabase reports whether the site's state lists the database.
+func (s State) HasDatabase(name contract.DatabaseName) bool {
+	return slices.Contains(s.Databases, name)
 }

@@ -39,6 +39,7 @@ func New(d sysexec.Deps, m *jobs.Manager) Handlers {
 		"logs.read":      logsRead(d),
 		"site.releases":  siteReleases(d),
 		"site.env.read":  siteEnvRead(d),
+		"db.list":        dbList(d),
 	}
 	if m == nil {
 		return h

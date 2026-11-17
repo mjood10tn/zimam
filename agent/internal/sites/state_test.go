@@ -131,3 +131,87 @@ func TestStateReleaseFields(t *testing.T) {
 		}
 	}
 }
+
+// A state file written before databases existed loads and saves again
+// without one changed byte.
+func TestStateWithoutDatabasesKeepsItsBytes(t *testing.T) {
+	const v020 = `{
+  "name": "shop",
+  "domain": "shop.example.com",
+  "type": "php",
+  "php_version": "8.4",
+  "template_version": 3,
+  "security": {
+    "force_https": true,
+    "hsts_max_age": 0,
+    "hsts_include_subdomains": false,
+    "headers_preset": true,
+    "block_risky_functions": false,
+    "restrict_to_site_folder": false,
+    "ip_allow": [],
+    "ip_deny": [],
+    "password_protection": false
+  },
+  "repository": "octo/app",
+  "branch": "main",
+  "deploy_key_fingerprint": "SHA256:abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOP0",
+  "keep_releases": 3
+}
+`
+	p := paths.Paths{Root: t.TempDir()}
+	if err := os.MkdirAll(p.SitesStateDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p.SiteState("shop"), []byte(v020), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := Load(p, "shop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Databases) != 0 || st.DBUser {
+		t.Errorf("databases %v, db_user %v on a file without them", st.Databases, st.DBUser)
+	}
+	if err := Save(p, st); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(p.SiteState("shop"))
+	if err != nil || string(got) != v020 {
+		t.Errorf("saved file differs (%v):\n%s", err, got)
+	}
+}
+
+func TestStateDatabases(t *testing.T) {
+	p := paths.Paths{Root: t.TempDir()}
+	base := State{Name: "my-shop", Domain: "shop.example.com", Type: contract.SiteStatic, TemplateVersion: 1, Security: DefaultSecurity()}
+
+	withDBs := base
+	withDBs.Databases = []contract.DatabaseName{"s_my_shop_a", "s_my_shop_b"}
+	withDBs.DBUser = true
+	if err := Save(p, withDBs); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(p, "my-shop")
+	if err != nil || !reflect.DeepEqual(got, withDBs) {
+		t.Fatalf("Load = %+v, %v; want %+v", got, err, withDBs)
+	}
+	data, _ := os.ReadFile(p.SiteState("my-shop"))
+	if !strings.Contains(string(data), `"databases": [`) || !strings.Contains(string(data), `"db_user": true`) {
+		t.Errorf("state file lacks the fields:\n%s", data)
+	}
+
+	for name, dbs := range map[string][]contract.DatabaseName{
+		"another site's prefix": {"s_other_a"},
+		"no suffix":             {"s_my_shop_"},
+		"not sorted":            {"s_my_shop_b", "s_my_shop_a"},
+		"listed twice":          {"s_my_shop_a", "s_my_shop_a"},
+		"reserved":              {"mysql"},
+		"a backtick":            {"s_my_shop_a`b"},
+	} {
+		bad := base
+		bad.Databases = dbs
+		if err := Save(p, bad); err == nil {
+			t.Errorf("%s: Save accepted %v", name, dbs)
+		}
+	}
+}

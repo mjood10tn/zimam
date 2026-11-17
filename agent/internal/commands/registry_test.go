@@ -8,12 +8,12 @@ import (
 )
 
 func TestNewAddsJobCommands(t *testing.T) {
-	if h := New(sysexec.Deps{}, nil); len(h) != 7 || h["agent.version"] == nil || h["system.status"] == nil || h["system.metrics"] == nil || h["logs.list"] == nil || h["logs.read"] == nil || h["site.releases"] == nil || h["site.env.read"] == nil {
-		t.Errorf("New(d, nil) has %d handlers, want only the reads: agent.version, system.status, system.metrics, logs.list, logs.read, site.releases and site.env.read", len(h))
+	if h := New(sysexec.Deps{}, nil); len(h) != 8 || h["agent.version"] == nil || h["system.status"] == nil || h["system.metrics"] == nil || h["logs.list"] == nil || h["logs.read"] == nil || h["site.releases"] == nil || h["site.env.read"] == nil || h["db.list"] == nil {
+		t.Errorf("New(d, nil) has %d handlers, want only the reads: agent.version, system.status, system.metrics, logs.list, logs.read, site.releases, site.env.read and db.list", len(h))
 	}
 	m := &jobs.Manager{Handlers: map[string]jobs.Handler{"php.default": nil}}
 	h := New(sysexec.Deps{}, m)
-	for _, name := range []string{"agent.version", "system.status", "system.metrics", "site.releases", "site.env.read", "job.status", "job.follow", "job.cancel", "php.default"} {
+	for _, name := range []string{"agent.version", "system.status", "system.metrics", "site.releases", "site.env.read", "db.list", "job.status", "job.follow", "job.cancel", "php.default"} {
 		if h[name] == nil {
 			t.Errorf("New(d, m) has no handler for %s", name)
 		}
