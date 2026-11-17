@@ -262,9 +262,9 @@ func (p Paths) PHPWwwPool(v contract.PHPVersion) string {
 }
 
 // MySQL: Zimam's drop-in beside the package's own files, which are never
-// edited (§11.3).
-
-func (p Paths) MySQLConf() string { return p.at("etc/mysql/mysql.conf.d/99-zimam.cnf") }
+// edited (§11.3). Files in this directory are read in name order and the
+// later one wins, so the name starts with zz to sort after mysqld.cnf.
+func (p Paths) MySQLConf() string { return p.at("etc/mysql/mysql.conf.d/zz-zimam.cnf") }
 
 // systemd: Zimam's own units (§7.1) and the journal's limits (§11.3)
 

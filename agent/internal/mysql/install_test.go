@@ -140,10 +140,10 @@ func TestInstallSequence(t *testing.T) {
 		}
 	}
 	if got := readFile(t, e.p.MySQLConf()); got != wantConf {
-		t.Errorf("99-zimam.cnf =\n%s\nwant\n%s", got, wantConf)
+		t.Errorf("zz-zimam.cnf =\n%s\nwant\n%s", got, wantConf)
 	}
 	if fi, err := os.Stat(e.p.MySQLConf()); err != nil || fi.Mode().Perm() != 0o644 {
-		t.Errorf("99-zimam.cnf: %v, %v; want mode 0644", fi, err)
+		t.Errorf("zz-zimam.cnf: %v, %v; want mode 0644", fi, err)
 	}
 	// SQL goes only on stdin. The live query reads exactly the settings that
 	// were rendered.
@@ -198,7 +198,7 @@ func TestInstallConverges(t *testing.T) {
 		t.Fatalf("second Install: %v", err)
 	}
 	if got := readFile(t, e.p.MySQLConf()); got != wantConf {
-		t.Errorf("99-zimam.cnf after the second run =\n%s", got)
+		t.Errorf("zz-zimam.cnf after the second run =\n%s", got)
 	}
 	if n := len(lines(e.run.Calls())); n != 12 {
 		t.Errorf("two runs made %d calls, want 12", n)
@@ -209,7 +209,7 @@ func TestInstallConverges(t *testing.T) {
 	}
 	entries, _ := os.ReadDir(filepath.Dir(e.p.MySQLConf()))
 	if len(entries) != 1 {
-		t.Errorf("the config directory holds %d entries, want only 99-zimam.cnf", len(entries))
+		t.Errorf("the config directory holds %d entries, want only zz-zimam.cnf", len(entries))
 	}
 }
 
@@ -222,7 +222,7 @@ func TestInstallAptFailureWritesNothing(t *testing.T) {
 		t.Fatalf("Install = %v, want apt-get's error", err)
 	}
 	if _, err := os.Lstat(e.p.MySQLConf()); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("99-zimam.cnf was written (Lstat: %v)", err)
+		t.Errorf("zz-zimam.cnf was written (Lstat: %v)", err)
 	}
 	if _, err := os.Lstat(e.p.ServicesState()); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("services.json was written (Lstat: %v)", err)
@@ -264,7 +264,7 @@ func TestInstallRendersBufferPoolFromMemory(t *testing.T) {
 		t.Fatalf("Install: %v", err)
 	}
 	if got := readFile(t, e.p.MySQLConf()); !strings.Contains(got, "innodb_buffer_pool_size = 4096M\n") {
-		t.Errorf("99-zimam.cnf:\n%s", got)
+		t.Errorf("zz-zimam.cnf:\n%s", got)
 	}
 }
 
@@ -321,7 +321,7 @@ func TestBadConfigRestoresPrevious(t *testing.T) {
 		},
 		"validate exits 0 but reports an error": {
 			setup: func(e *testEnv) {
-				e.run.Add(sysexec.Script{Path: mysqld, Args: validate.Args, Result: sysexec.Result{Stderr: []byte("mysqld: [ERROR] Wrong group definition in config file /etc/mysql/mysql.conf.d/99-zimam.cnf at line 1.\n")}})
+				e.run.Add(sysexec.Script{Path: mysqld, Args: validate.Args, Result: sysexec.Result{Stderr: []byte("mysqld: [ERROR] Wrong group definition in config file /etc/mysql/mysql.conf.d/zz-zimam.cnf at line 1.\n")}})
 				e.run.Add(validate)
 			},
 			want:  "Wrong group definition",
@@ -378,7 +378,7 @@ func TestBadConfigRestoresPrevious(t *testing.T) {
 				t.Fatalf("Install = %v, want an error holding %q", err, tc.want)
 			}
 			if got := readFile(t, e.p.MySQLConf()); got != previous {
-				t.Errorf("99-zimam.cnf =\n%s\nwant the previous file back:\n%s", got, previous)
+				t.Errorf("zz-zimam.cnf =\n%s\nwant the previous file back:\n%s", got, previous)
 			}
 			if got := lines(e.run.Calls())[2:]; !slices.Equal(got, tc.calls) {
 				t.Errorf("after the packages ran\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(tc.calls, "\n"))
@@ -387,7 +387,7 @@ func TestBadConfigRestoresPrevious(t *testing.T) {
 				t.Errorf("services.json was written for a failed install (Lstat: %v)", err)
 			}
 			if entries, _ := os.ReadDir(filepath.Dir(e.p.MySQLConf())); len(entries) != 1 {
-				t.Errorf("the config directory holds %d entries, want only 99-zimam.cnf", len(entries))
+				t.Errorf("the config directory holds %d entries, want only zz-zimam.cnf", len(entries))
 			}
 		})
 	}
@@ -404,7 +404,7 @@ func TestBadConfigWithoutPreviousFileRemovesOurs(t *testing.T) {
 		t.Fatal("Install succeeded with a live value that differs")
 	}
 	if _, err := os.Lstat(e.p.MySQLConf()); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("99-zimam.cnf is still there (Lstat: %v)", err)
+		t.Errorf("zz-zimam.cnf is still there (Lstat: %v)", err)
 	}
 }
 
@@ -453,7 +453,7 @@ func TestHangingRestartIsAFailureAndRestoresPrevious(t *testing.T) {
 		t.Errorf("the restart hung %d times, want once", h.hangs)
 	}
 	if got := readFile(t, e.p.MySQLConf()); got != previous {
-		t.Errorf("99-zimam.cnf =\n%s\nwant the previous file back", got)
+		t.Errorf("zz-zimam.cnf =\n%s\nwant the previous file back", got)
 	}
 	got := lines(e.run.Calls())[2:]
 	want := []string{line(validate), line(validate), line(restart)} // the hung restart never reached the fake
@@ -489,6 +489,6 @@ func TestInstallRefusesAnUnreadableMeminfo(t *testing.T) {
 		t.Fatal("Install ran with a meminfo it can't read")
 	}
 	if _, err := os.Lstat(e.p.MySQLConf()); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("99-zimam.cnf was written (Lstat: %v)", err)
+		t.Errorf("zz-zimam.cnf was written (Lstat: %v)", err)
 	}
 }

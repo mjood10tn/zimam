@@ -57,7 +57,7 @@ func Install(ctx context.Context, d sysexec.Deps) (string, error) {
 		return "", err
 	}
 	pool := BufferPoolMiB(mem)
-	conf, err := templates.Render("mysql/99-zimam.cnf", templates.MySQLConf{BufferPoolMiB: pool})
+	conf, err := templates.Render("mysql/zz-zimam.cnf", templates.MySQLConf{BufferPoolMiB: pool})
 	if err != nil {
 		return "", err
 	}
@@ -110,9 +110,10 @@ type liveValues struct {
 // comes back, or ours is removed, and MySQL restarts again, so the server
 // is left running with what it had.
 //
-// The live comparison matters because the package's own mysqld.cnf sorts
-// after 99-zimam.cnf and is read later, so where both set an option
-// (bind-address) the package's value wins whatever this file says.
+// The package's own mysqld.cnf sorts before this file, so ours is read later
+// and wins. That read order is observed, not documented, so the live
+// comparison is the real guarantee: a value overridden elsewhere fails the
+// install and is rolled back.
 func applyConfig(ctx context.Context, d sysexec.Deps, conf []byte, poolMiB int) (liveValues, error) {
 	var live liveValues
 	restarted := false

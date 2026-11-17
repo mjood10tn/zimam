@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -137,7 +138,7 @@ func TestRootMySQLInstall(t *testing.T) {
 			t.Errorf("%s: applyConfig accepted it", name)
 		}
 		if now, rerr := os.ReadFile(d.Paths.MySQLConf()); rerr != nil || string(now) != string(conf) {
-			t.Errorf("%s: 99-zimam.cnf = %q, %v; want the previous file", name, now, rerr)
+			t.Errorf("%s: zz-zimam.cnf = %q, %v; want the previous file", name, now, rerr)
 		}
 		if !isActive(t) {
 			t.Fatalf("%s: MySQL is not running after the rollback", name)
@@ -160,6 +161,63 @@ func TestRootMySQLInstall(t *testing.T) {
 	}
 	if plugin := mustQuery(t, d, rootPluginQuery); plugin != "auth_socket" {
 		t.Errorf("root@localhost uses %q after Install", plugin)
+	}
+
+	// The package's own mysqld.cnf sorts before our file, so our value wins
+	// over a conflicting one there.
+	pkgConf := "/etc/mysql/mysql.conf.d/mysqld.cnf"
+	orig, err := os.ReadFile(pkgConf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.WriteFile(pkgConf, orig, 0o644) })
+	if !strings.Contains(string(orig), "bind-address") {
+		t.Fatal("mysqld.cnf has no bind-address line to conflict with")
+	}
+	conflict := regexp.MustCompile(`(?m)^bind-address.*$`).ReplaceAllString(string(orig), "bind-address = 0.0.0.0")
+	if err := os.WriteFile(pkgConf, []byte(conflict), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Install(ctx, d); err != nil {
+		t.Fatalf("Install with a conflicting value in mysqld.cnf: %v", err)
+	}
+	if got := mustQuery(t, d, "SELECT @@bind_address;"); got != "127.0.0.1" {
+		t.Errorf("bind_address = %q with a conflicting mysqld.cnf, want ours (127.0.0.1)", got)
+	}
+	if got := listeners(t, 3306); len(got) != 1 || got[0] != "0100007F" {
+		t.Errorf("port 3306 listens on %v with a conflicting mysqld.cnf", got)
+	}
+	if err := os.WriteFile(pkgConf, orig, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// A file that sorts after ours and overrides one of our settings is
+	// caught by the live check: the install fails and leaves the previous
+	// state.
+	other := "/etc/mysql/mysql.conf.d/zzz-other.cnf"
+	if err := os.WriteFile(other, []byte("[mysqld]\nlocal_infile = ON\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(other) })
+	before, err := os.ReadFile(d.Paths.MySQLConf())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Install(ctx, d); err == nil || !strings.Contains(err.Error(), "local_infile") {
+		t.Fatalf("Install with an overriding zzz-other.cnf = %v, want a local_infile failure", err)
+	}
+	if after, _ := os.ReadFile(d.Paths.MySQLConf()); string(after) != string(before) {
+		t.Errorf("zz-zimam.cnf changed after the failed install:\n%s", after)
+	}
+	if !isActive(t) {
+		t.Fatal("MySQL is not running after the failed install")
+	}
+	os.Remove(other)
+	if _, err := Install(ctx, d); err != nil {
+		t.Fatalf("Install after removing zzz-other.cnf: %v", err)
+	}
+	if got := mustQuery(t, d, "SELECT @@local_infile;"); got != "0" {
+		t.Errorf("local_infile = %q after converging", got)
 	}
 }
 

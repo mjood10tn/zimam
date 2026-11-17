@@ -124,7 +124,7 @@ if [ -d "$src/etc/apt" ]; then
 	echo "every source and pin parses"
 fi
 
-if [ -f "$src/etc/mysql/mysql.conf.d/99-zimam.cnf" ]; then
+if [ -f "$src/etc/mysql/mysql.conf.d/zz-zimam.cnf" ]; then
 	echo "== mysqld --validate-config"
 	out=$(mysqld --validate-config 2>&1) || {
 		printf '%s\n' "$out"
