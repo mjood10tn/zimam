@@ -110,7 +110,7 @@ func checkSiteDestroy(d sysexec.Deps, p contract.SiteDestroyParams) (sites.State
 // hold, so a site made later with the same name starts with none. The
 // accounts are dropped whenever MySQL is installed, even for a site whose
 // state lists neither databases nor a user; then a failure is only logged.
-func siteDestroy(ctx context.Context, j *jobs.Context, p contract.Params) (any, error) {
+func destroySite(ctx context.Context, j *jobs.Context, p contract.Params) (any, error) {
 	params := *p.(*contract.SiteDestroyParams)
 	d := j.Deps()
 	st, work, err := checkSiteDestroy(d, params)
@@ -162,4 +162,36 @@ func siteDestroy(ctx context.Context, j *jobs.Context, p contract.Params) (any, 
 		}
 	}
 	return sites.Destroy(ctx, d, j.Helper, helper.LookupAccount, params.Name)
+}
+
+// siteDestroy runs the destroy. A failure keeps what the destroy knows: the
+// job fails, and its result says which of the site's service users are no
+// longer on the server (jobs.Landed), so the panel keeps the rows of the
+// users that remain.
+func siteDestroy(ctx context.Context, j *jobs.Context, p contract.Params) (any, error) {
+	res, err := destroySite(ctx, j, p)
+	if err == nil {
+		return res, nil
+	}
+	name := p.(*contract.SiteDestroyParams).Name
+	removed, ok := removedUsers(j.Deps(), name)
+	if !ok {
+		return nil, err
+	}
+	return contract.SiteDestroyResult{Name: name, Removed: &removed}, &jobs.Landed{Err: err}
+}
+
+// removedUsers reads the state the destroy left on disk: a user the state
+// doesn't list is gone, or was never made. A site with no state file has
+// none. Its second result is false when the state can't be read, and
+// nothing can be said.
+func removedUsers(d sysexec.Deps, name contract.SiteName) (contract.SiteDestroyRemoved, bool) {
+	st, err := sites.Load(d.Paths, name)
+	if errors.Is(err, fs.ErrNotExist) {
+		return contract.SiteDestroyRemoved{MySQLUser: true, ValkeyUser: true}, true
+	}
+	if err != nil {
+		return contract.SiteDestroyRemoved{}, false
+	}
+	return contract.SiteDestroyRemoved{MySQLUser: !st.DBUser, ValkeyUser: st.CacheUserHash == ""}, true
 }

@@ -28,7 +28,7 @@ func init() {
 		Kind:    KindJob,
 		Audited: true,
 		Params:  func() Params { return &SiteDestroyParams{} },
-		Result:  SiteNameResult{},
+		Result:  SiteDestroyResult{},
 		Subject: func(p Params) string { return "site:" + string(p.(*SiteDestroyParams).Name) },
 	})
 	Register(Descriptor{
@@ -130,7 +130,7 @@ func (p *SiteNameParams) Validate() error {
 	return f.Err()
 }
 
-// SiteNameResult is what site.destroy answers: the site it removed.
+// SiteNameResult is what a command that only names its site answers.
 type SiteNameResult struct {
 	Name SiteName `json:"name"`
 }
@@ -155,4 +155,22 @@ func (p *SiteDestroyParams) Validate() error {
 	f := FieldErrors{}
 	f.Check("name", p.Name)
 	return f.Err()
+}
+
+// SiteDestroyResult is what site.destroy answers. A destroy that fails after
+// it began still answers, with Removed set, so the panel knows which service
+// users are gone. A successful destroy and an agent from before the field
+// leave Removed out.
+type SiteDestroyResult struct {
+	Name    SiteName            `json:"name"`
+	Removed *SiteDestroyRemoved `json:"removed,omitempty"`
+}
+
+// SiteDestroyRemoved says, for a destroy that failed, whether each of the
+// site's service users is no longer on the server: removed by the destroy,
+// or never there. A user that is still there, or whose removal is not
+// finished, is false: running the destroy again deals with it.
+type SiteDestroyRemoved struct {
+	MySQLUser  bool `json:"mysql_user"`
+	ValkeyUser bool `json:"valkey_user"`
 }

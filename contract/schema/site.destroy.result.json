@@ -13,6 +13,29 @@
       },
       "pattern": "^[a-z][a-z0-9-]{0,22}[a-z0-9]$",
       "type": "string"
+    },
+    "removed": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "mysql_user": {
+              "type": "boolean"
+            },
+            "valkey_user": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "mysql_user",
+            "valkey_user"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "required": [
