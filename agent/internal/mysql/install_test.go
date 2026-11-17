@@ -71,7 +71,7 @@ func newEnv(t *testing.T, memTotalKiB int) *testEnv {
 // scriptInstall scripts a whole successful install: the packages, the test
 // of the file, the restart, the live values, and root on auth_socket.
 func (e *testEnv) scriptInstall() {
-	for _, s := range []sysexec.Script{aptUpdate, aptInstall, validate, restart, client(liveGood), client("auth_socket\n")} {
+	for _, s := range []sysexec.Script{aptUpdate, aptInstall, client("auth_socket\n"), validate, restart, client(liveGood)} {
 		e.run.Add(s)
 	}
 }
@@ -125,10 +125,10 @@ func TestInstallSequence(t *testing.T) {
 	want := []string{
 		line(aptUpdate),
 		line(aptInstall),
-		line(validate), // the file's test
-		line(restart),  // which has to start with the file
-		line(client("")),
-		line(client("")), // root's plugin
+		line(client("")), // root's plugin, before anything changes
+		line(validate),   // the file's test
+		line(restart),    // which has to start with the file
+		line(client("")), // the live values
 	}
 	calls := e.run.Calls()
 	if got := lines(calls); !slices.Equal(got, want) {
@@ -147,13 +147,13 @@ func TestInstallSequence(t *testing.T) {
 	}
 	// SQL goes only on stdin. The live query reads exactly the settings that
 	// were rendered.
-	live := string(calls[4].Stdin)
+	live := string(calls[5].Stdin)
 	for _, w := range []string{"@@bind_address", "@@local_infile", "@@skip_name_resolve", "@@secure_file_priv", "@@innodb_buffer_pool_size", "mysqlx", "@@version"} {
 		if !strings.Contains(live, w) {
 			t.Errorf("the live query lacks %s:\n%s", w, live)
 		}
 	}
-	if auth := string(calls[5].Stdin); !strings.Contains(auth, "mysql.user") {
+	if auth := string(calls[2].Stdin); !strings.Contains(auth, "mysql.user") {
 		t.Errorf("the plugin query = %q", auth)
 	}
 	st, err := services.Load(e.p)
@@ -170,7 +170,7 @@ func TestInstallSequence(t *testing.T) {
 
 func TestInstallSetsAuthSocketWhenRootUsesAPassword(t *testing.T) {
 	e := newEnv(t, gib/1024)
-	for _, s := range []sysexec.Script{aptUpdate, aptInstall, validate, restart, client(liveGood), client("caching_sha2_password\n"), client("")} {
+	for _, s := range []sysexec.Script{aptUpdate, aptInstall, client("caching_sha2_password\n"), client(""), validate, restart, client(liveGood)} {
 		e.run.Add(s)
 	}
 	if _, err := Install(context.Background(), e.d); err != nil {
@@ -180,7 +180,7 @@ func TestInstallSetsAuthSocketWhenRootUsesAPassword(t *testing.T) {
 	if len(calls) != 7 {
 		t.Fatalf("ran %d commands, want 7:\n%s", len(calls), strings.Join(lines(calls), "\n"))
 	}
-	if got, want := string(calls[6].Stdin), "ALTER USER 'root'@'localhost' IDENTIFIED WITH auth_socket;\n"; got != want {
+	if got, want := string(calls[3].Stdin), "ALTER USER 'root'@'localhost' IDENTIFIED WITH auth_socket;\n"; got != want {
 		t.Errorf("the last statement = %q, want %q", got, want)
 	}
 }
@@ -200,8 +200,8 @@ func TestInstallConverges(t *testing.T) {
 	if got := readFile(t, e.p.MySQLConf()); got != wantConf {
 		t.Errorf("zz-zimam.cnf after the second run =\n%s", got)
 	}
-	if n := len(lines(e.run.Calls())); n != 12 {
-		t.Errorf("two runs made %d calls, want 12", n)
+	if n := len(lines(e.run.Calls())); n != 11 {
+		t.Errorf("two runs made %d calls, want 11", n)
 	}
 	st, err := services.Load(e.p)
 	if err != nil || st.MySQL.Version != "8.4.13" {
@@ -257,7 +257,7 @@ func TestBufferPoolFromMemTotal(t *testing.T) {
 func TestInstallRendersBufferPoolFromMemory(t *testing.T) {
 	e := newEnv(t, 64*gib/1024)
 	live := "127.0.0.1\t0\t1\t/var/lib/mysql-files/\t4294967296\tDISABLED\t8.4.13-0ubuntu0.26.04.2\n"
-	for _, s := range []sysexec.Script{aptUpdate, aptInstall, validate, restart, client(live), client("auth_socket\n")} {
+	for _, s := range []sysexec.Script{aptUpdate, aptInstall, client("auth_socket\n"), validate, restart, client(live)} {
 		e.run.Add(s)
 	}
 	if _, err := Install(context.Background(), e.d); err != nil {
@@ -282,7 +282,7 @@ func TestInstallAcceptsARoundedBufferPool(t *testing.T) {
 	} {
 		e := newEnv(t, gib/1024)
 		live := "127.0.0.1\t0\t1\t/var/lib/mysql-files/\t" + tc.live + "\tDISABLED\t8.4.13-0ubuntu0.26.04.2\n"
-		for _, s := range []sysexec.Script{aptUpdate, aptInstall, validate, restart, client(live), client("auth_socket\n")} {
+		for _, s := range []sysexec.Script{aptUpdate, aptInstall, client("auth_socket\n"), validate, restart, client(live)} {
 			e.run.Add(s)
 		}
 		_, err := Install(context.Background(), e.d)
@@ -370,6 +370,7 @@ func TestBadConfigRestoresPrevious(t *testing.T) {
 			withPrevious(t, e)
 			e.run.Add(aptUpdate)
 			e.run.Add(aptInstall)
+			e.run.Add(client("auth_socket\n"))
 			tc.setup(e)
 			// The restore's restart, when the setup left it unscripted.
 			e.run.Add(restart)
@@ -380,7 +381,7 @@ func TestBadConfigRestoresPrevious(t *testing.T) {
 			if got := readFile(t, e.p.MySQLConf()); got != previous {
 				t.Errorf("zz-zimam.cnf =\n%s\nwant the previous file back:\n%s", got, previous)
 			}
-			if got := lines(e.run.Calls())[2:]; !slices.Equal(got, tc.calls) {
+			if got := lines(e.run.Calls())[3:]; !slices.Equal(got, tc.calls) {
 				t.Errorf("after the packages ran\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(tc.calls, "\n"))
 			}
 			if _, err := os.Lstat(e.p.ServicesState()); !errors.Is(err, fs.ErrNotExist) {
@@ -397,6 +398,7 @@ func TestBadConfigWithoutPreviousFileRemovesOurs(t *testing.T) {
 	e := newEnv(t, gib/1024)
 	e.run.Add(aptUpdate)
 	e.run.Add(aptInstall)
+	e.run.Add(client("auth_socket\n"))
 	e.run.Add(validate)
 	e.run.Add(restart)
 	e.run.Add(client("0.0.0.0\t0\t1\t/var/lib/mysql-files/\t268435456\tDISABLED\t8.4.13-0ubuntu0.26.04.2\n"))
@@ -440,7 +442,7 @@ func TestHangingRestartIsAFailureAndRestoresPrevious(t *testing.T) {
 
 	e := newEnv(t, gib/1024)
 	withPrevious(t, e)
-	for _, s := range []sysexec.Script{aptUpdate, aptInstall, validate, restart} {
+	for _, s := range []sysexec.Script{aptUpdate, aptInstall, client("auth_socket\n"), validate, restart} {
 		e.run.Add(s)
 	}
 	h := &hangingRestart{Runner: e.run}
@@ -455,7 +457,7 @@ func TestHangingRestartIsAFailureAndRestoresPrevious(t *testing.T) {
 	if got := readFile(t, e.p.MySQLConf()); got != previous {
 		t.Errorf("zz-zimam.cnf =\n%s\nwant the previous file back", got)
 	}
-	got := lines(e.run.Calls())[2:]
+	got := lines(e.run.Calls())[3:]
 	want := []string{line(validate), line(validate), line(restart)} // the hung restart never reached the fake
 	if !slices.Equal(got, want) {
 		t.Errorf("ran\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -469,6 +471,7 @@ func TestRestoreDoesNotCompareLiveValues(t *testing.T) {
 	withPrevious(t, e)
 	e.run.Add(aptUpdate)
 	e.run.Add(aptInstall)
+	e.run.Add(client("auth_socket\n"))
 	e.run.Add(validate)
 	e.run.Add(restart)
 	e.run.Add(client("0.0.0.0\t0\t1\t/var/lib/mysql-files/\t268435456\tDISABLED\t8.4.13-0ubuntu0.26.04.2\n"))

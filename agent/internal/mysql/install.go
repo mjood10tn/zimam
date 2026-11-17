@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"zimam/agent/contract"
 	"zimam/agent/internal/configtx"
 	"zimam/agent/internal/metrics"
 	"zimam/agent/internal/php"
@@ -30,7 +31,13 @@ const (
 // restartTimeout bounds the restart that makes MySQL read Zimam's file.
 // The unit has TimeoutSec=infinity, so a server that can't start would keep
 // systemctl waiting for as long as the job may run.
-var restartTimeout = 3 * time.Minute
+//
+// The job may run 900 s. Apart from apt-get (which may wait up to 300 s for
+// a dpkg lock, then downloads and installs), the worst case is the root
+// check (30 s), the candidate's restart (2 min) and live query (30 s), and
+// the restore's validate and restart (2 min plus 30 s): about 6 minutes,
+// which leaves about 9 minutes for apt-get.
+var restartTimeout = 2 * time.Minute
 
 // The statements Install runs. The first reads what the running server
 // uses, and the plugin's status shows whether the X protocol is off, since
@@ -41,6 +48,9 @@ const (
 	rootPluginQuery = "SELECT plugin FROM mysql.user WHERE user = 'root' AND host = 'localhost';"
 	rootAuthSocket  = "ALTER USER 'root'@'localhost' IDENTIFIED WITH auth_socket;"
 )
+
+// notApplied is logged when the packages are in but Zimam's settings are not.
+const notApplied = "MySQL is installed with the package's own settings and is not recorded as installed yet; running the install again continues from here."
 
 // Install installs MySQL from Ubuntu's archive, writes and tests Zimam's
 // settings, makes sure root logs in over the socket, and records the
@@ -56,17 +66,21 @@ func Install(ctx context.Context, d sysexec.Deps) (string, error) {
 	if err := php.InstallPackages(ctx, d, packageName); err != nil {
 		return "", err
 	}
+	// Root must log in over the socket before anything else changes: a root
+	// password would otherwise fail the live query and look like a bad file.
+	if err := ensureRootAuthSocket(ctx, d); err != nil {
+		d.Logf("%s", notApplied)
+		return "", err
+	}
 	pool := BufferPoolMiB(mem)
 	conf, err := templates.Render("mysql/zz-zimam.cnf", templates.MySQLConf{BufferPoolMiB: pool})
 	if err != nil {
 		return "", err
 	}
-	d.Logf("Writing MySQL's settings (a %d MiB buffer pool) and restarting it", pool)
+	d.Logf("Writing MySQL's settings (a %d MiB buffer pool)", pool)
 	live, err := applyConfig(ctx, d, conf, pool)
 	if err != nil {
-		return "", err
-	}
-	if err := ensureRootAuthSocket(ctx, d); err != nil {
+		d.Logf("%s", notApplied)
 		return "", err
 	}
 	version, _, _ := strings.Cut(live.version, "-")
@@ -116,29 +130,59 @@ type liveValues struct {
 // install and is rolled back.
 func applyConfig(ctx context.Context, d sysexec.Deps, conf []byte, poolMiB int) (liveValues, error) {
 	var live liveValues
+	// A file that is already in place needs no restart when the server
+	// already runs with its values.
+	previous, err := os.ReadFile(d.Paths.MySQLConf())
+	unchanged := err == nil && bytes.Equal(previous, conf)
+	passes := 0
 	restarted := false
-	err := configtx.Apply(ctx, []configtx.Change{configtx.RootFile(d.Paths.MySQLConf(), conf, 0o644)}, func(ctx context.Context) error {
-		// Apply runs this again after a restore, when the candidate file
-		// is gone and the live values are no longer its to check.
-		current, err := os.ReadFile(d.Paths.MySQLConf())
-		candidate := err == nil && bytes.Equal(current, conf)
+	err = configtx.Apply(ctx, []configtx.Change{configtx.RootFile(d.Paths.MySQLConf(), conf, 0o644)}, func(ctx context.Context) error {
+		// Apply runs the test again after a restore, and also when it
+		// couldn't stage the file. Only the first pass with the candidate in
+		// place checks the live values; a pass after that puts back what
+		// the server had.
+		current, rerr := os.ReadFile(d.Paths.MySQLConf())
+		restore := passes > 0 || rerr != nil || !bytes.Equal(current, conf)
+		passes++
+		if restore {
+			// A job is cancelled by stopping its unit, which ends ctx. The
+			// restore must still run, or the server could be left with
+			// settings that are not on disk.
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), queryTimeout+restartTimeout)
+			defer cancel()
+		}
 		if err := validateConfig(ctx, d); err != nil {
+			if restore {
+				return fmt.Errorf("MySQL may be running settings that are not in %s: %w", d.Paths.MySQLConf(), err)
+			}
 			return err
 		}
-		if !candidate && !restarted {
-			return nil // the server never read the candidate
+		if restore {
+			if !restarted {
+				return nil // the server never read the candidate
+			}
+			if err := restartMySQL(ctx, d); err != nil {
+				return fmt.Errorf("MySQL may be running settings that are not in %s: %w", d.Paths.MySQLConf(), err)
+			}
+			return nil
+		}
+		if unchanged {
+			if v, err := readLive(ctx, d); err == nil && v.check(poolMiB) == nil {
+				live = v
+				return nil
+			}
 		}
 		restarted = true
 		if err := restartMySQL(ctx, d); err != nil {
 			return err
 		}
-		if !candidate {
-			return nil
-		}
-		if live, err = readLive(ctx, d); err != nil {
+		v, err := readLive(ctx, d)
+		if err != nil {
 			return err
 		}
-		return live.check(poolMiB)
+		live = v
+		return v.check(poolMiB)
 	})
 	return live, err
 }
@@ -223,7 +267,12 @@ func (v liveValues) check(poolMiB int) error {
 func ensureRootAuthSocket(ctx context.Context, d sysexec.Deps) error {
 	out, err := query(ctx, d, rootPluginQuery)
 	if err != nil {
-		return err
+		var exit *sysexec.ExitError
+		if errors.As(err, &exit) && (bytes.Contains(exit.Stderr, []byte("ERROR 1045")) || bytes.Contains(exit.Stderr, []byte("Access denied"))) {
+			return &contract.AgentError{Code: contract.ErrConflict, Message: "MySQL's root@localhost doesn't accept the socket login, because it has a password. " +
+				"Zimam needs root@localhost on auth_socket, so it changed nothing. Run ALTER USER 'root'@'localhost' IDENTIFIED WITH auth_socket as that root, then install again."}
+		}
+		return fmt.Errorf("checking MySQL's root login: %w", err)
 	}
 	plugin := strings.TrimSpace(out)
 	if plugin == "" {

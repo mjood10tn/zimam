@@ -23,11 +23,11 @@ import (
 
 func rootDeps(t *testing.T) sysexec.Deps {
 	t.Helper()
-	if os.Geteuid() != 0 {
-		t.Fatal("the roottest tests need root")
-	}
 	if os.Getenv("ZIMAM_ROOTTEST_MYSQL") != "1" {
 		t.Skip("set ZIMAM_ROOTTEST_MYSQL=1 to install MySQL on this machine")
+	}
+	if os.Geteuid() != 0 {
+		t.Fatal("the roottest tests need root")
 	}
 	return sysexec.Deps{Paths: paths.Paths{}, Run: sysexec.ExecRunner{}, Logf: t.Logf, Now: time.Now}
 }
@@ -118,9 +118,14 @@ func TestRootMySQLInstall(t *testing.T) {
 		t.Errorf("port 33060 listens on %v, want it closed", got)
 	}
 
-	// Running it again converges.
+	// Running it again converges, without restarting a server that already
+	// runs with the file.
+	pidBefore := mainPID(t)
 	if _, err := Install(ctx, d); err != nil {
 		t.Fatalf("second Install: %v", err)
+	}
+	if pidAfter := mainPID(t); pidAfter != pidBefore {
+		t.Errorf("MySQL restarted on a re-run that changed nothing: pid %s, then %s", pidBefore, pidAfter)
 	}
 
 	// Each kind of bad file is refused, the previous file comes back and the
@@ -203,6 +208,11 @@ func TestRootMySQLInstall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The running server has not read the new file yet, so its values still
+	// match and nothing restarts; once it restarts, the override shows.
+	if out, err := exec.Command("/usr/bin/systemctl", "restart", "mysql").CombinedOutput(); err != nil {
+		t.Fatalf("restart: %v\n%s", err, out)
+	}
 	if _, err := Install(ctx, d); err == nil || !strings.Contains(err.Error(), "local_infile") {
 		t.Fatalf("Install with an overriding zzz-other.cnf = %v, want a local_infile failure", err)
 	}
@@ -219,6 +229,44 @@ func TestRootMySQLInstall(t *testing.T) {
 	if got := mustQuery(t, d, "SELECT @@local_infile;"); got != "0" {
 		t.Errorf("local_infile = %q after converging", got)
 	}
+
+	// A root account with a password refuses the socket login: Install says
+	// so before it touches the file or restarts MySQL.
+	mustQuery(t, d, "ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY 'zimam-roottest-pw';")
+	confBefore, err := os.ReadFile(d.Paths.MySQLConf())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid := mainPID(t)
+	_, err = Install(ctx, d)
+	if err == nil || !strings.Contains(err.Error(), "auth_socket") || !strings.Contains(err.Error(), "password") {
+		t.Errorf("Install with a root password = %v, want the clear refusal", err)
+	}
+	t.Logf("with a root password: %v", err)
+	if after, _ := os.ReadFile(d.Paths.MySQLConf()); string(after) != string(confBefore) {
+		t.Errorf("the config file changed:\n%s", after)
+	}
+	if got := mainPID(t); got != pid {
+		t.Errorf("MySQL restarted: pid %s, then %s", pid, got)
+	}
+	// Put root back, logging in with the password as an administrator would.
+	restore := exec.Command("/usr/bin/mysql", "--protocol=socket", "--user=root", "--password=zimam-roottest-pw", "--batch", "--skip-column-names",
+		"-e", "ALTER USER 'root'@'localhost' IDENTIFIED WITH auth_socket;")
+	if out, err := restore.CombinedOutput(); err != nil {
+		t.Fatalf("restoring root: %v\n%s", err, out)
+	}
+	if plugin := mustQuery(t, d, rootPluginQuery); plugin != "auth_socket" {
+		t.Errorf("root@localhost uses %q after restoring it", plugin)
+	}
+}
+
+func mainPID(t *testing.T) string {
+	t.Helper()
+	out, err := exec.Command("/usr/bin/systemctl", "show", "-p", "MainPID", "--value", "mysql").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func mustMem(t *testing.T, d sysexec.Deps) uint64 {
