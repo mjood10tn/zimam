@@ -22,6 +22,7 @@ use Filament\Schemas\Contracts\HasSchemas;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
+use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Collection;
@@ -68,14 +69,16 @@ class ScheduleTab extends Component implements HasActions, HasSchemas, HasTable
                     ->description(fn (SiteCronJob $record): string => $record->command)
                     ->wrap(),
                 TextColumn::make('schedule')
-                    ->label(__('zimam.schedule.columns.schedule'))
-                    ->fontFamily('mono'),
+                    ->label(__('zimam.schedule.columns.schedule')),
                 TextColumn::make('next')
                     ->label(fn (): string => __('zimam.schedule.columns.next', ['zone' => $this->zone()]))
                     ->state(fn (SiteCronJob $record): array => $this->nextLines($record))
                     ->listWithLineBreaks()
+                    ->alignEnd()
                     ->color(fn (?string $state): ?string => $this->lineColors[$state] ?? null),
             ])
+            // Edit and Delete lead the row, so the next runs are the trailing,
+            // right-aligned column (DESIGN.md, The One Age Column Rule).
             ->recordActions([
                 $this->guarded(
                     Action::make('edit')
@@ -98,7 +101,7 @@ class ScheduleTab extends Component implements HasActions, HasSchemas, HasTable
                             ->action(fn (SiteCronJob $record) => $this->submitList($this->stored()->reject(fn (SiteCronJob $j): bool => $j->is($record)))),
                     ),
                 ),
-            ]);
+            ], position: RecordActionsPosition::BeforeColumns);
     }
 
     public function addAction(): Action
