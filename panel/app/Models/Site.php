@@ -37,11 +37,11 @@ class Site extends Model
 
     public const RESERVED_NAMES = ['zimam', 'panel', 'default', 'acme'];
 
-    protected $fillable = ['name', 'type', 'php_version', 'status', 'web_directory', 'template_version', 'last_error'];
+    protected $fillable = ['name', 'type', 'php_version', 'status', 'web_directory', 'template_version', 'last_error', 'scheduler_enabled'];
 
     protected function casts(): array
     {
-        return ['template_version' => 'integer'];
+        return ['template_version' => 'integer', 'scheduler_enabled' => 'boolean'];
     }
 
     public function domains(): HasMany
@@ -122,6 +122,12 @@ class Site extends Model
     public function workers(): HasMany
     {
         return $this->hasMany(SiteWorker::class);
+    }
+
+    /** The site's cron jobs, as last saved from the Schedule tab. */
+    public function cronJobs(): HasMany
+    {
+        return $this->hasMany(SiteCronJob::class);
     }
 
     public function certificate(): HasOne

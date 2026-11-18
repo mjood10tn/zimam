@@ -16,6 +16,7 @@ use App\Models\SecurityFinding;
 use App\Models\SiteBasicAuthUser;
 use App\Models\SiteRepository;
 use App\Models\SiteWorker;
+use App\Support\CronSchedule;
 use App\Support\IpEntry;
 use Carbon\CarbonImmutable;
 use Closure;
@@ -91,6 +92,9 @@ final class FakeAgentClient implements AgentClient
 
     /** @var array<string, list<array<string, mixed>>> each site's workers (WorkerSpecs), as succeeded site.workers jobs left them */
     private array $workers = [];
+
+    /** @var array<string, array{scheduler: bool, jobs: list<array<string, mixed>>}> each site's cron setup, as succeeded site.cron jobs left them */
+    private array $crons = [];
 
     /** How many deploys took the branch's head: each gets its own commit. */
     private int $heads = 0;
@@ -424,7 +428,7 @@ final class FakeAgentClient implements AgentClient
             'php.install', 'php.uninstall', 'php.default' => ['version' => $params['version']],
             'site.provision' => ['name' => $params['name'], 'template_version' => 1],
             'site.php' => ['name' => $params['name'], 'php_version' => $params['php_version']],
-            'site.destroy', 'site.security', 'site.env.write', 'site.workers', 'site.workers.restart' => ['name' => $params['name']],
+            'site.destroy', 'site.security', 'site.env.write', 'site.workers', 'site.workers.restart', 'site.cron' => ['name' => $params['name']],
             'mysql.install' => ['version' => '8.4.13'],
             'db.create', 'db.drop' => ['site' => $params['site'], 'database' => $params['database']],
             'db.user', 'cache.user' => ['site' => $params['site']],
@@ -598,6 +602,7 @@ final class FakeAgentClient implements AgentClient
             ),
             'site.env.write' => $this->envs[$name] = $params['content'],
             'site.workers' => $this->workers[$name] = $params['workers'],
+            'site.cron' => $this->crons[$name] = ['scheduler' => $params['scheduler'], 'jobs' => $params['jobs']],
             'site.destroy' => $this->forget($name),
             'mysql.install' => $this->installMysql($result['version'] ?? '8.4.13'),
             'db.create' => $this->database($params['site'], $params['database']),
@@ -631,7 +636,7 @@ final class FakeAgentClient implements AgentClient
 
     private function forget(string $name): void
     {
-        unset($this->repositories[$name], $this->releases[$name], $this->envs[$name], $this->dbUsers[$name], $this->cacheUsers[$name], $this->workers[$name]);
+        unset($this->repositories[$name], $this->releases[$name], $this->envs[$name], $this->dbUsers[$name], $this->cacheUsers[$name], $this->workers[$name], $this->crons[$name]);
         $this->databases = array_filter($this->databases, fn (array $database): bool => $database['site'] !== $name);
     }
 
@@ -739,6 +744,11 @@ final class FakeAgentClient implements AgentClient
         }
         if (in_array($command->name(), ['site.workers', 'site.workers.restart'], true)) {
             $this->validateWorkers($command->name(), $params);
+
+            return;
+        }
+        if ($command->name() === 'site.cron') {
+            $this->validateCron($params);
 
             return;
         }
@@ -856,6 +866,42 @@ final class FakeAgentClient implements AgentClient
         }
         if ($error !== null) {
             throw new AgentValidationFailed('Invalid parameters', ['workers' => $error]);
+        }
+    }
+
+    /**
+     * The agent's checks of site.cron (CronJobList, CronJobSpec), in its
+     * order: the message names the job, as the agent's does. A static site's
+     * scheduler is the agent's conflict, which the fake can't tell.
+     *
+     * @param  array<string, mixed>  $params
+     */
+    private function validateCron(array $params): void
+    {
+        $this->validateSiteName($params['name']);
+        $error = count($params['jobs']) > 50 ? 'must have at most 50 jobs' : null;
+        $seen = [];
+        foreach ($error === null ? $params['jobs'] : [] as $job) {
+            $command = $job['command'] ?? null;
+            $problem = match (true) {
+                ! preg_match('/^[a-z][a-z0-9-]{0,15}\z/', (string) ($job['id'] ?? '')) => 'id must be 1–16 lowercase letters, digits or hyphens and start with a letter',
+                $job['id'] === 'scheduler' => 'id is reserved for the Laravel scheduler',
+                ! is_string($job['schedule'] ?? null) || CronSchedule::error($job['schedule']) !== null => 'schedule is not a cron schedule',
+                ! is_string($command) || SiteWorker::commandError($command) !== null => 'command must be one line of valid UTF-8, 1 to 4096 bytes, without NUL characters',
+                default => null,
+            };
+            if ($problem !== null) {
+                $error = 'job "'.($job['id'] ?? '').'": '.$problem;
+                break;
+            }
+            if (isset($seen[$job['id']])) {
+                $error = "job \"{$job['id']}\" is listed twice";
+                break;
+            }
+            $seen[$job['id']] = true;
+        }
+        if ($error !== null) {
+            throw new AgentValidationFailed('Invalid parameters', ['jobs' => $error]);
         }
     }
 
