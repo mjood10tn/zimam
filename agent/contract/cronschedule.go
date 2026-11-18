@@ -120,7 +120,8 @@ func (f cronField) value(s string) (int, error) {
 	n, ok := cronNumber(s)
 	if !ok {
 		for i, name := range f.names {
-			if strings.EqualFold(s, name) {
+			// ASCII only: EqualFold would also fold U+017F (long s) to s, which the schema refuses.
+			if len(s) == len(name) && strings.EqualFold(s, name) {
 				n, ok = f.base+i, true
 			}
 		}

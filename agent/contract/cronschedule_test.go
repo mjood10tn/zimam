@@ -13,7 +13,9 @@ func TestCronScheduleRefuses(t *testing.T) {
 		"1-2-3 * * * *", "5-1 * * * *", "*/5/2 * * * *", "5/2 * * * *", ", * * * *", "1,,2 * * * *",
 		"* * * * *\n", "*\n* * * *", "* * * * * # x", "*/5 * * * * %", "0 3 * * 1%2", "% * * * *",
 		"*  * * * *", "*\t* * * *", " * * * * *", "foo * * * *", "* * * mon *", "* * * * jan", "0 3 * * monday",
-		"*/60 * * * *", "$(x) * * * *", "* * * * 1-", "1 2 3 4 5\x00")
+		"*/60 * * * *", "$(x) * * * *", "* * * * 1-", "1 2 3 4 5\x00",
+		// U+017F folds to s under EqualFold, but the schema and cron take ASCII names only.
+		"0 3 * * ſun", "0 3 * * ſat", "0 0 1 ſep *")
 }
 
 func checkAccepts(t *testing.T, in ...string) {
