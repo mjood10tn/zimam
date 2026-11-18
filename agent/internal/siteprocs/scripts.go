@@ -78,25 +78,18 @@ func WriteSiteEnv(ctx context.Context, h Helper, a helper.Account, st sites.Stat
 }
 
 // WriteWorkerScripts writes one script per worker into ~/.zimam/workers (0700)
-// and deletes the others there (site.workers, R04-D3). It returns the workers
-// whose script it changed, which site.workers restarts.
-func WriteWorkerScripts(ctx context.Context, h Helper, a helper.Account, st sites.State, workers []contract.WorkerSpec) (map[contract.WorkerID]bool, error) {
+// and deletes the others there (site.workers, R04-D3). A script whose content
+// is unchanged is not rewritten, so its time tells site.workers whether the
+// worker runs it yet.
+func WriteWorkerScripts(ctx context.Context, h Helper, a helper.Account, st sites.State, workers []contract.WorkerSpec) error {
 	if err := WriteSiteEnv(ctx, h, a, st); err != nil {
-		return nil, err
+		return err
 	}
 	scripts := map[string]templates.WorkerScript{}
 	for _, w := range workers {
 		scripts[string(w.ID)] = workerScript(w)
 	}
-	changed, err := writeScripts(ctx, h, a, workersDir, "site/worker.sh", scripts)
-	if err != nil {
-		return nil, err
-	}
-	ids := map[contract.WorkerID]bool{}
-	for id := range changed {
-		ids[contract.WorkerID(id)] = true
-	}
-	return ids, nil
+	return writeScripts(ctx, h, a, workersDir, "site/worker.sh", scripts)
 }
 
 // WriteCronScripts writes the script of every enabled cron job, and the
@@ -116,38 +109,35 @@ func WriteCronScripts(ctx context.Context, h Helper, a helper.Account, st sites.
 	if cron.Scheduler {
 		scripts[SchedulerID] = templates.CronScript{ID: SchedulerID, Command: "php artisan schedule:run"}
 	}
-	_, err := writeScripts(ctx, h, a, cronDir, "site/cron.sh", scripts)
-	return err
+	return writeScripts(ctx, h, a, cronDir, "site/cron.sh", scripts)
 }
 
 // writeScripts makes dir (0700), writes each script as <id>.sh (0700) and
 // removes every other .sh file in dir; the helper's remove deletes a link
 // itself, never its target. A script already there with the same content is
-// left alone; the ids of the others are returned. The helper reads it back
+// left alone, its modification time with it. The helper reads it back
 // as the site user, so root still opens nothing in the home, and a read that
 // fails (a link, say) only means the script is written again.
-func writeScripts[D any](ctx context.Context, h Helper, a helper.Account, dir, tmpl string, scripts map[string]D) (map[string]bool, error) {
+func writeScripts[D any](ctx context.Context, h Helper, a helper.Account, dir, tmpl string, scripts map[string]D) error {
 	if err := h.Mkdir(ctx, a, dir, 0o700); err != nil {
-		return nil, err
+		return err
 	}
-	changed := map[string]bool{}
 	for id, data := range scripts {
 		out, err := templates.Render(tmpl, data)
 		if err != nil {
-			return nil, fmt.Errorf("script %s: %w", id, err)
+			return fmt.Errorf("script %s: %w", id, err)
 		}
 		name := path.Join(dir, id+".sh")
 		if r, err := h.Read(ctx, a, name, 0, maxScriptBytes); err == nil && bytes.Equal(r.Data, out) {
 			continue
 		}
 		if err := h.Write(ctx, a, name, 0o700, bytes.NewReader(out)); err != nil {
-			return nil, err
+			return err
 		}
-		changed[id] = true
 	}
 	l, err := h.List(ctx, a, dir)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	for _, e := range l.Entries {
 		id, ok := strings.CutSuffix(e.Name, ".sh")
@@ -155,10 +145,10 @@ func writeScripts[D any](ctx context.Context, h Helper, a helper.Account, dir, t
 			continue
 		}
 		if err := h.RemoveTree(ctx, a, path.Join(dir, e.Name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return nil, err
+			return err
 		}
 	}
-	return changed, nil
+	return nil
 }
 
 // workerScript is a worker's script data: the owner's command as it is, or
