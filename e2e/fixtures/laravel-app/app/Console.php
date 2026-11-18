@@ -49,9 +49,23 @@ final class Console
                 echo "Blade templates cached successfully.\n";
 
                 return 0;
+            case 'schedule:run':
+                // What the scheduler's every-minute run does here: one line in
+                // ~/e2e/schedule.log with the PHP version and the release that
+                // ran it, so e2e/scenarios/v04-workers.sh sees cron start it
+                // and which code it ran.
+                $line = sprintf("%s php=%s release=%s\n", gmdate('Y-m-d\TH:i:s\Z'), PHP_VERSION, $base);
+                if (file_put_contents(Services::outputDir().'/schedule.log', $line, FILE_APPEND | LOCK_EX) === false) {
+                    return $this->fail('The schedule log could not be written.');
+                }
+                echo "Ran the scheduled e2e command.\n";
+
+                return 0;
             case 'queue:work':
                 // The Redis queue worker, without Laravel: it runs until stopped, and
-                // ends with the error when Valkey closes its connection.
+                // ends with the error when Valkey closes its connection. The
+                // connection name and options a Zimam worker passes after the
+                // command are taken and ignored.
                 try {
                     return (new Services($this->app))->work(in_array('--once', $args, true));
                 } catch (\Throwable $e) {

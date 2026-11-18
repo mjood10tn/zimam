@@ -13,7 +13,8 @@
 #      reports the new version, bootstrap installed the new panel release,
 #      both sites still answer 200 with their placeholder, a new static
 #      site up-new provisions and answers 200, the panel's /admin/login
-#      answers 200, maintenance exits 0, and the audit log has
+#      answers 200, maintenance exits 0, cron runs and /etc/cron.allow and
+#      /etc/at.allow name only root, and the audit log has
 #      the installer's cli:root entries from both runs. The two sites keep
 #      their template_version and no deploy fields in their state files, and
 #      their vhosts, up-php's pool and their logrotate rules are byte for
@@ -132,6 +133,9 @@ run_job site.provision "{\"name\":\"up-static\",\"domain\":\"up-static.$E2E_DOMA
 run_job site.provision "{\"name\":\"up-php\",\"domain\":\"up-php.$E2E_DOMAIN\",\"type\":\"php\",\"php_version\":\"$php\"}"
 check_sites "on $old"
 ((failed == 0)) || die "FAIL sites: the sites don't answer on $old, before any upgrade"
+# v0.4.0 brought cron and the allow files (OQ1); a server from before has
+# neither file, so the upgrade's repair run is what writes them.
+allow_before=$(in_c sh -c 'ls /etc/cron.allow /etc/at.allow 2>/dev/null' || true)
 # What the agent rendered for the two sites (R02-D9: a release that keeps
 # their template_version re-renders nothing), hashed before and after.
 rendered=(
@@ -204,6 +208,19 @@ if ((${#absent[@]} == 0)); then
 	pass "upgrade: neither MySQL nor Valkey is installed, running, recorded or listening on $new"
 else
 	fail "upgrade: MySQL or Valkey appeared on $new: ${absent[*]}"
+fi
+# The repair run installs cron and writes /etc/cron.allow and /etc/at.allow,
+# root only (OQ1).
+allow=()
+for f in /etc/cron.allow /etc/at.allow; do
+	[[ $(in_c stat -c '%U %a' "$f" 2>&1) == "root 644" && $(in_c cat "$f" 2>&1) == root ]] || allow+=("$f is $(in_c stat -c '%U %a' "$f" 2>&1): $(in_c cat "$f" 2>&1 | head -n 3)")
+done
+in_c dpkg -s cron 2>/dev/null | grep -q '^Status: install ok installed' || allow+=("the cron package isn't installed")
+in_c systemctl is-active --quiet cron || allow+=("cron isn't running")
+if ((${#allow[@]} == 0)); then
+	pass "upgrade: cron runs, and /etc/cron.allow and /etc/at.allow are root's, 0644, naming only root (before: ${allow_before:-neither})"
+else
+	fail "upgrade: ${allow[*]}"
 fi
 # A new site on the upgraded server. A release before v0.1.1 leaves no
 # uid-highwater.json, so the new site user's uid then comes from

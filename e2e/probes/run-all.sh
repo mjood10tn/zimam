@@ -28,7 +28,7 @@ in_c systemctl start zimam-maintenance.service
 
 in_c zimam-fs-hash >"$E2E_WORK/fs-before.txt"
 code=0
-for probe in callers protocol validation archive-names log-symlink journal-paging oom destroy-symlink destroy-schedules deploy databases maintenance; do
+for probe in callers protocol validation archive-names log-symlink journal-paging oom destroy-symlink destroy-schedules deploy workers databases maintenance; do
 	echo "== $probe.sh"
 	bash "$(dirname "$0")/$probe.sh" || code=1
 done
