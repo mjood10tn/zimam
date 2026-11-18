@@ -1,0 +1,21 @@
+# Managed by Zimam. Changes here are overwritten.
+[Unit]
+Description=Zimam worker {{safe .ID}} of site {{safe .Site}} (%i)
+PartOf=zimam-site-{{safe .Site}}.target
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+[Service]
+User=s_{{safe .Site}}
+Group=s_{{safe .Site}}
+ExecStart=/bin/bash /home/s_{{safe .Site}}/.zimam/workers/{{safe .ID}}.sh
+Restart=always
+RestartSec=5
+KillMode=control-group
+KillSignal=SIGTERM
+TimeoutStopSec={{.TimeoutStopSec}}
+MemoryMax={{.MemoryMB}}M
+MemorySwapMax=0
+{{template "systemd/sandbox.part" (printf "/home/s_%s" (safe .Site))}}
+[Install]
+WantedBy=zimam-site-{{safe .Site}}.target

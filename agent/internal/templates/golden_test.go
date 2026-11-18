@@ -73,6 +73,12 @@ var goldenCases = map[string][]goldenFile{
 	"panel-https":   panel(true),
 	// Zimam's own units (§7.1, §11.3).
 	"units": units(),
+	// A site's worker units (R04-D2) with their target: a laravel-queue
+	// worker with a timeout, and a custom one on the defaults. A unit is a
+	// template whatever the worker's processes (1 to 10 are its instances
+	// @1..@10), so the process count never reaches the file.
+	"workers-laravel-queue": workerUnit(WorkerUnit{Site: "shop", ID: "queue", MemoryMB: 512, TimeoutStopSec: 150}),
+	"workers-custom":        workerUnit(WorkerUnit{Site: "shop", ID: "horizon", MemoryMB: 1024, TimeoutStopSec: 90}),
 	// The log policy (§11.3): Zimam's own rules, one site's, and the journal's.
 	"log-policy": logPolicy(),
 	// A laravel site's rules, which also rotate its shared storage's logs
@@ -182,6 +188,14 @@ func units() []goldenFile {
 		files = append(files, goldenFile{path: p.SystemdUnit(name), tmpl: "systemd/" + name, data: func() any { return PanelUnits{PanelPHP: "8.4"} }})
 	}
 	return files
+}
+
+func workerUnit(u WorkerUnit) []goldenFile {
+	var p paths.Paths
+	return []goldenFile{
+		{path: p.SystemdUnit("zimam-worker-" + string(u.Site) + "_" + string(u.ID) + "@.service"), tmpl: "systemd/zimam-worker.service", data: func() any { return u }},
+		{path: p.SystemdUnit("zimam-site-" + string(u.Site) + ".target"), tmpl: "systemd/zimam-site.target", data: func() any { return SiteTarget{Site: u.Site} }},
+	}
 }
 
 func logPolicy() []goldenFile {

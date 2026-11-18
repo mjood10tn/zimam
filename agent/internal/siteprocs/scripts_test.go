@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -26,10 +27,12 @@ import (
 // refusing a symlink that leaves it, is the helper's own behaviour. Exec only
 // records the request.
 type homeHelper struct {
-	root *os.Root
-	home string
-	exec []helper.ExecRequest
-	acct []string
+	root  *os.Root
+	home  string
+	exec  []helper.ExecRequest
+	reads []string // every path Read was asked for
+	ops   []string // "<op> <path>" of every operation but exec
+	acct  []string
 }
 
 func newHome(t *testing.T) *homeHelper {
@@ -45,6 +48,7 @@ func newHome(t *testing.T) *homeHelper {
 
 func (h *homeHelper) serve(a helper.Account, op string, stdin io.Reader, out any, args ...string) error {
 	h.acct = append(h.acct, a.Name)
+	h.ops = append(h.ops, op+" "+args[0])
 	var stdout, stderr bytes.Buffer
 	if stdin == nil {
 		stdin = strings.NewReader("")
@@ -83,6 +87,13 @@ func (h *homeHelper) List(_ context.Context, a helper.Account, dir string) (help
 
 func (h *homeHelper) RemoveTree(_ context.Context, a helper.Account, name string) error {
 	return h.serve(a, "remove-tree", nil, nil, name)
+}
+
+func (h *homeHelper) Read(_ context.Context, a helper.Account, name string, offset, limit int64) (helper.ReadResult, error) {
+	h.reads = append(h.reads, name)
+	var r helper.ReadResult
+	err := h.serve(a, "read", nil, &r, name, strconv.FormatInt(offset, 10), strconv.FormatInt(limit, 10))
+	return r, err
 }
 
 var acct = helper.Account{Name: "s_shop", UID: 1001, GID: 1001, Home: "/home/s_shop"}
@@ -145,7 +156,7 @@ func TestScriptsWrittenThroughHelperAsSiteUser(t *testing.T) {
 		{ID: "queue", Kind: contract.WorkerLaravelQueue, Processes: 1, Connection: "redis", Queues: []contract.QueueName{"high"}},
 		{ID: "ws", Kind: contract.WorkerCustom, Processes: 1, Command: "node ws.js | cat"},
 	}
-	if err := WriteWorkerScripts(context.Background(), h, acct, state("8.4"), workers); err != nil {
+	if _, err := WriteWorkerScripts(context.Background(), h, acct, state("8.4"), workers); err != nil {
 		t.Fatal(err)
 	}
 	cron := contract.SiteCronParams{Name: "shop", Scheduler: true, Jobs: contract.CronJobList{
@@ -197,16 +208,16 @@ func TestStaleScriptsRemoved(t *testing.T) {
 		}
 		return l
 	}
-	if err := WriteWorkerScripts(ctx, h, acct, state(""), w("a", "b")); err != nil {
+	if _, err := WriteWorkerScripts(ctx, h, acct, state(""), w("a", "b")); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteWorkerScripts(ctx, h, acct, state(""), w("b")); err != nil {
+	if _, err := WriteWorkerScripts(ctx, h, acct, state(""), w("b")); err != nil {
 		t.Fatal(err)
 	}
 	if got := h.names(t, ".zimam/workers"); !slices.Equal(got, []string{"b.sh"}) {
 		t.Errorf("workers: %v", got)
 	}
-	if err := WriteWorkerScripts(ctx, h, acct, state(""), nil); err != nil {
+	if _, err := WriteWorkerScripts(ctx, h, acct, state(""), nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := h.names(t, ".zimam/workers"); len(got) != 0 {
@@ -261,7 +272,10 @@ func TestSiteEnvUsesSitePHPVersion(t *testing.T) {
 // Each half writes site.env.sh first (ledger R3).
 func TestEveryWriteStartsWithSiteEnv(t *testing.T) {
 	for name, run := range map[string]func(h *homeHelper) error{
-		"workers": func(h *homeHelper) error { return WriteWorkerScripts(context.Background(), h, acct, state("8.4"), nil) },
+		"workers": func(h *homeHelper) error {
+			_, err := WriteWorkerScripts(context.Background(), h, acct, state("8.4"), nil)
+			return err
+		},
 		"cron": func(h *homeHelper) error {
 			return WriteCronScripts(context.Background(), h, acct, state("8.4"), contract.SiteCronParams{Name: "shop", Jobs: contract.CronJobList{}})
 		},
@@ -284,7 +298,7 @@ func TestScriptDirRefusesSymlink(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(h.home, ".zimam")); err != nil {
 		t.Fatal(err)
 	}
-	err := WriteWorkerScripts(context.Background(), h, acct, state("8.4"), []contract.WorkerSpec{{ID: "a", Kind: contract.WorkerCustom, Processes: 1, Command: "x"}})
+	_, err := WriteWorkerScripts(context.Background(), h, acct, state("8.4"), []contract.WorkerSpec{{ID: "a", Kind: contract.WorkerCustom, Processes: 1, Command: "x"}})
 	if err == nil {
 		t.Fatal("wrote through a .zimam symlink")
 	}

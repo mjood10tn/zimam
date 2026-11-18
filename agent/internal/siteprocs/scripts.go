@@ -30,7 +30,12 @@ type Helper interface {
 	Write(ctx context.Context, a helper.Account, name string, mode fs.FileMode, content io.Reader) error
 	List(ctx context.Context, a helper.Account, dir string) (helper.Listing, error)
 	RemoveTree(ctx context.Context, a helper.Account, name string) error
+	Read(ctx context.Context, a helper.Account, name string, offset, limit int64) (helper.ReadResult, error)
 }
+
+// maxScriptBytes bounds reading a script back: a header and one command line
+// of at most 4096 bytes.
+const maxScriptBytes = 64 << 10
 
 var _ Helper = (*helper.Client)(nil)
 
@@ -73,16 +78,25 @@ func WriteSiteEnv(ctx context.Context, h Helper, a helper.Account, st sites.Stat
 }
 
 // WriteWorkerScripts writes one script per worker into ~/.zimam/workers (0700)
-// and deletes the others there (site.workers, R04-D3).
-func WriteWorkerScripts(ctx context.Context, h Helper, a helper.Account, st sites.State, workers []contract.WorkerSpec) error {
+// and deletes the others there (site.workers, R04-D3). It returns the workers
+// whose script it changed, which site.workers restarts.
+func WriteWorkerScripts(ctx context.Context, h Helper, a helper.Account, st sites.State, workers []contract.WorkerSpec) (map[contract.WorkerID]bool, error) {
 	if err := WriteSiteEnv(ctx, h, a, st); err != nil {
-		return err
+		return nil, err
 	}
 	scripts := map[string]templates.WorkerScript{}
 	for _, w := range workers {
 		scripts[string(w.ID)] = workerScript(w)
 	}
-	return writeScripts(ctx, h, a, workersDir, "site/worker.sh", scripts)
+	changed, err := writeScripts(ctx, h, a, workersDir, "site/worker.sh", scripts)
+	if err != nil {
+		return nil, err
+	}
+	ids := map[contract.WorkerID]bool{}
+	for id := range changed {
+		ids[contract.WorkerID(id)] = true
+	}
+	return ids, nil
 }
 
 // WriteCronScripts writes the script of every enabled cron job, and the
@@ -102,28 +116,38 @@ func WriteCronScripts(ctx context.Context, h Helper, a helper.Account, st sites.
 	if cron.Scheduler {
 		scripts[SchedulerID] = templates.CronScript{ID: SchedulerID, Command: "php artisan schedule:run"}
 	}
-	return writeScripts(ctx, h, a, cronDir, "site/cron.sh", scripts)
+	_, err := writeScripts(ctx, h, a, cronDir, "site/cron.sh", scripts)
+	return err
 }
 
 // writeScripts makes dir (0700), writes each script as <id>.sh (0700) and
 // removes every other .sh file in dir; the helper's remove deletes a link
-// itself, never its target.
-func writeScripts[D any](ctx context.Context, h Helper, a helper.Account, dir, tmpl string, scripts map[string]D) error {
+// itself, never its target. A script already there with the same content is
+// left alone; the ids of the others are returned. The helper reads it back
+// as the site user, so root still opens nothing in the home, and a read that
+// fails (a link, say) only means the script is written again.
+func writeScripts[D any](ctx context.Context, h Helper, a helper.Account, dir, tmpl string, scripts map[string]D) (map[string]bool, error) {
 	if err := h.Mkdir(ctx, a, dir, 0o700); err != nil {
-		return err
+		return nil, err
 	}
+	changed := map[string]bool{}
 	for id, data := range scripts {
 		out, err := templates.Render(tmpl, data)
 		if err != nil {
-			return fmt.Errorf("script %s: %w", id, err)
+			return nil, fmt.Errorf("script %s: %w", id, err)
 		}
-		if err := h.Write(ctx, a, path.Join(dir, id+".sh"), 0o700, bytes.NewReader(out)); err != nil {
-			return err
+		name := path.Join(dir, id+".sh")
+		if r, err := h.Read(ctx, a, name, 0, maxScriptBytes); err == nil && bytes.Equal(r.Data, out) {
+			continue
 		}
+		if err := h.Write(ctx, a, name, 0o700, bytes.NewReader(out)); err != nil {
+			return nil, err
+		}
+		changed[id] = true
 	}
 	l, err := h.List(ctx, a, dir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for _, e := range l.Entries {
 		id, ok := strings.CutSuffix(e.Name, ".sh")
@@ -131,10 +155,10 @@ func writeScripts[D any](ctx context.Context, h Helper, a helper.Account, dir, t
 			continue
 		}
 		if err := h.RemoveTree(ctx, a, path.Join(dir, e.Name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return changed, nil
 }
 
 // workerScript is a worker's script data: the owner's command as it is, or

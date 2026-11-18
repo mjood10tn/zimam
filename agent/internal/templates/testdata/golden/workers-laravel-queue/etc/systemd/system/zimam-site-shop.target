@@ -1,0 +1,6 @@
+# Managed by Zimam. Changes here are overwritten.
+[Unit]
+Description=Zimam workers of site shop
+
+[Install]
+WantedBy=multi-user.target

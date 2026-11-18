@@ -1,0 +1,32 @@
+# Managed by Zimam. Changes here are overwritten.
+[Unit]
+Description=Zimam worker queue of site shop (%i)
+PartOf=zimam-site-shop.target
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+[Service]
+User=s_shop
+Group=s_shop
+ExecStart=/bin/bash /home/s_shop/.zimam/workers/queue.sh
+Restart=always
+RestartSec=5
+KillMode=control-group
+KillSignal=SIGTERM
+TimeoutStopSec=150
+MemoryMax=512M
+MemorySwapMax=0
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindPaths=/home/s_shop
+ReadWritePaths=/home/s_shop
+RestrictSUIDSGID=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+UMask=0027
+
+[Install]
+WantedBy=zimam-site-shop.target

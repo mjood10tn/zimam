@@ -234,7 +234,7 @@ if [ -f "$src/etc/zimam/logrotate.conf" ]; then
 	fi
 fi
 
-units=("$src"/etc/systemd/system/*.service "$src"/etc/systemd/system/*.timer "$src"/etc/systemd/system/*.socket)
+units=("$src"/etc/systemd/system/*.service "$src"/etc/systemd/system/*.timer "$src"/etc/systemd/system/*.socket "$src"/etc/systemd/system/*.target)
 if [ "${#units[@]}" -gt 0 ]; then
 	# The image has no agent, so units that run it get a stand-in. Any other
 	# missing program fails the check.

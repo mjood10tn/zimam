@@ -8,8 +8,8 @@ import (
 )
 
 func TestNewAddsJobCommands(t *testing.T) {
-	if h := New(sysexec.Deps{}, nil); len(h) != 8 || h["agent.version"] == nil || h["system.status"] == nil || h["system.metrics"] == nil || h["logs.list"] == nil || h["logs.read"] == nil || h["site.releases"] == nil || h["site.env.read"] == nil || h["db.list"] == nil {
-		t.Errorf("New(d, nil) has %d handlers, want only the reads: agent.version, system.status, system.metrics, logs.list, logs.read, site.releases, site.env.read and db.list", len(h))
+	if h := New(sysexec.Deps{}, nil); len(h) != 9 || h["site.workers.status"] == nil || h["agent.version"] == nil || h["system.status"] == nil || h["system.metrics"] == nil || h["logs.list"] == nil || h["logs.read"] == nil || h["site.releases"] == nil || h["site.env.read"] == nil || h["db.list"] == nil {
+		t.Errorf("New(d, nil) has %d handlers, want only the reads: agent.version, system.status, system.metrics, logs.list, logs.read, site.releases, site.env.read, db.list and site.workers.status", len(h))
 	}
 	m := &jobs.Manager{Handlers: map[string]jobs.Handler{"php.default": nil}}
 	h := New(sysexec.Deps{}, m)

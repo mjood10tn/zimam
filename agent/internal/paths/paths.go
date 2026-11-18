@@ -288,6 +288,9 @@ func (p Paths) ValkeyTestDir() string { return p.at("run/zimam-valkey-test") }
 func (p Paths) SystemdUnit(name string) string { return p.at("etc/systemd/system", name) }
 func (p Paths) JournaldDropIn() string         { return p.at("etc/systemd/journald.conf.d/50-zimam.conf") }
 
+// SystemdUnitDir holds the units, a site's worker units among them (R04-D2).
+func (p Paths) SystemdUnitDir() string { return p.at("etc/systemd/system") }
+
 // OwnLogrotateConf rotates the audit log and the panel's Laravel log (§11.3).
 func (p Paths) OwnLogrotateConf() string { return p.at("etc/zimam/logrotate.d/zimam-own.conf") }
 

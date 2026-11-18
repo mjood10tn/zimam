@@ -128,3 +128,16 @@ type CronScript struct {
 	ID      contract.WorkerID
 	Command contract.OwnerCommand
 }
+
+// WorkerUnit fills systemd/zimam-worker.service, one worker's template unit
+// (R04-D2). It holds only validated fields: the owner's command lives in the
+// script the unit names.
+type WorkerUnit struct {
+	Site           contract.SiteName
+	ID             contract.WorkerID
+	MemoryMB       contract.WorkerMemoryMB
+	TimeoutStopSec int // the worker's timeout plus 30
+}
+
+// SiteTarget fills systemd/zimam-site.target, which groups a site's workers.
+type SiteTarget struct{ Site contract.SiteName }

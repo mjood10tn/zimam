@@ -1,5 +1,6 @@
 // Package systemd installs Zimam's own units: the panel's queue worker and
-// scheduler, and the maintenance timer (design §7.1, §11.3).
+// scheduler, and the maintenance timer (design §7.1, §11.3). It also names
+// and removes a site's worker units (R04-D2), which siteprocs renders.
 package systemd
 
 import (

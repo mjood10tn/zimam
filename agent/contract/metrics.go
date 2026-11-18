@@ -24,6 +24,22 @@ type SystemMetricsResult struct {
 	Disks         []DiskUsage     `json:"disks"`          // statfs of each real mount
 	Network       NetworkCounters `json:"network"`        // /proc/net/dev, loopback left out
 	Services      []ServiceState  `json:"services"`       // the monitored units
+	// Workers are every site's queue workers (v0.4.0, R04-D8); left out on
+	// a server without any, and by an older agent.
+	Workers []WorkerMetric `json:"workers,omitempty"`
+}
+
+// WorkerMetric is one worker of a site. Restarts is its processes' NRestarts
+// summed, which also counts clean exits. Failing is true while a process
+// waits to restart after a failed exit, or systemd gave it up (Failed). The
+// panel warns worker-crashloop:<site>:<worker> when Restarts rose by more
+// than 5 in 10 minutes while Failing (R04-D17).
+type WorkerMetric struct {
+	Site     SiteName `json:"site"`
+	Worker   WorkerID `json:"worker"`
+	Restarts int      `json:"restarts"`
+	Failing  bool     `json:"failing"`
+	Failed   bool     `json:"failed"`
 }
 
 type LoadAverages struct {

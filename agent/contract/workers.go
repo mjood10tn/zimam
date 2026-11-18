@@ -56,6 +56,9 @@ const (
 	maxOwnerCommandBytes   = 4096
 	DefaultWorkerMemoryMB  = WorkerMemoryMB(512)
 	DefaultQueueConnection = QueueConnection("default")
+	// MaxWorkerProcesses is the most processes a worker has; the agent
+	// stops @1..@10 of a worker it removes, whatever its state said.
+	MaxWorkerProcesses = maxWorkerProcesses
 )
 
 // WorkerID names a worker, or a cron job, within a site. It ends up in unit

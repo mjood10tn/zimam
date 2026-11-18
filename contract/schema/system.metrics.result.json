@@ -185,6 +185,47 @@
     },
     "uptime_seconds": {
       "type": "number"
+    },
+    "workers": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "failed": {
+            "type": "boolean"
+          },
+          "failing": {
+            "type": "boolean"
+          },
+          "restarts": {
+            "type": "integer"
+          },
+          "site": {
+            "not": {
+              "enum": [
+                "zimam",
+                "panel",
+                "default",
+                "acme"
+              ]
+            },
+            "pattern": "^[a-z][a-z0-9-]{0,22}[a-z0-9]$",
+            "type": "string"
+          },
+          "worker": {
+            "pattern": "^[a-z][a-z0-9-]{0,15}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "failed",
+          "failing",
+          "restarts",
+          "site",
+          "worker"
+        ],
+        "type": "object"
+      },
+      "type": "array"
     }
   },
   "required": [
