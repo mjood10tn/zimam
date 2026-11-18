@@ -113,6 +113,13 @@ func Destroy(ctx context.Context, d sysexec.Deps, h Helper, lookup Lookup, name 
 		return contract.SiteNameResult{}, err
 	}
 
+	// Step 2c: the cron file goes with them, and before userdel: one line
+	// naming a missing user makes cron ignore the whole file (spike, R04-D5).
+	// Cron needs no reload to notice.
+	if err := removeFile(p.CronDFile(name)); err != nil {
+		return contract.SiteNameResult{}, err
+	}
+
 	a, err := lookup(username)
 	userExists := err == nil
 	if err != nil && !errors.As(err, new(user.UnknownUserError)) {

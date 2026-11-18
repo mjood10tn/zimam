@@ -108,6 +108,10 @@ var production = map[string]string{
 	"SystemdUnit":           "/etc/systemd/system/site:shop", // the test passes every string argument "site:shop"
 	"JournaldDropIn":        "/etc/systemd/journald.conf.d/50-zimam.conf",
 	"SystemdUnitDir":        "/etc/systemd/system",
+	"CronDFile":             "/etc/cron.d/zimam-shop",
+	"CronDDir":              "/etc/cron.d",
+	"CronAllow":             "/etc/cron.allow",
+	"AtAllow":               "/etc/at.allow",
 	"OwnLogrotateConf":      "/etc/zimam/logrotate.d/zimam-own.conf",
 	"LetsEncryptCert":       "/etc/letsencrypt/live/site:shop/cert.pem",
 	"CertRecord":            "/var/lib/zimam/certs/site:shop.json",

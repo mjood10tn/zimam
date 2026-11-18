@@ -1,0 +1,7 @@
+# Managed by Zimam for site {{siteName .Site}}. Changes here are overwritten.
+SHELL=/bin/sh
+PATH=/usr/bin:/bin
+MAILTO=""
+{{if .Scheduler}}* * * * * s_{{siteName .Site}} /bin/bash /home/s_{{siteName .Site}}/.zimam/cron/scheduler.sh
+{{end}}{{range .Jobs}}{{cronSchedule .Schedule}} s_{{siteName $.Site}} /bin/bash /home/s_{{siteName $.Site}}/.zimam/cron/{{safe .ID}}.sh
+{{end}}

@@ -24,14 +24,20 @@ func init() {
 	jobHandlers["site.workers"] = siteWorkers
 }
 
-// workerSite is the state of a site that can have workers: not_found for a
-// site that doesn't exist, conflict for a static one, which has no PHP to
-// run them (as site.php answers it).
-func workerSite(d sysexec.Deps, name contract.SiteName) (sites.State, error) {
+// loadSite is the state of a site, not_found for one that doesn't exist.
+func loadSite(d sysexec.Deps, name contract.SiteName) (sites.State, error) {
 	st, err := sites.Load(d.Paths, name)
 	if errors.Is(err, fs.ErrNotExist) {
 		return sites.State{}, &contract.AgentError{Code: contract.ErrNotFound, Message: fmt.Sprintf("Site %s doesn't exist.", name)}
 	}
+	return st, err
+}
+
+// workerSite is the state of a site that can have workers: not_found for a
+// site that doesn't exist, conflict for a static one, which has no PHP to
+// run them (as site.php answers it).
+func workerSite(d sysexec.Deps, name contract.SiteName) (sites.State, error) {
+	st, err := loadSite(d, name)
 	if err != nil {
 		return sites.State{}, err
 	}

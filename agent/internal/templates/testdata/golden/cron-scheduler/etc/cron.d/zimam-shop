@@ -1,0 +1,5 @@
+# Managed by Zimam for site shop. Changes here are overwritten.
+SHELL=/bin/sh
+PATH=/usr/bin:/bin
+MAILTO=""
+* * * * * s_shop /bin/bash /home/s_shop/.zimam/cron/scheduler.sh

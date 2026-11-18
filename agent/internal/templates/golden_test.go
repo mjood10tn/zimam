@@ -79,6 +79,16 @@ var goldenCases = map[string][]goldenFile{
 	// @1..@10), so the process count never reaches the file.
 	"workers-laravel-queue": workerUnit(WorkerUnit{Site: "shop", ID: "queue", MemoryMB: 512, TimeoutStopSec: 150}),
 	"workers-custom":        workerUnit(WorkerUnit{Site: "shop", ID: "horizon", MemoryMB: 1024, TimeoutStopSec: 90}),
+	// A site's cron file (R04-D5): the scheduler alone, jobs alone, and both.
+	// A schedule is rendered normalised, so "@daily" is "0 0 * * *".
+	"cron-scheduler": cronFile(SiteCron{Site: "shop", Scheduler: true}),
+	"cron-jobs":      cronFile(SiteCron{Site: "shop", Jobs: []CronLine{{ID: "backup", Schedule: "0 3 * * 1"}, {ID: "tidy", Schedule: "*/15 1-5,7 * 1-3 *"}}}),
+	"cron-both":      cronFile(SiteCron{Site: "my-shop", Scheduler: true, Jobs: []CronLine{{ID: "report", Schedule: "30 6 1 * *"}}}),
+	// The root-only allow files (OQ1).
+	"cron-allow": {
+		{path: paths.Paths{}.CronAllow(), tmpl: "cron/cron.allow"},
+		{path: paths.Paths{}.AtAllow(), tmpl: "cron/at.allow"},
+	},
 	// The log policy (§11.3): Zimam's own rules, one site's, and the journal's.
 	"log-policy": logPolicy(),
 	// A laravel site's rules, which also rotate its shared storage's logs
@@ -188,6 +198,10 @@ func units() []goldenFile {
 		files = append(files, goldenFile{path: p.SystemdUnit(name), tmpl: "systemd/" + name, data: func() any { return PanelUnits{PanelPHP: "8.4"} }})
 	}
 	return files
+}
+
+func cronFile(c SiteCron) []goldenFile {
+	return []goldenFile{{path: paths.Paths{}.CronDFile(c.Site), tmpl: "cron/site.cron", data: func() any { return c }}}
 }
 
 func workerUnit(u WorkerUnit) []goldenFile {
@@ -361,8 +375,9 @@ type renderedString struct {
 // use, such as SuryRepo.Host in the source file, is left out.
 func renderedStrings(t testing.TB) []renderedString {
 	// A string a template checks again before writing it, such as a
-	// bcrypt hash in htpasswd, takes the sentinel in its own shape.
-	sentinels := []string{"zimamsentinel", "$2y$12$zimamsentinel" + strings.Repeat("a", 40)}
+	// bcrypt hash in htpasswd, or a cron schedule, takes the sentinel in its
+	// own shape.
+	sentinels := []string{"zimamsentinel", "$2y$12$zimamsentinel" + strings.Repeat("a", 40), "0 0 1 1 *"}
 	var found []renderedString
 	for name, files := range goldenCases {
 		for _, gf := range files {

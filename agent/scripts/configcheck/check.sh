@@ -234,6 +234,16 @@ if [ -f "$src/etc/zimam/logrotate.conf" ]; then
 	fi
 fi
 
+# A site's cron file: cron has no config test, so check what it ignores the
+# whole file for (spike, R04-D5): a name with a dot, no final newline. The
+# agent's own check (siteprocs.checkCronFile) does the rest.
+for f in "$src"/etc/cron.d/*; do
+	name=$(basename "$f")
+	case "$name" in *.*) fail "$name: cron ignores a file name with a dot" ;; esac
+	[ -z "$(tail -c1 "$f")" ] || fail "$name: no newline at the end, so cron ignores the file"
+	[ "$(grep -cE '^(SHELL=/bin/sh|PATH=/usr/bin:/bin|MAILTO="")$' "$f")" -eq 3 ] || fail "$name: not the three environment lines"
+done
+
 units=("$src"/etc/systemd/system/*.service "$src"/etc/systemd/system/*.timer "$src"/etc/systemd/system/*.socket "$src"/etc/systemd/system/*.target)
 if [ "${#units[@]}" -gt 0 ]; then
 	# The image has no agent, so units that run it get a stand-in. Any other

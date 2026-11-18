@@ -344,3 +344,38 @@ func TestDestroyRemovesUnitsFirst(t *testing.T) {
 		t.Error("another site's unit was removed")
 	}
 }
+
+// The site's cron file goes before its user does: one line naming a deleted
+// user makes cron ignore the whole file (spike, R04-D5). Another site's file,
+// whose name starts the same, stays.
+func TestDestroyRemovesCronFile(t *testing.T) {
+	e := provisioned(t)
+	mkdir(t, e.p.CronDDir())
+	file, other := e.p.CronDFile("shop"), e.p.CronDFile("shop2")
+	writeFile(t, file, "SHELL=/bin/sh\n")
+	writeFile(t, other, "SHELL=/bin/sh\n")
+	gone := map[string]bool{}
+	for _, cmd := range []string{pkillCmd, userdelCmd} {
+		e.onRun[cmd] = func() { gone[cmd] = !exists(file) }
+	}
+	if _, err := e.destroy(); err != nil {
+		t.Fatal(err)
+	}
+	if !gone[pkillCmd] || !gone[userdelCmd] {
+		t.Errorf("the cron file still existed when the processes were killed or the user deleted: %v", gone)
+	}
+	if exists(file) {
+		t.Error("the cron file is left")
+	}
+	if !exists(other) {
+		t.Error("another site's cron file was removed")
+	}
+}
+
+// A site that never had a cron file destroys as before.
+func TestDestroyWithoutCronFile(t *testing.T) {
+	e := provisioned(t)
+	if _, err := e.destroy(); err != nil {
+		t.Fatal(err)
+	}
+}
