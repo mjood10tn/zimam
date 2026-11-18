@@ -23,6 +23,7 @@ use App\Agent\Commands\PhpDefault;
 use App\Agent\Commands\PhpInstall;
 use App\Agent\Commands\PhpUninstall;
 use App\Agent\Commands\SecurityCheck;
+use App\Agent\Commands\SiteCron;
 use App\Agent\Commands\SiteDeploy;
 use App\Agent\Commands\SiteDestroy;
 use App\Agent\Commands\SiteEnvRead;
@@ -116,6 +117,7 @@ final class SchemaTest extends TestCase
             new SiteWorkers('shop', self::workerSpecs()),
             new SiteWorkersStatus('shop'),
             new SiteWorkersRestart('shop', 'queue'),
+            new SiteCron('shop', true, self::cronJobs()),
         ];
 
         return array_combine(
@@ -131,6 +133,26 @@ final class SchemaTest extends TestCase
             ['id' => 'horizon', 'kind' => 'custom', 'processes' => 1, 'memory_mb' => 1024, 'command' => 'php artisan horizon'],
             ['id' => 'queue', 'kind' => 'laravel-queue', 'processes' => 10, 'memory_mb' => 512, 'connection' => 'redis', 'queues' => ['high', 'emails:low'], 'tries' => 3, 'timeout' => 0, 'sleep' => 3, 'max_time' => 3600, 'backoff' => 10],
         ];
+    }
+
+    /** @return list<array<string, mixed>> an enabled job on a macro and a paused one on a full schedule, as SiteCronJob::spec() builds them */
+    private static function cronJobs(): array
+    {
+        return [
+            ['id' => 'report', 'schedule' => '@daily', 'command' => 'php artisan report', 'enabled' => true],
+            ['id' => 'tidy', 'schedule' => '0,30 */2 1-15/3 jan,jul sat-sun', 'command' => 'php artisan tidy', 'enabled' => false],
+        ];
+    }
+
+    /** site.cron with the least it takes: no jobs, no scheduler; and the fake's answer. */
+    public function testCronParamsAndFakeResultMatchSchemas(): void
+    {
+        $empty = new SiteCron('shop', false, []);
+        $this->assertValid(self::wire($empty->jsonParams()), file_get_contents($this->schemaPath('site.cron.params')), 'site.cron');
+        $fake = new FakeAgentClient;
+        $final = $fake->follow($fake->submit(new SiteCron('shop', true, self::cronJobs()))->id, 0, function (): void {});
+        $this->assertSame('succeeded', $final->status);
+        $this->assertResult('site.cron', $final->result, 'fake site.cron result');
     }
 
     /** The worker commands with the least they take: no workers, every worker restarted. */

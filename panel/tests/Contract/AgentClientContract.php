@@ -7,6 +7,7 @@ use App\Agent\AgentJobStatus;
 use App\Agent\Commands\AgentVersion;
 use App\Agent\Commands\E2eSleep;
 use App\Agent\Commands\JobCancel;
+use App\Agent\Commands\SiteCron;
 use App\Agent\Commands\SiteDeploy;
 use App\Agent\Commands\SiteEnvWrite;
 use App\Agent\Commands\SiteProvision;
@@ -80,6 +81,24 @@ abstract class AgentClientContract extends TestCase
                 $this->fail("{$command->name()} accepted a bad {$field}");
             } catch (AgentValidationFailed $e) {
                 $this->assertSame([$field], array_keys($e->fields()), "{$command->name()} {$field}");
+            }
+        }
+    }
+
+    /**
+     * site.cron's validation, answered before anything runs: a schedule the
+     * agent refuses, a command over two lines, the id the scheduler's script
+     * takes.
+     */
+    public function testCronValidationShape(): void
+    {
+        $job = ['id' => 'report', 'schedule' => '@daily', 'command' => 'php artisan report', 'enabled' => true];
+        foreach ([[...$job, 'schedule' => '@reboot'], [...$job, 'command' => "a\nb"], [...$job, 'id' => 'scheduler']] as $bad) {
+            try {
+                $this->client->submit(new SiteCron('contract-cron', false, [$bad]));
+                $this->fail('site.cron accepted a bad job');
+            } catch (AgentValidationFailed $e) {
+                $this->assertSame(['jobs'], array_keys($e->fields()));
             }
         }
     }

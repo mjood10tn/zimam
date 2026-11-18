@@ -8,6 +8,7 @@ use App\Filament\Resources\SiteResource\Pages\DatabaseTab;
 use App\Filament\Resources\SiteResource\Pages\DeploymentsTab;
 use App\Filament\Resources\SiteResource\Pages\EnvironmentTab;
 use App\Filament\Resources\SiteResource\Pages\ListSites;
+use App\Filament\Resources\SiteResource\Pages\ScheduleTab;
 use App\Filament\Resources\SiteResource\Pages\SecurityTab;
 use App\Filament\Resources\SiteResource\Pages\ViewSite;
 use App\Filament\Resources\SiteResource\Pages\WorkersTab;
@@ -162,6 +163,10 @@ class SiteResource extends Resource
                     ->schema([
                         Livewire::make(WorkersTab::class, fn (Site $record): array => ['site' => $record])->key('site-workers')->lazy(),
                     ]),
+                // A static site gets cron jobs, but not the Laravel scheduler (the tab says so).
+                Tab::make(__('zimam.sites.tabs.schedule'))->schema([
+                    Livewire::make(ScheduleTab::class, fn (Site $record): array => ['site' => $record])->key('site-schedule')->lazy(),
+                ]),
                 Tab::make(__('zimam.sites.tabs.database'))->schema([
                     Livewire::make(DatabaseTab::class, fn (Site $record): array => ['site' => $record])->key('site-database')->lazy(),
                 ]),

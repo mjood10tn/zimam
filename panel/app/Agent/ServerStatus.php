@@ -6,6 +6,7 @@ use App\Agent\Commands\SystemStatus;
 use App\Agent\Exceptions\AgentException;
 use App\Agent\Exceptions\AgentUnavailable;
 use Carbon\CarbonImmutable;
+use DateTimeZone;
 use Illuminate\Support\Facades\Cache;
 
 /**
@@ -104,6 +105,17 @@ final class ServerStatus
     public function serviceUnknown(string $name): bool
     {
         return array_key_exists('services', $this->data) && ($this->data['services'][$name] ?? null) === null;
+    }
+
+    /**
+     * The zone cron runs jobs in (ruling R7): the status's IANA name, or UTC
+     * from an agent that predates it or one that names a zone PHP doesn't know.
+     */
+    public function timezone(): string
+    {
+        $zone = $this->data['timezone'] ?? 'UTC';
+
+        return is_string($zone) && in_array($zone, DateTimeZone::listIdentifiers(), true) ? $zone : 'UTC';
     }
 
     /** When the next answer is due, for the bulletin's "Next" time. */

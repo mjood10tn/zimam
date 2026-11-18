@@ -12,6 +12,7 @@ use App\Agent\JobLogReader;
 use App\Agent\JobOutcomes;
 use App\Agent\Outcomes\CacheOutcomes;
 use App\Agent\Outcomes\CertificateOutcomes;
+use App\Agent\Outcomes\CronOutcomes;
 use App\Agent\Outcomes\DatabaseOutcomes;
 use App\Agent\Outcomes\DeploymentOutcomes;
 use App\Agent\Outcomes\PhpOutcomes;
@@ -43,6 +44,7 @@ class AgentServiceProvider extends ServiceProvider
             DatabaseOutcomes::register($outcomes);
             CacheOutcomes::register($outcomes);
             WorkerOutcomes::register($outcomes);
+            CronOutcomes::register($outcomes);
 
             return $outcomes;
         });
