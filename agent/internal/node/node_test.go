@@ -330,3 +330,30 @@ func TestRefreshRepoKeepsTheMajor(t *testing.T) {
 		t.Errorf("hits = %d, sources:\n%s", e.keys.hits, readFile(t, e.p.NodeSources()))
 	}
 }
+
+// RefreshRepo reads the followed major under the repository lock: a
+// node.install that switches it while the refresh waits must win.
+func TestRefreshRepoReadsTheMajorUnderTheLock(t *testing.T) {
+	e := newEnv(t, fixture(t))
+	e.run.Add(aptUpdate)
+	if err := EnsureRepo(context.Background(), e.d, "24"); err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := sysexec.Lock(context.Background(), e.p.AptRepoLock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- RefreshRepo(context.Background(), e.d) }()
+	time.Sleep(150 * time.Millisecond)
+	if err := os.WriteFile(e.p.NodeSources(), []byte("URIs: https://deb.nodesource.com/node_26.x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+	if err := <-done; err != nil {
+		t.Fatalf("RefreshRepo: %v", err)
+	}
+	if src := readFile(t, e.p.NodeSources()); !strings.Contains(src, "node_26.x") {
+		t.Errorf("the refresh wrote back the major it read before the lock:\n%s", src)
+	}
+}
