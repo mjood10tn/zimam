@@ -19,6 +19,7 @@ import (
 	"zimam/agent/internal/paths"
 	"zimam/agent/internal/sites"
 	"zimam/agent/internal/sysexec"
+	"zimam/agent/internal/systemd"
 )
 
 // Helper is what reading a site's PHP error and Laravel logs needs of the
@@ -85,6 +86,18 @@ func resolve(e Env, id contract.LogSource, name contract.SiteName) (source, erro
 			return source{}, fmt.Errorf("looking up s_%s: %w", name, err)
 		}
 		return source{kind: helperFile, path: "site/shared/storage/logs/laravel.log", acct: a}, nil
+	case "site.workers":
+		// The journal of this site's worker units (R04-D2), matched by a glob
+		// built from the validated name, never one from the panel.
+		return source{kind: journal, units: []string{systemd.WorkerUnitGlob(name)}}, nil
+	case "site.cron":
+		// The cron scripts append here (R04-D4); read like site.php-error,
+		// never by root. No job run yet reads as an empty log.
+		a, err := e.Lookup("s_" + string(name))
+		if err != nil {
+			return source{}, fmt.Errorf("looking up s_%s: %w", name, err)
+		}
+		return source{kind: helperFile, path: "logs/cron.log", acct: a}, nil
 	case "file.nginx-error":
 		return source{kind: rootFile, path: at(p, "var/log/nginx/error.log")}, nil
 	case "file.certbot":

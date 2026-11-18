@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"slices"
 	"strconv"
 	"time"
@@ -28,7 +30,12 @@ func Read(ctx context.Context, e Env, p contract.LogsReadParams) (contract.LogsR
 	if src.kind == journal {
 		return readJournal(ctx, e, src, p)
 	}
-	return readFile(ctx, e, src, p)
+	res, err := readFile(ctx, e, src, p)
+	if p.Source == "site.cron" && p.Archive == "" && errors.Is(err, fs.ErrNotExist) {
+		// No cron job has run yet, so there is no log: empty, not an error.
+		return contract.LogsReadResult{Lines: []contract.FileLogLine{}, Entries: []contract.JournalEntry{}}, nil
+	}
+	return res, err
 }
 
 // readJournal runs journalctl --output=json --no-pager with the source's
