@@ -11,7 +11,9 @@ use App\Agent\Commands\SiteRepo;
 use App\Agent\Commands\SiteRollback;
 use App\Agent\Exceptions\AgentException;
 use App\Agent\Exceptions\AgentValidationFailed;
+use App\Agent\ServerStatus;
 use App\Filament\Actions\ConfirmsPassword;
+use App\Filament\Pages\Node;
 use App\Models\Deployment;
 use App\Models\Site;
 use App\Models\SiteRepository;
@@ -29,6 +31,7 @@ use Filament\Schemas\Schema;
 use Filament\Support\Exceptions\Halt;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\HtmlString;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
 
@@ -176,7 +179,7 @@ class DeploymentsTab extends Component implements HasActions, HasSchemas
                     ->helperText(__('zimam.deployments.settings.auto_deploy_help')),
                 Textarea::make('deploy_script')
                     ->label(__('zimam.deployments.settings.script'))
-                    ->helperText(__('zimam.deployments.settings.script_help').' '.__('zimam.deployments.settings.script_node'))
+                    ->helperText(fn (): HtmlString => $this->scriptHint())
                     ->rows(8)
                     ->extraInputAttributes(['class' => 'font-mono', 'spellcheck' => 'false'])
                     // The limit is in bytes, as the agent counts it, so no
@@ -198,6 +201,25 @@ class DeploymentsTab extends Component implements HasActions, HasSchemas
                     ->minValue(SiteRepository::MIN_KEEP_RELEASES)
                     ->maxValue(SiteRepository::MAX_KEEP_RELEASES),
             ]);
+    }
+
+    /**
+     * How the script runs, and whether Node is there for it (R04-D6). A status
+     * without `node` is an older or blind agent: it claims nothing, like the
+     * Node page.
+     */
+    private function scriptHint(): HtmlString
+    {
+        $node = ServerStatus::current()?->data['node'] ?? null;
+        $text = e(__('zimam.deployments.settings.script_help')).' ';
+        if ($node === null) {
+            return new HtmlString($text.e(__('zimam.deployments.settings.script_node_unknown')));
+        }
+        if ($node['installed'] ?? false) {
+            return new HtmlString($text.e(__('zimam.deployments.settings.script_node_installed', ['version' => $node['version'] ?? $node['major'] ?? ''])));
+        }
+
+        return new HtmlString($text.e(__('zimam.deployments.settings.script_node_missing')).' <a href="'.e(Node::getUrl()).'" class="underline">'.e(__('zimam.deployments.settings.script_node_link')).'</a>');
     }
 
     private function repository(): ?SiteRepository

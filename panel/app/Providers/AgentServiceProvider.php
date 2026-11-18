@@ -15,6 +15,7 @@ use App\Agent\Outcomes\CertificateOutcomes;
 use App\Agent\Outcomes\CronOutcomes;
 use App\Agent\Outcomes\DatabaseOutcomes;
 use App\Agent\Outcomes\DeploymentOutcomes;
+use App\Agent\Outcomes\NodeOutcomes;
 use App\Agent\Outcomes\PhpOutcomes;
 use App\Agent\Outcomes\SecurityOutcomes;
 use App\Agent\Outcomes\SettingsOutcomes;
@@ -45,6 +46,7 @@ class AgentServiceProvider extends ServiceProvider
             CacheOutcomes::register($outcomes);
             WorkerOutcomes::register($outcomes);
             CronOutcomes::register($outcomes);
+            NodeOutcomes::register($outcomes);
 
             return $outcomes;
         });

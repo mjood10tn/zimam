@@ -97,9 +97,8 @@ final class DeployTest extends DeploymentsTestCase
 
         Livewire::test(DeploymentsTab::class, ['site' => $site])
             ->assertSee(__('zimam.deployments.settings.script_help'))
-            ->assertSee(__('zimam.deployments.settings.script_node'));
+            ->assertSee(__('zimam.deployments.settings.script_node_missing'));
         $this->assertStringContainsString('stopped when the script ends', __('zimam.deployments.settings.script_help'));
-        $this->assertStringContainsString('Node', __('zimam.deployments.settings.script_node'));
     }
 
     public function testSettingsSaved(): void

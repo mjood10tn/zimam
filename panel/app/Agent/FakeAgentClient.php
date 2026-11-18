@@ -45,6 +45,9 @@ final class FakeAgentClient implements AgentClient
 
     private const MAX_UNFINISHED = 2;
 
+    /** @var array<string, string> the Node majors the agent allowlists, with their end of life (OQ5) */
+    private const NODE_MAJORS = ['24' => '2028-04-30', '26' => '2029-04-30'];
+
     /** @var list<array{method: string, command: string, params: array<string, mixed>}> */
     private array $calls = [];
 
@@ -387,6 +390,9 @@ final class FakeAgentClient implements AgentClient
 
             return;
         }
+        if ($command->name() === 'node.uninstall' && ! ($this->systemStatus['node']['installed'] ?? false)) {
+            throw new AgentNotFound("Node.js isn't installed.");
+        }
         if (! str_starts_with($command->name(), 'php.')) {
             return;
         }
@@ -430,6 +436,8 @@ final class FakeAgentClient implements AgentClient
             'site.php' => ['name' => $params['name'], 'php_version' => $params['php_version']],
             'site.destroy', 'site.security', 'site.env.write', 'site.workers', 'site.workers.restart', 'site.cron' => ['name' => $params['name']],
             'mysql.install' => ['version' => '8.4.13'],
+            'node.install' => ['major' => $params['major'], 'version' => $params['major'].'.1.0'],
+            'node.uninstall' => [],
             'db.create', 'db.drop' => ['site' => $params['site'], 'database' => $params['database']],
             'db.user', 'cache.user' => ['site' => $params['site']],
             'valkey.install' => ['version' => '9.0.4'],
@@ -609,6 +617,8 @@ final class FakeAgentClient implements AgentClient
             'db.drop' => $this->databases = array_diff_key($this->databases, [$params['database'] => true]),
             'db.user' => $this->dbUsers[$params['site']] = true,
             'valkey.install' => $this->installValkey($result['version'] ?? '9.0.4'),
+            'node.install' => $this->systemStatus['node'] = ['installed' => true, 'major' => $params['major'], 'version' => $result['version'] ?? $params['major'].'.1.0'] + $this->systemStatus['node'],
+            'node.uninstall' => $this->systemStatus['node'] = ['installed' => false, 'available' => $this->systemStatus['node']['available']],
             'cache.user' => $this->cacheUser($params['site']),
             default => null,
         };
@@ -708,6 +718,14 @@ final class FakeAgentClient implements AgentClient
         if (str_starts_with($command->name(), 'php.')) {
             if (! in_array($params['version'], array_column($this->systemStatus['php']['available'], 'version'), true)) {
                 throw new AgentValidationFailed('Invalid parameters', ['version' => 'is not a supported PHP version']);
+            }
+
+            return;
+        }
+        if ($command->name() === 'node.install') {
+            $node = array_column($this->systemStatus['node']['available'], null, 'major')[$params['major']] ?? null;
+            if ($node === null || ! $node['supported']) {
+                throw new AgentValidationFailed('Invalid parameters', ['major' => $node === null ? 'is not a supported Node major version' : "Node {$params['major']}'s support ended on {$node['end_of_life']}, so it can't be installed"]);
             }
 
             return;
@@ -1437,6 +1455,16 @@ final class FakeAgentClient implements AgentClient
             ],
             // The zone cron runs in (ruling R7); a test sets another through changeServer().
             'timezone' => 'UTC',
+            // R04-D6: Node isn't installed until node.install runs; the allowlist is the agent's (OQ5).
+            'node' => [
+                'installed' => false,
+                'available' => array_map(fn (string $major): array => [
+                    'major' => $major,
+                    'end_of_life' => self::NODE_MAJORS[$major],
+                    'supported' => $today->lte(CarbonImmutable::parse(self::NODE_MAJORS[$major], 'UTC')),
+                    'recommended' => $major === '26',
+                ], array_keys(self::NODE_MAJORS)),
+            ],
         ];
     }
 }
