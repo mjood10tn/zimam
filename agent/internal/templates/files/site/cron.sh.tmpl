@@ -12,6 +12,6 @@ echo "$(date -Is) [{{safe .ID}}] started" >>"$ZIMAM_LOG"
 ZIMAM_RC=0
 (
 {{.Command}}
-) >>"$ZIMAM_LOG" 2>&1 || ZIMAM_RC=$?
+) 9>&- >>"$ZIMAM_LOG" 2>&1 || ZIMAM_RC=$?
 echo "$(date -Is) [{{safe .ID}}] finished with status $ZIMAM_RC" >>"$ZIMAM_LOG"
 exit "$ZIMAM_RC"

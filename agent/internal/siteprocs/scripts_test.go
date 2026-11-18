@@ -306,9 +306,11 @@ func TestScriptDirRefusesSymlink(t *testing.T) {
 	}
 }
 
-// A second run while the first holds the lock exits 0 and logs the skip; a
-// failing job reports its status. This runs the rendered script under real bash.
-func TestCronScriptSkipsWhileRunning(t *testing.T) {
+// cronHome makes a home for running rendered cron scripts under the real bash
+// and flock: script writes one and returns its path, run makes its command,
+// and log is the cron log.
+func cronHome(t *testing.T) (script func(id, cmd string) string, run func(p string) *exec.Cmd, log string) {
+	t.Helper()
 	bash, err := exec.LookPath("bash")
 	if err != nil {
 		t.Skip("no bash")
@@ -334,34 +336,46 @@ func TestCronScriptSkipsWhileRunning(t *testing.T) {
 		return p
 	}
 	write(".zimam/site.env.sh", env)
-	script := func(id, cmd string) string {
+	script = func(id, cmd string) string {
 		b, err := templates.Render("site/cron.sh", templates.CronScript{ID: contract.WorkerID(id), Command: contract.OwnerCommand(cmd)})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return write(".zimam/cron/"+id+".sh", b)
 	}
-	run := func(p string) *exec.Cmd {
+	run = func(p string) *exec.Cmd {
 		c := exec.Command(bash, p)
 		c.Env = []string{"HOME=" + home, "PATH=/usr/local/bin:/usr/bin:/bin"}
 		return c
 	}
+	return script, run, filepath.Join(home, "logs/cron.log")
+}
+
+// waitForLog waits until the cron log holds want.
+func waitForLog(t *testing.T, log, want string) {
+	t.Helper()
+	for i := 0; ; i++ {
+		if b, _ := os.ReadFile(log); strings.Contains(string(b), want) {
+			return
+		}
+		if i > 100 {
+			t.Fatalf("the log never had %q", want)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// A second run while the first holds the lock exits 0 and logs the skip; a
+// failing job reports its status. This runs the rendered script under real bash.
+func TestCronScriptSkipsWhileRunning(t *testing.T) {
+	script, run, log := cronHome(t)
 	slowPath := script("slow", "echo working; sleep 3")
 	slow := run(slowPath)
 	if err := slow.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { slow.Process.Kill(); slow.Wait() })
-	log := filepath.Join(home, "logs/cron.log")
-	for i := 0; ; i++ {
-		if b, _ := os.ReadFile(log); strings.Contains(string(b), "[slow] started") {
-			break
-		}
-		if i > 100 {
-			t.Fatal("the first run never started")
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	waitForLog(t, log, "[slow] started")
 	if err := run(slowPath).Run(); err != nil {
 		t.Fatalf("the overlapping run: %v (want exit 0)", err)
 	}
@@ -376,12 +390,28 @@ func TestCronScriptSkipsWhileRunning(t *testing.T) {
 	if !strings.Contains(string(b), "working\n") || !strings.Contains(string(b), "[slow] finished with status 0") {
 		t.Errorf("the first run's log:\n%s", b)
 	}
-	err = run(script("bad", "echo oops; exit 7")).Run()
+	err := run(script("bad", "echo oops; exit 7")).Run()
 	var ee *exec.ExitError
 	if !errors.As(err, &ee) || ee.ExitCode() != 7 {
 		t.Errorf("bad job: %v, want exit 7", err)
 	}
 	if b, _ = os.ReadFile(log); !strings.Contains(string(b), "[bad] finished with status 7") {
 		t.Errorf("log:\n%s", b)
+	}
+}
+
+// A child the command leaves running (Laravel's runInBackground, nohup ... &)
+// must not keep the job's lock, or every later run is skipped.
+func TestCronLockNotKeptByBackgroundChild(t *testing.T) {
+	script, run, log := cronHome(t)
+	p := script("bg", "sleep 3 >/dev/null 2>&1 &")
+	for i := 1; i <= 2; i++ {
+		if err := run(p).Run(); err != nil {
+			t.Fatalf("run %d: %v", i, err)
+		}
+	}
+	b, _ := os.ReadFile(log)
+	if strings.Contains(string(b), "skipped") || strings.Count(string(b), "[bg] started") != 2 {
+		t.Errorf("the second run didn't run:\n%s", b)
 	}
 }
