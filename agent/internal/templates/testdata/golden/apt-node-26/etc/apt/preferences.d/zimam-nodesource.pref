@@ -1,0 +1,16 @@
+# Managed by Zimam. Changes here are overwritten.
+# Node.js comes from NodeSource, never from Ubuntu. The Release file's Origin
+# is ". nodistro", so the pins name the host (spike R04-D6).
+Package: nodejs
+Pin: origin deb.nodesource.com
+Pin-Priority: 900
+
+# Nothing else NodeSource carries (nsolid) is wanted.
+Package: *
+Pin: origin deb.nodesource.com
+Pin-Priority: -1
+
+# If a NodeSource update fails, APT must not fall back to Ubuntu's nodejs.
+Package: nodejs
+Pin: release o=Ubuntu
+Pin-Priority: -1

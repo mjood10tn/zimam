@@ -357,3 +357,13 @@ func (p Paths) UIDLock() string { return p.at("run/zimam/locks/uid.lock") }
 // reads to find a candidate server a killed job left running.
 func (p Paths) ValkeyDataDir() string     { return p.at("var/lib/valkey") }
 func (p Paths) ProcPID(pid string) string { return p.at("proc", pid) }
+
+// APT: the NodeSource repository (R04-D6)
+
+func (p Paths) NodeKeyring() string { return p.at("etc/apt/keyrings/zimam-nodesource.gpg") }
+func (p Paths) NodeSources() string { return p.at("etc/apt/sources.list.d/zimam-nodesource.sources") }
+func (p Paths) NodePin() string     { return p.at("etc/apt/preferences.d/zimam-nodesource.pref") }
+
+// NodeKeyringRefresh records maintenance's last try at refreshing the
+// NodeSource keyring, as KeyringRefresh does for sury's.
+func (p Paths) NodeKeyringRefresh() string { return p.at("var/lib/zimam/node-keyring-refresh.json") }

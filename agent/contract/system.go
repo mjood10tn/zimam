@@ -27,6 +27,7 @@ type SystemStatusResult struct {
 	PanelDomain    Domain         `json:"panel_domain"`
 	ACMEDirectory  string         `json:"acme_directory"`
 	Services       ServicesStatus `json:"services"`
+	Node           *NodeStatus    `json:"node,omitempty"` // R04-D6; absent on a v0.3 agent, and when dpkg could not be read
 }
 
 // PHPStatus carries the allowlist and its end dates as well as what is
@@ -73,4 +74,22 @@ type ServiceStatus struct {
 	Installed bool   `json:"installed"`
 	Version   string `json:"version"`
 	Active    bool   `json:"active"`
+}
+
+// NodeStatus is what system.status reports of Node.js (R04-D6), read live:
+// Node is not in services.json. Major is the installed package's major, which
+// is off the allowlist only for a nodejs that Zimam did not install. Available
+// carries the allowlist and its end dates so the panel never hard-codes them.
+type NodeStatus struct {
+	Installed bool            `json:"installed"`
+	Major     string          `json:"major,omitempty"`
+	Version   string          `json:"version,omitempty"`
+	Available []AvailableNode `json:"available"`
+}
+
+type AvailableNode struct {
+	Major       NodeMajor `json:"major"`
+	EndOfLife   string    `json:"end_of_life"` // YYYY-MM-DD, from NodeAllowlist
+	Supported   bool      `json:"supported"`   // NodeRelease.SupportedOn(now)
+	Recommended bool      `json:"recommended"` // DefaultNodeMajor
 }

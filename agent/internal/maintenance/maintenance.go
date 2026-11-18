@@ -1,7 +1,7 @@
 // Package maintenance is `zimam-agent maintenance`, which
 // zimam-maintenance.timer runs every 15 minutes (design §11.3). It settles
 // dead jobs, rotates Zimam's and every site's logs, counts the pending updates hourly and
-// refreshes the sury keyring weekly and reloads the PHP versions deploys
+// refreshes the sury and NodeSource keyrings weekly and reloads the PHP versions deploys
 // marked (spike amendment A3).
 package maintenance
 
@@ -19,7 +19,7 @@ import (
 	"zimam/agent/contract"
 	"zimam/agent/internal/audit"
 	"zimam/agent/internal/configtx"
-	"zimam/agent/internal/paths"
+	"zimam/agent/internal/node"
 	"zimam/agent/internal/php"
 	"zimam/agent/internal/sysexec"
 )
@@ -182,50 +182,77 @@ func Run(ctx context.Context, d sysexec.Deps, j Jobs, homes Homes, w interface{ 
 }
 
 // refreshRecord is keyring-refresh.json: maintenance's last try at
-// refreshing the sury keyring, and why it failed if it did.
+// refreshing a keyring (sury's; node-keyring-refresh.json is NodeSource's),
+// and why it failed if it did.
 type refreshRecord struct {
 	AttemptedAt time.Time `json:"attempted_at"`
 	Error       string    `json:"error,omitempty"`
 }
 
-// refreshKeyring downloads sury's keyring again at most once every 7 days,
-// once the repository is set up (D23). sury extends its key's expiry and
-// keeps the key, so a server that never refreshed it would stop getting PHP
-// updates when the old expiry passed. php.EnsureRepo accepts the download
-// only with one primary key whose fingerprint is sury's, and swaps it in
-// tested with apt-get update. A failed refresh keeps the installed keyring;
-// it is logged and recorded, and next week tries again. refreshKeyring
-// reports whether the repository's files changed.
+// repoRefresh is one APT repository whose keyring maintenance refreshes.
+type repoRefresh struct {
+	name   string
+	files  []string // keyring (it exists once the repository is set up), source, pin
+	record string   // the refresh record
+	ensure func(context.Context, sysexec.Deps) error
+}
+
+// refreshKeyring refreshes sury's keyring and, once Node is installed,
+// NodeSource's (R04-D6). One repository's failure never stops the other. It
+// reports whether any repository's files changed.
 func refreshKeyring(ctx context.Context, d sysexec.Deps) (bool, error) {
-	_, err := os.Lstat(d.Paths.SuryKeyring())
+	p := d.Paths
+	var changed bool
+	var errs []error
+	for _, r := range []repoRefresh{
+		{"sury", []string{p.SuryKeyring(), p.SurySources(), p.SuryPin()}, p.KeyringRefresh(), php.EnsureRepo},
+		{"NodeSource", []string{p.NodeKeyring(), p.NodeSources(), p.NodePin()}, p.NodeKeyringRefresh(), node.RefreshRepo},
+	} {
+		c, err := refreshRepoKeyring(ctx, d, r)
+		changed = changed || c
+		errs = append(errs, err)
+	}
+	return changed, errors.Join(errs...)
+}
+
+// refreshRepoKeyring downloads a repository's keyring again at most once every
+// 7 days, once the repository is set up (D23). sury extends its key's expiry
+// and keeps the key, so a server that never refreshed it would stop getting
+// updates when the old expiry passed. The repository's EnsureRepo accepts the
+// download only with one primary key and the pinned fingerprint, and swaps it
+// in tested with apt-get update. A failed refresh keeps the installed
+// keyring; it is logged and recorded, and next week tries again. It reports
+// whether the repository's files changed.
+func refreshRepoKeyring(ctx context.Context, d sysexec.Deps, r repoRefresh) (bool, error) {
+	_, err := os.Lstat(r.files[0])
 	if errors.Is(err, fs.ErrNotExist) {
-		return false, nil // bootstrap hasn't set the repository up yet
+		return false, nil // not set up yet
 	}
 	if err != nil {
 		return false, err
 	}
 	now := d.Now().UTC()
-	if last, ok := lastRefresh(d.Paths); ok && !last.After(now) && now.Sub(last) <= keyringRefreshEvery {
+	if last, ok := lastRefresh(r.record); ok && !last.After(now) && now.Sub(last) <= keyringRefreshEvery {
 		return false, nil
 	}
-	before := repoFiles(d.Paths)
-	d.Logf("Refreshing the sury keyring")
+	before := repoFiles(r.files)
+	d.Logf("Refreshing the %s keyring", r.name)
 	rec := refreshRecord{AttemptedAt: now}
-	if err := php.EnsureRepo(ctx, d); err != nil {
-		d.Logf("Refreshing the sury keyring failed; the installed keyring stays: %v", err)
+	if err := r.ensure(ctx, d); err != nil {
+		d.Logf("Refreshing the %s keyring failed; the installed keyring stays: %v", r.name, err)
 		rec.Error = err.Error()
 	}
-	changed := !slices.EqualFunc(before, repoFiles(d.Paths), bytes.Equal)
-	if err := writeRootJSON(d.Paths.KeyringRefresh(), rec); err != nil {
+	changed := !slices.EqualFunc(before, repoFiles(r.files), bytes.Equal)
+	if err := writeRootJSON(r.record, rec); err != nil {
 		return changed, err
 	}
 	return changed, nil
 }
 
-// lastRefresh reads when maintenance last tried to refresh the keyring. An
+// lastRefresh reads when maintenance last tried to refresh a keyring. An
 // unreadable record counts as none.
-func lastRefresh(p paths.Paths) (time.Time, bool) {
-	data, err := os.ReadFile(p.KeyringRefresh())
+func lastRefresh(record string) (time.Time, bool) {
+	data, err := os.ReadFile(record)
 	if err != nil {
 		return time.Time{}, false
 	}
@@ -236,14 +263,14 @@ func lastRefresh(p paths.Paths) (time.Time, bool) {
 	return rec.AttemptedAt, true
 }
 
-// repoFiles reads the keyring, source and pin; a missing file reads as nil.
-func repoFiles(p paths.Paths) [][]byte {
-	var files [][]byte
-	for _, path := range []string{p.SuryKeyring(), p.SurySources(), p.SuryPin()} {
+// repoFiles reads the files; a missing one reads as nil.
+func repoFiles(files []string) [][]byte {
+	var out [][]byte
+	for _, path := range files {
 		b, _ := os.ReadFile(path)
-		files = append(files, b)
+		out = append(out, b)
 	}
-	return files
+	return out
 }
 
 // writeRootJSON writes one of maintenance's state files, root 0600,
