@@ -25,9 +25,9 @@ const (
 
 var errTruncated = errors.New("the keyring is truncated")
 
-// binaryKeyring returns the keyring in binary form: APT reads binary
+// BinaryKeyring returns the keyring in binary form: APT reads binary
 // keyrings from /usr/share/keyrings, and an armored one is decoded here.
-func binaryKeyring(keyring []byte) ([]byte, error) {
+func BinaryKeyring(keyring []byte) ([]byte, error) {
 	if bytes.HasPrefix(bytes.TrimSpace(keyring), []byte(armorBegin)) {
 		return dearmor(keyring)
 	}
@@ -56,7 +56,7 @@ func allowedTag(tag byte) bool {
 // any other packet type refuses the keyring. Only v4 keys are read, the
 // version sury's key has (RFC 4880 §12.2).
 func CheckSingleCertificate(keyring []byte) (fingerprint string, err error) {
-	data, err := binaryKeyring(keyring)
+	data, err := BinaryKeyring(keyring)
 	if err != nil {
 		return "", err
 	}

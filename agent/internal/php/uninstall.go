@@ -47,24 +47,24 @@ func Uninstall(ctx context.Context, d sysexec.Deps, v contract.PHPVersion) error
 		return err
 	}
 	d.Logf("Purging the PHP %s packages", v)
-	args := append(slices.Clone(aptLockWait), "purge", "-y")
-	return aptGetRepairing(ctx, d, append(args, Packages(v)...))
+	args := append(slices.Clone(AptLockWait), "purge", "-y")
+	return AptGetRepairing(ctx, d, append(args, Packages(v)...))
 }
 
-// aptGetRepairing runs apt-get with args. If apt-get refuses because a dpkg
+// AptGetRepairing runs apt-get with args. If apt-get refuses because a dpkg
 // run was cut short, by a job that hit its time or memory limit say, it
 // finishes that run with dpkg --configure -a and tries once more. apt-get
 // checks for that while holding dpkg's lock, so a dpkg run that is merely
 // in progress elsewhere never looks interrupted.
-func aptGetRepairing(ctx context.Context, d sysexec.Deps, args []string) error {
-	cmd := sysexec.Cmd{Path: aptGet, Args: args, Env: aptEnv}
+func AptGetRepairing(ctx context.Context, d sysexec.Deps, args []string) error {
+	cmd := sysexec.Cmd{Path: AptGet, Args: args, Env: AptEnv}
 	_, err := d.Run.Run(ctx, cmd)
 	var exit *sysexec.ExitError
 	if !errors.As(err, &exit) || !bytes.Contains(exit.Stderr, dpkgInterrupted) {
 		return err
 	}
 	d.Logf("A dpkg run was interrupted; finishing it with dpkg --configure -a")
-	if _, err := d.Run.Run(ctx, sysexec.Cmd{Path: dpkg, Args: []string{"--force-confdef", "--force-confold", "--configure", "-a"}, Env: aptEnv}); err != nil {
+	if _, err := d.Run.Run(ctx, sysexec.Cmd{Path: dpkg, Args: []string{"--force-confdef", "--force-confold", "--configure", "-a"}, Env: AptEnv}); err != nil {
 		return err
 	}
 	_, err = d.Run.Run(ctx, cmd)
