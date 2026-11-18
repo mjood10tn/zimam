@@ -106,3 +106,25 @@ type ValkeySite struct {
 	Name contract.SiteName
 	Hash [sha256.Size]byte
 }
+
+// SiteEnv fills site/site.env.sh (R04-D15), which every worker and cron
+// script of a site sources. The helper writes it as the site user.
+type SiteEnv struct {
+	PHPVersion contract.PHPVersion // empty for a static site: no php directory
+}
+
+// WorkerScript fills site/worker.sh (R04-D1). A laravel-queue worker sets Argv,
+// the whole artisan command, whose every word the template single-quotes; a
+// custom worker sets Command, the owner's line, which goes in verbatim. Both
+// are written as the site user and never read by root.
+type WorkerScript struct {
+	Argv    []string
+	Command contract.OwnerCommand
+}
+
+// CronScript fills site/cron.sh (R04-D1): one cron job, or the Laravel
+// scheduler with ID "scheduler" and its artisan line as Command.
+type CronScript struct {
+	ID      contract.WorkerID
+	Command contract.OwnerCommand
+}

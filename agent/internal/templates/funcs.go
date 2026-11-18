@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"reflect"
 	"regexp"
+	"strings"
 	"text/template"
 
 	"zimam/agent/contract"
@@ -18,6 +19,7 @@ var funcs = template.FuncMap{
 	"htpasswdLine": htpasswdLine,
 	"laravelKey":   laravelKey,
 	"sha256hex":    sha256hex,
+	"shquote":      shquote,
 }
 
 // safeRe is all a string may contain on its way into a config file. Without
@@ -74,3 +76,19 @@ func laravelKey(k string) (string, error) {
 // file takes after "#". A sum is bytes, so it can't carry anything else into
 // the file.
 func sha256hex(sum [sha256.Size]byte) string { return hex.EncodeToString(sum[:]) }
+
+// shquote single-quotes a word for bash, so whatever the word holds stays one
+// argument: the only character a single-quoted string can't hold is ', which
+// closes the quotes, adds \' and reopens them. It refuses NUL, which no
+// argument can carry, and renders nothing for a non-string.
+func shquote(v any) (string, error) {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.String {
+		return "", fmt.Errorf("shquote: %T is not a string", v)
+	}
+	s := rv.String()
+	if strings.IndexByte(s, 0) >= 0 {
+		return "", fmt.Errorf("shquote: the word contains NUL")
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'", nil
+}
