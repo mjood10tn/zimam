@@ -58,6 +58,7 @@ var production = map[string]string{
 	"ProcPID":               "/proc/site:shop",
 	"LogrotateState":        "/var/lib/zimam/logrotate.state",
 	"RebootRequired":        "/run/reboot-required",
+	"Localtime":             "/etc/localtime",
 	"AptCheck":              "/usr/lib/update-notifier/apt-check",
 	"EtcGroup":              "/etc/group",
 	"EtcPasswd":             "/etc/passwd",

@@ -1389,6 +1389,8 @@ final class FakeAgentClient implements AgentClient
                 'mysql' => ['installed' => false, 'version' => '', 'active' => false],
                 'valkey' => ['installed' => false, 'version' => '', 'active' => false],
             ],
+            // The zone cron runs in (ruling R7); a test sets another through changeServer().
+            'timezone' => 'UTC',
         ];
     }
 }

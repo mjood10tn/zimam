@@ -28,6 +28,7 @@ type SystemStatusResult struct {
 	ACMEDirectory  string         `json:"acme_directory"`
 	Services       ServicesStatus `json:"services"`
 	Node           *NodeStatus    `json:"node,omitempty"` // R04-D6; absent on a v0.3 agent, and when dpkg could not be read
+	Timezone       string         `json:"timezone"`       // IANA name of the server's zone, UTC when unreadable (ruling R7); absent on an older agent
 }
 
 // PHPStatus carries the allowlist and its end dates as well as what is

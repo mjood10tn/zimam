@@ -303,6 +303,14 @@ final class SchemaTest extends TestCase
         $this->assertSame(['content' => "APP_KEY=x\n"], $read);
     }
 
+    /** The server's zone (ruling R7) is in the fake's status, and the schema takes it. */
+    public function testStatusReportsTimezone(): void
+    {
+        $data = (new FakeAgentClient)->call(new SystemStatus)->data;
+        $this->assertSame('UTC', $data['timezone']);
+        $this->assertResult('system.status', $data, 'system.status with timezone');
+    }
+
     /** A service the agent couldn't read is left out of system.status: the schema allows it, for either service. */
     public function testStatusMayLeaveAServiceOut(): void
     {

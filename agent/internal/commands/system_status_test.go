@@ -142,6 +142,7 @@ func TestStatusAllFields(t *testing.T) {
 		PanelDomain:    "panel.example.com",
 		ACMEDirectory:  config.DefaultACMEDirectory,
 		Services:       contract.ServicesStatus{MySQL: &contract.ServiceStatus{}, Valkey: &contract.ServiceStatus{}},
+		Timezone:       "UTC",
 	}
 	if got := getStatus(t, d); !reflect.DeepEqual(got, want) {
 		t.Errorf("system.status =\n%+v\nwant\n%+v", got, want)
@@ -458,5 +459,40 @@ func TestStatusReportsValkey(t *testing.T) {
 		if got := getStatus(t, d).Services; !reflect.DeepEqual(got, want) {
 			t.Errorf("active = %v: services = %+v, want %+v", active, got, want)
 		}
+	}
+}
+
+// Cron runs a site's jobs in the server's zone (ruling R7), read from where
+// /etc/localtime points: absolute as Debian makes it, relative as
+// timedatectl does. Anything else reads as UTC.
+func TestStatusTimezone(t *testing.T) {
+	for name, tc := range map[string]struct{ target, want string }{
+		"absolute":      {"/usr/share/zoneinfo/Europe/Berlin", "Europe/Berlin"},
+		"relative":      {"../usr/share/zoneinfo/Asia/Riyadh", "Asia/Riyadh"},
+		"one segment":   {"/usr/share/zoneinfo/UTC", "UTC"},
+		"not a zone":    {"/etc/timezone-copy", "UTC"},
+		"bad character": {"/usr/share/zoneinfo/Europe/Be rlin", "UTC"},
+		"traversal":     {"/usr/share/zoneinfo/../../etc/passwd", "UTC"},
+	} {
+		d := statusDeps(t, sysexec.NewFakeRunner(nginxV(t)))
+		if err := os.MkdirAll(filepath.Dir(d.Paths.Localtime()), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(tc.target, d.Paths.Localtime()); err != nil {
+			t.Fatal(err)
+		}
+		if got := getStatus(t, d).Timezone; got != tc.want {
+			t.Errorf("%s: timezone = %q, want %q", name, got, tc.want)
+		}
+	}
+	// A regular file, or none, is UTC.
+	d := statusDeps(t, sysexec.NewFakeRunner(nginxV(t)))
+	if got := getStatus(t, d).Timezone; got != "UTC" {
+		t.Errorf("no /etc/localtime: timezone = %q, want UTC", got)
+	}
+	d = statusDeps(t, sysexec.NewFakeRunner(nginxV(t)))
+	touch(t, d.Paths.Localtime())
+	if got := getStatus(t, d).Timezone; got != "UTC" {
+		t.Errorf("regular /etc/localtime: timezone = %q, want UTC", got)
 	}
 }

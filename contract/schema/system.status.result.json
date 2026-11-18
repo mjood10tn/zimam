@@ -230,6 +230,9 @@
       },
       "type": "object"
     },
+    "timezone": {
+      "type": "string"
+    },
     "updates": {
       "additionalProperties": false,
       "properties": {
@@ -282,6 +285,7 @@
     "protocols",
     "reboot_required",
     "services",
+    "timezone",
     "updates"
   ],
   "title": "system.status result",
