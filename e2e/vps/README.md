@@ -32,7 +32,7 @@ A third server, amd64 only to bound the cost and tagged `<run>-<attempt>-upgrade
 
 `.github/workflows/vps-sweep.yml` runs `sweep.sh` daily. It deletes servers and keys labelled `zimam-vps` that are older than 3 hours, which is what a run that died before `destroy.sh` leaves behind. To test it, start `vps.yml` with **keep_server**, then start `vps-sweep.yml` with a small `hours`.
 
-A failed browser spec's Playwright trace, in `vps-logs-<arch>`, holds what the panel revealed: the admin's throwaway password, and from `v02-deploy` the webhook secret, the deploy URL's token and the site's `.env`. They only open this run's server. With **keep_server** that server stays reachable until the sweep deletes it, so keep the artifact private until then.
+A failed browser spec's Playwright trace, in `vps-logs-<arch>`, holds what the panel revealed: the admin's throwaway password, from `v02-deploy` the webhook secret, the deploy URL's token and the site's `.env`, and from `v03-databases` each site's MySQL and Valkey passwords. They only open this run's server. With **keep_server** that server stays reachable until the sweep deletes it, so keep the artifact private until then.
 
 ## Secrets
 
