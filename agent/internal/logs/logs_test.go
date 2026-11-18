@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -22,6 +23,7 @@ import (
 	"zimam/agent/internal/paths"
 	"zimam/agent/internal/sites"
 	"zimam/agent/internal/sysexec"
+	"zimam/agent/internal/systemd"
 )
 
 // fakeHelper serves a home from memory; a name in links is a symlink.
@@ -658,6 +660,81 @@ func TestReadReturnsContextError(t *testing.T) {
 		res, err := Read(ctx, e.e, p)
 		if !errors.Is(err, context.Canceled) {
 			t.Errorf("%+v: err = %v with %d lines, want context.Canceled", p, err, len(res.Lines))
+		}
+	}
+}
+
+// site.workers matches only that site's worker units, by a glob built from
+// the validated name: "_" ends it, so shop never reaches shop2's units.
+func TestWorkersSourceMatchesOnlyThatSitesUnits(t *testing.T) {
+	e := laravelEnv(t)
+	e.run.Add(sysexec.Script{Path: journalctl, Args: []string{"--output=json", "--no-pager", "-u", "zimam-worker-shop_*", "--reverse", "-n", "200"}})
+	read(t, e.e, contract.LogsReadParams{Source: "site.workers", Name: "shop", Direction: contract.LogBack})
+	if !contract.LogSource("site.workers").IsJournal() {
+		t.Error("site.workers is a journal source")
+	}
+	glob := systemd.WorkerUnitGlob("shop")
+	for _, other := range []string{
+		systemd.WorkerInstance("shop2", "queue", 1),
+		systemd.WorkerInstance("shop-2", "queue", 1),
+		systemd.WorkerUnit("shop2", "queue"),
+	} {
+		if ok, _ := path.Match(glob, other); ok {
+			t.Errorf("%s matches %s", glob, other)
+		}
+	}
+	if ok, _ := path.Match(glob, systemd.WorkerInstance("shop", "queue", 2)); !ok {
+		t.Errorf("%s misses shop's own unit", glob)
+	}
+	for _, n := range []contract.SiteName{"sh_op", "shop*"} {
+		if n.Validate() == nil {
+			t.Errorf("site name %q is valid; the glob could be ambiguous", n)
+		}
+	}
+	// A site that doesn't exist has no workers to read.
+	_, err := Read(context.Background(), e.e, contract.LogsReadParams{Source: "site.workers", Name: "blog", Direction: contract.LogBack})
+	wantCode(t, err, contract.ErrNotFound)
+}
+
+const cronLog = "logs/cron.log"
+
+// site.cron is read through the helper like site.php-error; a site whose
+// jobs never ran has no file, which reads as empty.
+func TestCronLogReadThroughHelper(t *testing.T) {
+	e := laravelEnv(t)
+	res := read(t, e.e, contract.LogsReadParams{Source: "site.cron", Name: "shop", Direction: contract.LogBack})
+	if len(res.Lines) != 0 {
+		t.Errorf("missing cron.log gave %v", texts(res.Lines))
+	}
+	l, err := List(context.Background(), e.e, contract.LogsListParams{Source: "site.cron", Name: "shop"})
+	if err != nil || l.Current != nil {
+		t.Errorf("missing cron.log listing = %+v, %v", l, err)
+	}
+	e.h.files[cronLog] = []byte("job a\njob b\n")
+	res = read(t, e.e, contract.LogsReadParams{Source: "site.cron", Name: "shop", Direction: contract.LogBack})
+	if got := texts(res.Lines); !slices.Equal(got, []string{"PHP Warning: one"}) || !slices.Contains(e.h.ops, "tail "+cronLog) {
+		t.Errorf("lines %v, ops %v", got, e.h.ops)
+	}
+	read(t, e.e, contract.LogsReadParams{Source: "site.cron", Name: "shop", Direction: contract.LogBack, Search: "job b"})
+	if !slices.Contains(e.h.ops, "search "+cronLog) {
+		t.Errorf("search did not go through the helper: %v", e.h.ops)
+	}
+}
+
+// A planted logs/cron.log symlink gets an error and no content: the helper
+// stats it first (os.Root) and nothing reads it.
+func TestCronLogSymlinkRefused(t *testing.T) {
+	e := laravelEnv(t)
+	e.h.links[cronLog] = true
+	for _, dir := range []contract.LogDirection{contract.LogBack, contract.LogForward} {
+		res, err := Read(context.Background(), e.e, contract.LogsReadParams{Source: "site.cron", Name: "shop", Direction: dir, Offset: off(0)})
+		if err == nil || len(res.Lines) != 0 {
+			t.Errorf("%s through a symlink: %+v, %v", dir, res, err)
+		}
+	}
+	for _, op := range e.h.ops {
+		if !strings.HasPrefix(op, "stat ") {
+			t.Errorf("read through a symlink: %v", e.h.ops)
 		}
 	}
 }

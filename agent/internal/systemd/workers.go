@@ -39,6 +39,11 @@ func WorkerInstances(site contract.SiteName, id contract.WorkerID, from, to int)
 	return names
 }
 
+// WorkerUnitGlob matches every unit of a site's workers, for the journal
+// (journalctl -u takes a glob). Built from the validated site name only; the
+// "_" ends it, so site shop never matches shop2's units.
+func WorkerUnitGlob(site contract.SiteName) string { return "zimam-worker-" + string(site) + "_*" }
+
 // SiteTarget groups a site's workers.
 func SiteTarget(site contract.SiteName) string { return "zimam-site-" + string(site) + ".target" }
 
