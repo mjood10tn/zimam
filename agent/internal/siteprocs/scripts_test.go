@@ -415,3 +415,24 @@ func TestCronLockNotKeptByBackgroundChild(t *testing.T) {
 		t.Errorf("the second run didn't run:\n%s", b)
 	}
 }
+
+// The scheduler takes no lock (ruling R8): Laravel wants schedule:run every
+// minute and handles overlap per task, so a long task from an earlier minute
+// must not skip the tasks due now.
+func TestSchedulerRunsWhileRunning(t *testing.T) {
+	script, run, log := cronHome(t)
+	p := script(SchedulerID, "echo working; sleep 2")
+	first := run(p)
+	if err := first.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { first.Process.Kill(); first.Wait() })
+	waitForLog(t, log, "[scheduler] started")
+	if err := run(p).Run(); err != nil {
+		t.Fatalf("the overlapping run: %v", err)
+	}
+	b, _ := os.ReadFile(log)
+	if strings.Contains(string(b), "skipped") || strings.Count(string(b), "[scheduler] started") != 2 {
+		t.Errorf("the overlapping run was skipped:\n%s", b)
+	}
+}
