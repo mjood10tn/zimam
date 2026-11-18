@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Done-when 11 (design §2, §5.8): the audit re-check. First every one of
-# the 31 commands (§5.3's 18, v0.2.0's six and v0.3.0's seven) runs at least once: the
-# scenarios and probes before this sent all but php.uninstall, which runs
-# here on PHP 8.3 (installed for it and removed again), and the nine
-# routine reads run here once each, as zimam, and must add no entry, while
+# the 37 commands (§5.3's 18, v0.2.0's six, v0.3.0's seven and v0.4.0's six)
+# runs at least once: the scenarios and probes before this sent all but
+# php.uninstall, which runs here on PHP 8.3 (installed for it and removed
+# again), and the ten routine reads run here once each, as zimam, and must add no entry, while
 # site.env.read, which returns a secret, adds exactly one with its result
 # redacted (R02-D10). Then certbot renews every certificate
 # against Pebble, so `hook cert-deployed` runs once per lineage. Then the
@@ -36,7 +36,7 @@ else
 	fail "PHP 8.3 is still installed after php.uninstall: $installed"
 fi
 
-# The nine routine reads, each answered, none audited.
+# The ten routine reads, each answered, none audited.
 before=$(audit_lines)
 reads=(
 	'agent.version' '{}'
@@ -48,6 +48,7 @@ reads=(
 	'logs.read' '{"source":"journal.nginx","direction":"back","limit":3}'
 	'site.releases' '{"name":"laravel"}'
 	'db.list' '{}'
+	'site.workers.status' '{"name":"laravel"}'
 )
 for ((i = 0; i < ${#reads[@]}; i += 2)); do
 	reply=$(request "${reads[i]}" "${reads[i + 1]}")
@@ -59,7 +60,7 @@ for ((i = 0; i < ${#reads[@]}; i += 2)); do
 	fi
 done
 if [[ $(audit_lines) == "$before" ]]; then
-	pass "the nine reads added no audit entry"
+	pass "the ten reads added no audit entry"
 else
 	fail "the reads added: $(audit_since "$before")"
 fi
@@ -151,18 +152,19 @@ def count(**want):
     return sum(all(e.get(k) == v for k, v in want.items()) for e in entries)
 
 
-# The 31 commands, §5.3's 18, v0.2.0's six and v0.3.0's seven: the jobs are
+# The 37 commands, §5.3's 18, v0.2.0's six, v0.3.0's seven and v0.4.0's six: the jobs are
 # audited at submission and outcome, job.cancel when it acts, the routine
 # reads never, unless refused, and site.env.read, which returns a secret,
 # every time.
 jobs = ["php.install", "php.uninstall", "php.default", "site.provision", "site.php", "site.security",
         "site.destroy", "cert.issue", "security.check", "logs.policy",
         "site.repo", "site.deploy", "site.rollback", "site.env.write",
-        "mysql.install", "valkey.install", "db.create", "db.drop", "db.user", "cache.user"]
+        "mysql.install", "valkey.install", "db.create", "db.drop", "db.user", "cache.user",
+        "site.workers", "site.workers.restart", "site.cron", "node.install", "node.uninstall"]
 reads = ["agent.version", "system.status", "system.metrics", "job.status", "job.follow", "logs.list", "logs.read",
-         "site.releases", "db.list"]
+         "site.releases", "db.list", "site.workers.status"]
 audited_reads = ["site.env.read"]
-assert len(jobs) + 1 + len(reads) + len(audited_reads) == 31
+assert len(jobs) + 1 + len(reads) + len(audited_reads) == 37
 for command in jobs:
     for outcome in ("accepted", "ok"):
         n = count(command=command, outcome=outcome)
@@ -295,12 +297,20 @@ for command, accepted, ok in [("mysql.install", 1, 1), ("valkey.install", 1, 1),
     check(n >= accepted, f"{command} accepted: {n}, want at least {accepted}")
     n = count(command=command, outcome="ok")
     check(n >= ok, f"{command} ok: {n}, want at least {ok}")
+# v0.4.0 (v04-workers and the workers probe): Node.js installed three times
+# and uninstalled once, the workers saved at least three times (the
+# scenario's site and the probe's), restarted twice, and cron saved twice.
+for command, ok in [("node.install", 3), ("node.uninstall", 1), ("site.workers", 3), ("site.workers.restart", 2), ("site.cron", 2)]:
+    n = count(command=command, outcome="ok")
+    check(n >= ok, f"{command} ok: {n}, want at least {ok}")
 # The validation probes, and the contract suite's bad site name.
 for command, least in [("site.provision", 23), ("php.install", 3), ("site.php", 3), ("site.destroy", 6), ("cert.issue", 3),
                        ("site.security", 31), ("logs.read", 7),
                        ("site.repo", 34), ("site.deploy", 23), ("site.rollback", 9), ("site.releases", 4),
                        ("site.env.read", 4), ("site.env.write", 4),
-                       ("db.create", 39), ("db.drop", 39), ("db.list", 3), ("db.user", 25), ("cache.user", 25)]:
+                       ("db.create", 39), ("db.drop", 39), ("db.list", 3), ("db.user", 25), ("cache.user", 25),
+                       ("site.workers", 21), ("site.cron", 26), ("site.workers.restart", 2), ("site.workers.status", 1),
+                       ("node.install", 4)]:
     n = count(command=command, outcome="error:validation_failed")
     check(n >= least, f"{command} refused as validation_failed: {n}, want at least {least}")
 sys.exit(1 if failed else 0)

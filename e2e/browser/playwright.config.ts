@@ -35,7 +35,9 @@ export default defineConfig({
   // (--project m3-settings), on the sites milestone 2 left. v0.2.0's deploys
   // (--project v02-deploy) need the Git host (e2e/githost) and PHP 8.4, and so do
   // v0.3.0's databases and cache users (--project v03-databases), which install
-  // MySQL and Valkey.
+  // MySQL and Valkey. v0.4.0's workers, cron jobs and Node.js page (--project
+  // v04-workers) use v0.2.0's site "laravel" and the Node.js that
+  // e2e/scenarios/v04-workers.sh leaves installed.
   projects: [
     { name: 'setup', testMatch: 'setup.spec.ts' },
     { name: 'recovery', testMatch: 'recovery.spec.ts', dependencies: ['setup'] },
@@ -47,5 +49,6 @@ export default defineConfig({
     { name: 'm3-settings', testMatch: 'settings.spec.ts', dependencies: ['m3-security'] },
     { name: 'v02-deploy', testMatch: 'deploy.spec.ts' },
     { name: 'v03-databases', testMatch: 'databases.spec.ts' },
+    { name: 'v04-workers', testMatch: 'workers.spec.ts' },
   ],
 });

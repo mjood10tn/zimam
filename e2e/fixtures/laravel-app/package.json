@@ -1,0 +1,9 @@
+{
+  "name": "zimam-e2e-laravel-app",
+  "private": true,
+  "type": "module",
+  "description": "The front-end build of Zimam's e2e app: Vite-shaped, with no dependencies, so npm ci needs no registry (e2e/scenarios/v04-workers.sh).",
+  "scripts": {
+    "build": "node build.mjs"
+  }
+}

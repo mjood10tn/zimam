@@ -153,6 +153,10 @@ jobs:
         run: bash e2e/scripts/browser.sh --project v02-deploy
       - name: v0.3.0, MySQL and Valkey from the panel, two sites with their own users, a rotation, and a site deleted with its databases, in the browser
         run: bash e2e/scripts/browser.sh --project v03-databases
+      - name: v0.4.0, Node.js installed, changed and removed, a deploy that builds with npm, queue workers, the scheduler and a cron job, restarts on deploy and PHP switch, and a site deleted with them
+        run: bash e2e/scenarios/v04-workers.sh
+      - name: v0.4.0, a worker, a cron job, the scheduler and the Node.js page, in the browser
+        run: bash e2e/scripts/browser.sh --project v04-workers
       - name: done-when 12, every root-escalation probe in one pass between two identical snapshots
         run: bash e2e/probes/run-all.sh
       - name: done-when 11, the audit re-check

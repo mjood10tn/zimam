@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Validation probes (design §14.4), sent as zimam for milestone 2's
 # commands (bad site names, domains and PHP versions), milestone 3's
-# site.security, and every field of v0.2.0's six commands: each answers
-# validation_failed before anything runs, and leaves exactly one
-# error:validation_failed audit entry. run-all.sh runs them between its two
-# file snapshots.
+# site.security, every field of v0.2.0's six commands, and v0.4.0's worker,
+# cron and Node.js commands: each answers validation_failed before anything
+# runs, and leaves exactly one error:validation_failed audit entry.
+# run-all.sh runs them between its two file snapshots.
 # shellcheck source=lib.sh
 source "$(dirname "$0")/lib.sh"
 
@@ -184,4 +184,47 @@ done
 for v in '"yes"' 1 '""'; do
 	send_field "site.destroy with drop_databases $v" site.destroy "{\"name\":\"php84\",\"drop_databases\":$v}" params
 done
+# v0.4.0's workers, cron jobs and Node.js. An owner's command is one line
+# without NUL (R04-D1): a newline or a carriage return would end the
+# script's line, or the cron file's, early. Each is sent JSON-escaped.
+for c in 'php artisan horizon\nid' 'php artisan horizon\rid' 'php artisan horizon\u0000id' '' "$(printf 'x%.0s' {1..4097})"; do
+	send_field "site.workers with a custom command '${c:0:40}'" site.workers \
+		"{\"name\":\"php84\",\"workers\":[{\"id\":\"w\",\"kind\":\"custom\",\"processes\":1,\"command\":\"$c\"}]}" workers
+	send_field "site.cron with the command '${c:0:40}'" site.cron \
+		"{\"name\":\"php84\",\"scheduler\":false,\"jobs\":[{\"id\":\"j\",\"schedule\":\"* * * * *\",\"command\":\"$c\",\"enabled\":true}]}" jobs
+done
+# Schedules: @reboot and the other @ words cron takes beyond the five
+# Zimam offers, a sixth field (the cron line's seventh, where the user
+# would move to), one that names a user, a newline and a second line, a %,
+# which cron turns into a newline, values out of range, and an empty one.
+for s in '@reboot' '@midnight' '@annually' '* * * * * *' '* * * * * root' '0 0 * * * root id' '* * * * *\n* * * * * root id' '* * * * *\r' \
+	'*/1 % * * *' '60 * * * *' '* 24 * * *' '* * 0 * *' '* * * 13 *' '* * * * 8' '*/0 * * * *' '* * * *' ' * * * * *' '*  * * * *' ''; do
+	send_field "site.cron with the schedule '$s'" site.cron \
+		"{\"name\":\"php84\",\"scheduler\":false,\"jobs\":[{\"id\":\"j\",\"schedule\":\"$s\",\"command\":\"true\",\"enabled\":true}]}" jobs
+done
+send_field "site.cron with a job named scheduler" site.cron \
+	'{"name":"php84","scheduler":false,"jobs":[{"id":"scheduler","schedule":"* * * * *","command":"true","enabled":true}]}' jobs
+# Worker fields: ids, counts, memory, the queue options, and what belongs to
+# one kind only.
+for w in '"id":"Queue","kind":"laravel-queue","processes":1' '"id":"1q","kind":"laravel-queue","processes":1' '"id":"a/b","kind":"laravel-queue","processes":1' \
+	'"id":"abcdefghijklmnopq","kind":"laravel-queue","processes":1' '"id":"q","kind":"laravel-queue","processes":0' '"id":"q","kind":"laravel-queue","processes":11' \
+	'"id":"q","kind":"laravel-queue","processes":1,"memory_mb":63' '"id":"q","kind":"laravel-queue","processes":1,"max_time":30' \
+	'"id":"q","kind":"laravel-queue","processes":1,"connection":"Redis;id"' '"id":"q","kind":"laravel-queue","processes":1,"queues":["a b"]' \
+	'"id":"q","kind":"laravel-queue","processes":1,"command":"id"' '"id":"q","kind":"custom","processes":1,"command":"id","queues":["x"]' \
+	'"id":"q","kind":"shell","processes":1,"command":"id"'; do
+	send_field "site.workers with {$w}" site.workers "{\"name\":\"php84\",\"workers\":[{$w}]}" workers
+done
+send_field "site.workers with the same worker twice" site.workers \
+	'{"name":"php84","workers":[{"id":"q","kind":"laravel-queue","processes":1},{"id":"q","kind":"laravel-queue","processes":1}]}' workers
+send_field "site.workers with no list" site.workers '{"name":"php84","workers":null}' workers
+send_field "site.workers of the site ../php84" site.workers '{"name":"../php84","workers":[]}' name
+send_field "site.cron of the site ../php84" site.cron '{"name":"../php84","scheduler":false,"jobs":[]}' name
+for command in site.workers.status site.workers.restart; do
+	send_field "$command of the site ../php84" "$command" '{"name":"../php84"}' name
+done
+send_field "site.workers.restart of the worker '../q'" site.workers.restart '{"name":"php84","worker":"../q"}' worker
+for m in '"22"' '"26; rm -rf /"' '"../26"'; do
+	send_field "node.install of the major $m" node.install "{\"major\":$m}" major
+done
+send_field "node.install of the major 26, a number" node.install '{"major":26}' params
 exit "$failed"

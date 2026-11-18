@@ -19,9 +19,26 @@ final class Services
     /** @var array<string, string> */
     private array $config;
 
+    private readonly string $base;
+
     public function __construct(App $app)
     {
         $this->config = $app->config();
+        $this->base = $app->base;
+    }
+
+    /**
+     * ~/e2e, where the worker's jobs and the scheduled command leave their
+     * files (job-<word> and schedule.log), made on first use.
+     */
+    public static function outputDir(): string
+    {
+        $dir = (getenv('HOME') ?: sys_get_temp_dir()).'/e2e';
+        if (! is_dir($dir) && ! mkdir($dir, 0o700, true) && ! is_dir($dir)) {
+            throw new \RuntimeException("{$dir} could not be made");
+        }
+
+        return $dir;
     }
 
     /** Writes a row to the site's database and reads it back. */
@@ -106,6 +123,9 @@ final class Services
                 $job = json_decode($popped[0], true);
                 $word = (string) ($job['data']['word'] ?? '');
                 $redis->set('e2e:done:'.$word, 'worker');
+                // Which PHP and which release ran the job, so the scenario
+                // sees a worker restart onto a new release or PHP version.
+                file_put_contents(self::outputDir().'/job-'.$word, sprintf("php=%s release=%s\n", PHP_VERSION, $this->base));
                 $redis->zRem(self::QUEUE.':reserved', $popped[1]);
                 echo "processed {$word}\n";
             } elseif (! $once) {
