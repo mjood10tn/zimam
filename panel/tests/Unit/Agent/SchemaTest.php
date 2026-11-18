@@ -33,6 +33,9 @@ use App\Agent\Commands\SiteReleases;
 use App\Agent\Commands\SiteRepo;
 use App\Agent\Commands\SiteRollback;
 use App\Agent\Commands\SiteSecurity;
+use App\Agent\Commands\SiteWorkers;
+use App\Agent\Commands\SiteWorkersRestart;
+use App\Agent\Commands\SiteWorkersStatus;
 use App\Agent\Commands\SystemMetrics;
 use App\Agent\Commands\SystemStatus;
 use App\Agent\Commands\ValkeyInstall;
@@ -110,12 +113,48 @@ final class SchemaTest extends TestCase
             new LogsList('site.nginx-access', 'shop'),
             new LogsPolicy(14, 365, 5 * 1024 ** 3),
             new LogsRead('journal.nginx', 'back', cursor: 's=a;i=1', limit: 50, search: 'error', priority: 3),
+            new SiteWorkers('shop', self::workerSpecs()),
+            new SiteWorkersStatus('shop'),
+            new SiteWorkersRestart('shop', 'queue'),
         ];
 
         return array_combine(
             array_map(fn (AgentCommand $c): string => $c->name(), $commands),
             array_map(fn (AgentCommand $c): array => [$c], $commands),
         );
+    }
+
+    /** @return list<array<string, mixed>> a custom worker and a Laravel one with every option, as SiteWorker::spec() builds them */
+    private static function workerSpecs(): array
+    {
+        return [
+            ['id' => 'horizon', 'kind' => 'custom', 'processes' => 1, 'memory_mb' => 1024, 'command' => 'php artisan horizon'],
+            ['id' => 'queue', 'kind' => 'laravel-queue', 'processes' => 10, 'memory_mb' => 512, 'connection' => 'redis', 'queues' => ['high', 'emails:low'], 'tries' => 3, 'timeout' => 0, 'sleep' => 3, 'max_time' => 3600, 'backoff' => 10],
+        ];
+    }
+
+    /** The worker commands with the least they take: no workers, every worker restarted. */
+    public function testMinimalWorkerParamsMatchSchema(): void
+    {
+        foreach ([new SiteWorkers('shop', []), new SiteWorkersRestart('shop')] as $command) {
+            $this->assertValid(self::wire($command->jsonParams()), file_get_contents($this->schemaPath($command->name().'.params')), $command->name());
+        }
+    }
+
+    /** The fake's worker answers, and system.metrics once a site has workers. */
+    public function testFakeWorkerResultsMatchSchemas(): void
+    {
+        $fake = new FakeAgentClient;
+        foreach ([new SiteWorkers('shop', self::workerSpecs()), new SiteWorkersRestart('shop', 'queue'), new SiteWorkersRestart('shop')] as $command) {
+            $final = $fake->follow($fake->submit($command)->id, 0, function (): void {});
+            $this->assertSame('succeeded', $final->status);
+            $this->assertResult($command->name(), $final->result, "fake {$command->name()} result");
+        }
+        $this->assertResult('site.workers.status', $fake->call(new SiteWorkersStatus('shop'))->data, 'fake site.workers.status');
+        $this->assertResult('site.workers.status', $fake->call(new SiteWorkersStatus('none'))->data, 'fake site.workers.status without workers');
+        $metrics = $fake->call(new SystemMetrics)->data;
+        $this->assertSame(['horizon', 'queue'], array_column($metrics['workers'], 'worker'));
+        $this->assertResult('system.metrics', $metrics, 'fake system.metrics with workers');
     }
 
     /** A command class missing from commands() would skip every check here. */

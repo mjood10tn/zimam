@@ -10,6 +10,7 @@ use App\Filament\Resources\SiteResource\Pages\EnvironmentTab;
 use App\Filament\Resources\SiteResource\Pages\ListSites;
 use App\Filament\Resources\SiteResource\Pages\SecurityTab;
 use App\Filament\Resources\SiteResource\Pages\ViewSite;
+use App\Filament\Resources\SiteResource\Pages\WorkersTab;
 use App\Livewire\SiteJobs;
 use App\Livewire\SiteLogs;
 use App\Models\Certificate;
@@ -155,6 +156,12 @@ class SiteResource extends Resource
                 Tab::make(__('zimam.sites.tabs.environment'))->schema([
                     Livewire::make(EnvironmentTab::class, fn (Site $record): array => ['site' => $record])->key('site-environment'),
                 ]),
+                // A static site has no PHP to run workers (the agent refuses it with conflict).
+                Tab::make(__('zimam.sites.tabs.workers'))
+                    ->visible(fn (Site $record): bool => $record->runsPhp())
+                    ->schema([
+                        Livewire::make(WorkersTab::class, fn (Site $record): array => ['site' => $record])->key('site-workers')->lazy(),
+                    ]),
                 Tab::make(__('zimam.sites.tabs.database'))->schema([
                     Livewire::make(DatabaseTab::class, fn (Site $record): array => ['site' => $record])->key('site-database')->lazy(),
                 ]),

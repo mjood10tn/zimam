@@ -10,7 +10,8 @@ use Livewire\Component;
 
 /**
  * A site's Logs tab: its three sources (§11.1), plus Laravel's log for a
- * Laravel site (R02-D8), one at a time.
+ * Laravel site (R02-D8) and the workers' journal for a PHP or Laravel site
+ * (v0.4.0), one at a time.
  */
 class SiteLogs extends Component
 {
@@ -24,6 +25,9 @@ class SiteLogs extends Component
         $ids = ['site.nginx-access', 'site.nginx-error', 'site.php-error'];
         if ($this->site->isLaravel()) {
             $ids[] = 'site.laravel';
+        }
+        if ($this->site->runsPhp()) {
+            $ids[] = 'site.workers';
         }
         $sources = [];
         foreach ($ids as $id) {

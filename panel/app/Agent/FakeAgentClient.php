@@ -15,6 +15,7 @@ use App\Agent\Exceptions\AgentValidationFailed;
 use App\Models\SecurityFinding;
 use App\Models\SiteBasicAuthUser;
 use App\Models\SiteRepository;
+use App\Models\SiteWorker;
 use App\Support\IpEntry;
 use Carbon\CarbonImmutable;
 use Closure;
@@ -87,6 +88,9 @@ final class FakeAgentClient implements AgentClient
 
     /** @var array<string, true> the sites with a Valkey user, as succeeded cache.user jobs left them */
     private array $cacheUsers = [];
+
+    /** @var array<string, list<array<string, mixed>>> each site's workers (WorkerSpecs), as succeeded site.workers jobs left them */
+    private array $workers = [];
 
     /** How many deploys took the branch's head: each gets its own commit. */
     private int $heads = 0;
@@ -219,6 +223,18 @@ final class FakeAgentClient implements AgentClient
         return $this->envs[$site] ?? null;
     }
 
+    /**
+     * Gives a site workers on the fake's server, as a succeeded site.workers would.
+     *
+     * @param  list<array<string, mixed>>  $workers  WorkerSpecs
+     */
+    public function workers(string $site, array $workers): static
+    {
+        $this->workers[$site] = $workers;
+
+        return $this;
+    }
+
     /** Gives a site a kept release, newest first; an active one becomes the live one. */
     public function release(string $site, string $id, string $commit, bool $active = false, ?CarbonImmutable $created = null): static
     {
@@ -280,6 +296,7 @@ final class FakeAgentClient implements AgentClient
             $command->name() === 'site.releases' => $this->siteReleases($command->params()['name']),
             $command->name() === 'site.env.read' => $this->siteEnvRead($command->params()['name']),
             $command->name() === 'db.list' => $this->dbList($command->params()),
+            $command->name() === 'site.workers.status' => $this->siteWorkersStatus($command->params()['name']),
             $command instanceof JobStatus => $this->advance($command->job),
             $command instanceof JobCancel => $this->cancel($command->job),
             $command instanceof JobFollow => throw new LogicException('job.follow streams: use follow()'),
@@ -316,6 +333,14 @@ final class FakeAgentClient implements AgentClient
      */
     private function precheck(AgentCommand $command): void
     {
+        if ($command->name() === 'site.workers.restart' && isset($command->params()['worker'])) {
+            $name = $command->params()['name'];
+            if (! in_array($command->params()['worker'], array_column($this->workers[$name] ?? [], 'id'), true)) {
+                throw new AgentNotFound("Site {$name} has no worker {$command->params()['worker']}.");
+            }
+
+            return;
+        }
         if ($command->name() === 'site.destroy') {
             $name = $command->params()['name'];
             if (! ($command->params()['drop_databases'] ?? false) && in_array($name, array_column($this->databases, 'site'), true)) {
@@ -399,7 +424,7 @@ final class FakeAgentClient implements AgentClient
             'php.install', 'php.uninstall', 'php.default' => ['version' => $params['version']],
             'site.provision' => ['name' => $params['name'], 'template_version' => 1],
             'site.php' => ['name' => $params['name'], 'php_version' => $params['php_version']],
-            'site.destroy', 'site.security', 'site.env.write' => ['name' => $params['name']],
+            'site.destroy', 'site.security', 'site.env.write', 'site.workers', 'site.workers.restart' => ['name' => $params['name']],
             'mysql.install' => ['version' => '8.4.13'],
             'db.create', 'db.drop' => ['site' => $params['site'], 'database' => $params['database']],
             'db.user', 'cache.user' => ['site' => $params['site']],
@@ -572,6 +597,7 @@ final class FakeAgentClient implements AgentClient
                 $this->releases[$name] ?? [],
             ),
             'site.env.write' => $this->envs[$name] = $params['content'],
+            'site.workers' => $this->workers[$name] = $params['workers'],
             'site.destroy' => $this->forget($name),
             'mysql.install' => $this->installMysql($result['version'] ?? '8.4.13'),
             'db.create' => $this->database($params['site'], $params['database']),
@@ -605,7 +631,7 @@ final class FakeAgentClient implements AgentClient
 
     private function forget(string $name): void
     {
-        unset($this->repositories[$name], $this->releases[$name], $this->envs[$name], $this->dbUsers[$name], $this->cacheUsers[$name]);
+        unset($this->repositories[$name], $this->releases[$name], $this->envs[$name], $this->dbUsers[$name], $this->cacheUsers[$name], $this->workers[$name]);
         $this->databases = array_filter($this->databases, fn (array $database): bool => $database['site'] !== $name);
     }
 
@@ -711,6 +737,11 @@ final class FakeAgentClient implements AgentClient
 
             return;
         }
+        if (in_array($command->name(), ['site.workers', 'site.workers.restart'], true)) {
+            $this->validateWorkers($command->name(), $params);
+
+            return;
+        }
         if (in_array($command->name(), ['db.create', 'db.drop', 'db.user', 'cache.user'], true)) {
             $this->validateDatabase($command->name(), $params);
 
@@ -768,6 +799,83 @@ final class FakeAgentClient implements AgentClient
         if ($fields !== []) {
             throw new AgentValidationFailed('Invalid parameters', $fields);
         }
+    }
+
+    /**
+     * The agent's checks of site.workers and site.workers.restart
+     * (WorkerList, WorkerSpec), in its order: the message names the worker,
+     * as the agent's does.
+     *
+     * @param  array<string, mixed>  $params
+     */
+    private function validateWorkers(string $command, array $params): void
+    {
+        $this->validateSiteName($params['name']);
+        $id = '/^[a-z][a-z0-9-]{0,15}\z/';
+        if ($command === 'site.workers.restart') {
+            if (isset($params['worker']) && ! preg_match($id, $params['worker'])) {
+                throw new AgentValidationFailed('Invalid parameters', ['worker' => 'must be 1–16 lowercase letters, digits or hyphens and start with a letter']);
+            }
+
+            return;
+        }
+        $error = count($params['workers']) > 10 ? 'must have at most 10 workers' : null;
+        $seen = [];
+        foreach ($error === null ? $params['workers'] : [] as $w) {
+            $custom = ($w['kind'] ?? null) === 'custom';
+            $out = fn (string $k, int $lo, int $hi): bool => isset($w[$k]) && (! is_int($w[$k]) || $w[$k] < $lo || $w[$k] > $hi);
+            $line = $w['command'] ?? null;
+            $problem = match (true) {
+                ! preg_match($id, (string) ($w['id'] ?? '')) => 'id must be 1–16 lowercase letters, digits or hyphens and start with a letter',
+                ! in_array($w['kind'] ?? null, ['laravel-queue', 'custom'], true) => 'kind must be laravel-queue or custom',
+                ! isset($w['processes']) || $out('processes', 1, 10) => 'processes must be between 1 and 10',
+                $out('memory_mb', 64, 4096) => 'memory_mb must be between 64 and 4096',
+                isset($w['connection']) && ! preg_match('/^[a-z0-9_-]{1,32}\z/', $w['connection']) => 'connection must be 1–32 lowercase letters, digits, underscores or hyphens',
+                count($w['queues'] ?? []) > 10 => 'queues must have at most 10 queues',
+                array_filter($w['queues'] ?? [], fn (mixed $q): bool => ! is_string($q) || ! preg_match('/^[A-Za-z0-9_.:-]{1,64}\z/', $q)) !== [] => 'queues must be 1–64 letters, digits, dots, colons, underscores or hyphens',
+                $out('tries', 1, 100) => 'tries must be between 1 and 100',
+                $out('timeout', 0, 86400) => 'timeout must be between 0 and 86400',
+                $out('sleep', 0, 60) => 'sleep must be between 0 and 60',
+                $out('max_time', 0, 86400) || (isset($w['max_time']) && $w['max_time'] >= 1 && $w['max_time'] < 60) => 'max_time must be 0 or between 60 and 86400',
+                $out('backoff', 0, 3600) => 'backoff must be between 0 and 3600',
+                ! $custom && $line !== null => 'command is only for a custom worker',
+                $custom && ! is_string($line) => 'command must not be empty',
+                $custom && SiteWorker::commandError($line) !== null => 'command must be one line of valid UTF-8, 1 to 4096 bytes, without NUL characters',
+                $custom && array_intersect_key($w, array_flip(['connection', 'queues', 'tries', 'timeout', 'sleep', 'max_time', 'backoff'])) !== [] => 'kind a custom worker takes no connection, queues or queue options',
+                default => null,
+            };
+            if ($problem !== null) {
+                $error = 'worker "'.($w['id'] ?? '').'": '.$problem;
+                break;
+            }
+            if (isset($seen[$w['id']])) {
+                $error = "worker \"{$w['id']}\" is listed twice";
+                break;
+            }
+            $seen[$w['id']] = true;
+        }
+        if ($error !== null) {
+            throw new AgentValidationFailed('Invalid parameters', ['workers' => $error]);
+        }
+    }
+
+    /**
+     * site.workers.status's data: every process of each worker on the
+     * fake's server, running since now, in id order.
+     *
+     * @return array<string, mixed>
+     */
+    private function siteWorkersStatus(string $name): array
+    {
+        $this->validateSiteName($name);
+        $since = self::goTime(CarbonImmutable::now('UTC'));
+        $workers = $this->workers[$name] ?? [];
+        usort($workers, fn (array $a, array $b): int => strcmp($a['id'], $b['id']));
+
+        return ['name' => $name, 'workers' => array_map(fn (array $w): array => [
+            'id' => $w['id'],
+            'instances' => array_map(fn (int $n): array => ['instance' => $n, 'active' => 'active', 'sub' => 'running', 'restarts' => 0, 'since' => $since, 'failing' => false], range(1, $w['processes'])),
+        ], $workers)];
     }
 
     /**
@@ -1088,6 +1196,12 @@ final class FakeAgentClient implements AgentClient
             'network' => ['rx_bytes' => 52311086811 + 250000 * $n, 'tx_bytes' => 9814555121 + 60000 * $n],
             'services' => $services,
         ];
+        // Left out on a server without workers, as the agent's omitempty does.
+        foreach ($this->workers as $site => $workers) {
+            foreach ($workers as $w) {
+                $metrics['workers'][] = ['site' => $site, 'worker' => $w['id'], 'restarts' => 0, 'failing' => false, 'failed' => false];
+            }
+        }
         foreach ($this->metricsChanges as $change) {
             $metrics = $change($metrics);
         }
@@ -1123,7 +1237,7 @@ final class FakeAgentClient implements AgentClient
     private function validateLogs(array $params): void
     {
         $site = str_starts_with($params['source'], 'site.');
-        $journal = str_starts_with($params['source'], 'journal.');
+        $journal = self::journalSource($params['source']);
         $fields = [];
         if ($site !== isset($params['name'])) {
             $fields['name'] = $site ? 'is required for a site\'s log' : 'must be left out for a server log';
@@ -1142,11 +1256,17 @@ final class FakeAgentClient implements AgentClient
         }
     }
 
+    /** Whether a log source is a journal one, as the agent's LogSource.IsJournal says. */
+    private static function journalSource(string $source): bool
+    {
+        return str_starts_with($source, 'journal.') || $source === 'site.workers';
+    }
+
     /** @return array<string, mixed> logs.list's data: a file source's current file and one archive */
     private function logsList(array $params): array
     {
         $this->validateLogs($params);
-        if (str_starts_with($params['source'], 'journal.')) {
+        if (self::journalSource($params['source'])) {
             return ['source' => $params['source'], 'current' => null, 'archives' => []];
         }
         $size = array_sum(array_map(fn (string $l): int => strlen($l) + 1, $this->sourceLines($params)));
@@ -1168,7 +1288,7 @@ final class FakeAgentClient implements AgentClient
     private function logsRead(array $params): array
     {
         $this->validateLogs($params);
-        $journal = str_starts_with($params['source'], 'journal.');
+        $journal = self::journalSource($params['source']);
         $all = [];
         $offset = 0;
         foreach ($this->sourceLines($params) as $i => $text) {

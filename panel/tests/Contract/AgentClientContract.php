@@ -12,6 +12,8 @@ use App\Agent\Commands\SiteEnvWrite;
 use App\Agent\Commands\SiteProvision;
 use App\Agent\Commands\SiteRepo;
 use App\Agent\Commands\SiteRollback;
+use App\Agent\Commands\SiteWorkers;
+use App\Agent\Commands\SiteWorkersRestart;
 use App\Agent\Commands\SystemStatus;
 use App\Agent\Exceptions\AgentBusy;
 use App\Agent\Exceptions\AgentException;
@@ -78,6 +80,33 @@ abstract class AgentClientContract extends TestCase
                 $this->fail("{$command->name()} accepted a bad {$field}");
             } catch (AgentValidationFailed $e) {
                 $this->assertSame([$field], array_keys($e->fields()), "{$command->name()} {$field}");
+            }
+        }
+    }
+
+    /**
+     * The worker commands' validation, answered before anything runs: a
+     * custom command over two lines, an id with a capital, a max_time under
+     * a minute (ruling R5), the worker to restart.
+     */
+    public function testWorkerCommandsValidationShape(): void
+    {
+        $cases = [
+            'workers' => [
+                new SiteWorkers('contract-workers', [['id' => 'horizon', 'kind' => 'custom', 'processes' => 1, 'command' => "php artisan horizon\nid"]]),
+                new SiteWorkers('contract-workers', [['id' => 'Queue', 'kind' => 'laravel-queue', 'processes' => 1]]),
+                new SiteWorkers('contract-workers', [['id' => 'queue', 'kind' => 'laravel-queue', 'processes' => 1, 'max_time' => 30]]),
+            ],
+            'worker' => [new SiteWorkersRestart('contract-workers', 'Queue')],
+        ];
+        foreach ($cases as $field => $commands) {
+            foreach ($commands as $command) {
+                try {
+                    $this->client->submit($command);
+                    $this->fail("{$command->name()} accepted a bad {$field}");
+                } catch (AgentValidationFailed $e) {
+                    $this->assertSame([$field], array_keys($e->fields()), "{$command->name()} {$field}");
+                }
             }
         }
     }
