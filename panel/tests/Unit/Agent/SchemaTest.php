@@ -19,6 +19,8 @@ use App\Agent\Commands\LogsList;
 use App\Agent\Commands\LogsPolicy;
 use App\Agent\Commands\LogsRead;
 use App\Agent\Commands\MysqlInstall;
+use App\Agent\Commands\NodeInstall;
+use App\Agent\Commands\NodeUninstall;
 use App\Agent\Commands\PhpDefault;
 use App\Agent\Commands\PhpInstall;
 use App\Agent\Commands\PhpUninstall;
@@ -118,6 +120,8 @@ final class SchemaTest extends TestCase
             new SiteWorkersStatus('shop'),
             new SiteWorkersRestart('shop', 'queue'),
             new SiteCron('shop', true, self::cronJobs()),
+            new NodeInstall('26'),
+            new NodeUninstall,
         ];
 
         return array_combine(
@@ -271,6 +275,14 @@ final class SchemaTest extends TestCase
         $final = $bare->follow($bare->submit(new ValkeyInstall)->id, 0, function (): void {});
         $this->assertSame('succeeded', $final->status);
         $this->assertResult('valkey.install', $final->result, 'fake valkey.install result');
+
+        $node = new FakeAgentClient;
+        $final = $node->follow($node->submit(new NodeInstall('24'))->id, 0, function (): void {});
+        $this->assertResult('node.install', $final->result, 'fake node.install result');
+        $this->assertResult('system.status', $node->call(new SystemStatus)->data, 'system.status with Node installed');
+        $final = $node->follow($node->submit(new NodeUninstall)->id, 0, function (): void {});
+        // Its result is the empty object {}, which PHP decodes as [] (assertResult would read it as a list).
+        $this->assertSame([], $final->result);
 
         $fake->database('shop', 's_shop_main', 4096);
         $this->assertResult('db.list', $fake->call(new DbList('shop'))->data, 'db.list with a database');
