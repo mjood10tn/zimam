@@ -2,7 +2,10 @@ package sites
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -192,7 +195,9 @@ func TestConcurrentProvisionsGetDifferentUIDs(t *testing.T) {
 func TestProvisionRemovesSchedulesLeftUnderTheName(t *testing.T) {
 	e := newEnv(t)
 	install(t, e.p.Crontab(), e.p.Atq())
-	e.run.Add(scriptFail(crontabCmd, 1, "no crontab for s_shop"))
+	spool := e.p.CrontabSpool("s_shop")
+	mkdir(t, filepath.Dir(spool))
+	writeFile(t, spool, "* * * * * true\n")
 	e.run.Add(scriptOut(atqCmd, "8\tFri Nov 14 10:00:00 2026 a s_shop\n9\tFri Nov 14 10:00:00 2026 a root\n"))
 	e.run.Add(scriptOut("/usr/bin/atrm 8", ""))
 	if _, err := e.provision(static); err != nil {
@@ -201,8 +206,11 @@ func TestProvisionRemovesSchedulesLeftUnderTheName(t *testing.T) {
 	calls := e.calls()
 	u := slices.Index(calls, "/usr/sbin/useradd -M -d /home/s_shop -s /usr/sbin/nologin -u 1000 -g 1000 s_shop")
 	m := slices.Index(calls, "/usr/sbin/usermod -aG s_shop www-data")
-	c, q, r := slices.Index(calls, crontabCmd), slices.Index(calls, atqCmd), slices.Index(calls, "/usr/bin/atrm 8")
-	if u < 0 || c < u || q < u || r < q || c > m || r > m {
-		t.Errorf("crontab -r and atrm 8 must run right after useradd, before usermod:\n%s", strings.Join(calls, "\n"))
+	if _, err := os.Lstat(spool); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the crontab left under the name is still in the spool: %v", err)
+	}
+	q, r := slices.Index(calls, atqCmd), slices.Index(calls, "/usr/bin/atrm 8")
+	if u < 0 || q < u || r < q || r > m {
+		t.Errorf("atrm 8 must run right after useradd, before usermod:\n%s", strings.Join(calls, "\n"))
 	}
 }

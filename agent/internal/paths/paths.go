@@ -160,6 +160,13 @@ func (p Paths) ComposerPhar(version string) string {
 func (p Paths) Crontab() string { return p.at("usr/bin/crontab") }
 func (p Paths) Atq() string     { return p.at("usr/bin/atq") }
 
+// CrontabSpool is a user's crontab in Debian cron's spool. site.destroy
+// removes it there: crontab -r -u refuses a user /etc/cron.allow doesn't
+// list, as every site user since v0.4.0 (OQ1).
+func (p Paths) CrontabSpool(username string) string {
+	return p.at("var/spool/cron/crontabs", username)
+}
+
 // /var/log/zimam
 
 func (p Paths) LogDir() string     { return p.at("var/log/zimam") }

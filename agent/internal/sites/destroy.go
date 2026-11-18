@@ -277,21 +277,24 @@ func groupExists(path, group string) (bool, error) {
 var _ Helper = (*helper.Client)(nil)
 
 const (
-	crontab = "/usr/bin/crontab"
-	atq     = "/usr/bin/atq"
-	atrm    = "/usr/bin/atrm"
+	atq  = "/usr/bin/atq"
+	atrm = "/usr/bin/atrm"
 )
 
 // removeSchedules removes username's crontab and at jobs, each only when its
-// program is installed. It runs while the user still exists: crontab -u
-// needs it, and atq names no owner for a deleted user's jobs.
+// program is installed. It runs while the user still exists: atq names no
+// owner for a deleted user's jobs. The crontab is deleted from cron's spool
+// directly, not with crontab -r -u, which refuses a user /etc/cron.allow
+// doesn't list (OQ1), so every site user since v0.4.0, though one may still
+// have a crontab from before. Cron notices the spool directory change on its
+// next minute.
 func removeSchedules(ctx context.Context, d sysexec.Deps, username string) error {
 	if exists(d.Paths.Crontab()) {
-		d.Logf("Removing the crontab of %s", username)
-		_, err := d.Run.Run(ctx, sysexec.Cmd{Path: crontab, Args: []string{"-r", "-u", username}})
-		var exit *sysexec.ExitError
-		if err != nil && !(errors.As(err, &exit) && exit.Code == 1 && strings.Contains(string(exit.Stderr), "no crontab for")) {
-			return err
+		spool := d.Paths.CrontabSpool(username)
+		if err := os.Remove(spool); err == nil {
+			d.Logf("Removed the crontab of %s", username)
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("removing the crontab of %s: %w", username, err)
 		}
 	}
 	if exists(d.Paths.Atq()) {

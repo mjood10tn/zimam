@@ -1,6 +1,9 @@
 package sites
 
 import (
+	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -9,19 +12,11 @@ import (
 	"zimam/agent/internal/sysexec"
 )
 
-const (
-	crontabCmd = "/usr/bin/crontab -r -u s_shop"
-	atqCmd     = "/usr/bin/atq"
-)
+const atqCmd = "/usr/bin/atq"
 
 func scriptOut(cmd, stdout string) sysexec.Script {
 	f := strings.Fields(cmd)
 	return sysexec.Script{Path: f[0], Args: f[1:], Result: sysexec.Result{Stdout: []byte(stdout)}}
-}
-
-func scriptFail(cmd string, code int, stderr string) sysexec.Script {
-	f := strings.Fields(cmd)
-	return sysexec.Script{Path: f[0], Args: f[1:], Result: sysexec.Result{ExitCode: code, Stderr: []byte(stderr)}}
 }
 
 // install makes the program at each path exist, as its package does.
@@ -39,20 +34,31 @@ const atJobs = "3\tFri Nov 14 10:00:00 2026 a s_shop\n" +
 	"6\tFri Nov 14 13:00:00 2026 b s_shop\n" +
 	"7\tFri Nov 14 14:00:00 2026 a s_sho\n"
 
-// The schedules go before the processes are killed, so cron can't start one
-// in between that makes userdel fail with "currently used by process".
-func TestDestroyRemovesCrontabBeforeKillAndUserdel(t *testing.T) {
+// The crontab is deleted from cron's spool, not with crontab -r -u, which
+// refuses every user /etc/cron.allow doesn't list: since v0.4.0 that is
+// every site user, so site.destroy failed on every site (found by the e2e
+// run). A crontab left from before v0.4.0 still goes, another user's stays.
+func TestDestroyRemovesCrontabFromTheSpool(t *testing.T) {
 	e := provisioned(t)
 	install(t, e.p.Crontab())
-	e.run.Add(scriptOut(crontabCmd, ""))
+	spool, other := e.p.CrontabSpool("s_shop"), e.p.CrontabSpool("s_shop2")
+	mkdir(t, filepath.Dir(spool))
+	writeFile(t, spool, "* * * * * true\n")
+	writeFile(t, other, "* * * * * true\n")
 	n := len(e.run.Calls())
 	if _, err := e.destroy(); err != nil {
 		t.Fatalf("Destroy: %v", err)
 	}
-	got := e.callsSince(n)
-	ci, ki, ui := slices.Index(got, crontabCmd), slices.Index(got, pkillCmd), slices.Index(got, userdelCmd)
-	if ci < 0 || ki < 0 || ci > ki || ci > ui {
-		t.Errorf("crontab -r must run before the processes are killed and before userdel:\n%s", strings.Join(got, "\n"))
+	if _, err := os.Lstat(spool); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("s_shop's crontab is still in the spool: %v", err)
+	}
+	if _, err := os.Lstat(other); err != nil {
+		t.Errorf("s_shop2's crontab went too: %v", err)
+	}
+	for _, c := range e.callsSince(n) {
+		if strings.Contains(c, "crontab") {
+			t.Errorf("ran %q; crontab refuses a user cron.allow doesn't list", c)
+		}
 	}
 }
 
@@ -125,15 +131,7 @@ func TestDestroyWithoutCronOrAtSkipsThem(t *testing.T) {
 func TestDestroyNoCrontabIsNotAnError(t *testing.T) {
 	e := provisioned(t)
 	install(t, e.p.Crontab())
-	e.run.Add(scriptFail(crontabCmd, 1, "no crontab for s_shop"))
 	if _, err := e.destroy(); err != nil {
 		t.Fatalf("Destroy with no crontab: %v", err)
-	}
-
-	e = provisioned(t)
-	install(t, e.p.Crontab())
-	e.run.Add(scriptFail(crontabCmd, 1, "crontab: cannot open spool"))
-	if _, err := e.destroy(); err == nil {
-		t.Fatal("a crontab failure other than no crontab was ignored")
 	}
 }
