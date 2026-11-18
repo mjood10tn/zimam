@@ -65,6 +65,9 @@ func (j *Context) Deps() sysexec.Deps {
 // answers that the job already ended. An error means the outcome couldn't
 // be recorded; the unit then fails, and Reconcile records that.
 func (m *Manager) RunJob(ctx context.Context, id contract.JobID) error {
+	// The unit's RuntimeMaxSec counts from about now; wall clock, not m.Now,
+	// which only stamps records.
+	start := time.Now()
 	sp, err := m.readSpec(id)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil // the job ended before it ran: cancelled, or never started
@@ -100,7 +103,21 @@ func (m *Manager) RunJob(ctx context.Context, id contract.JobID) error {
 	logf := func(format string, args ...any) {
 		logFile.Write(logLines(m.now(), fmt.Sprintf(format, args...)))
 	}
-	result, runErr := m.call(ctx, id, sp, logf)
+	// The handler's context ends recordTimeout before systemd kills the
+	// unit, so a step without its own bound fails with an outcome recorded
+	// here, not killed with none (R04-D12). systemd's kill stays the outer
+	// bound.
+	hctx := ctx
+	l, limited := LimitsFor(sp.Command)
+	if limited {
+		var cancel context.CancelFunc
+		hctx, cancel = context.WithDeadline(ctx, start.Add(time.Duration(l.RuntimeMaxSec)*time.Second-recordTimeout))
+		defer cancel()
+	}
+	result, runErr := m.call(hctx, id, sp, logf)
+	if runErr != nil && ctx.Err() == nil && errors.Is(hctx.Err(), context.DeadlineExceeded) {
+		logf("Ran out of time: a %s job may run %d s", sp.Command, l.RuntimeMaxSec)
+	}
 	if ctx.Err() != nil {
 		var landed *Landed
 		if runErr != nil && !errors.As(runErr, &landed) {
