@@ -57,6 +57,16 @@ class Node extends Page
         return ServerStatus::current()?->data['node'] ?? null;
     }
 
+    /**
+     * The Node version in a Debian package version: `26.13.1` from
+     * `26.13.1-1nodesource1`, without an epoch or the Debian revision. The
+     * agent's field stays the package version; only the display drops them.
+     */
+    public static function displayVersion(string $package): string
+    {
+        return preg_match('/\A(?:\d+:)?(\d+(?:\.\d+)*)/', $package, $m) === 1 ? $m[1] : $package;
+    }
+
     private function installedMajor(): ?string
     {
         $node = $this->node();
@@ -118,7 +128,7 @@ class Node extends Page
                 if ($major === null) {
                     return __('zimam.node.not_installed');
                 }
-                $text = __('zimam.node.installed', ['version' => $this->node()['version'] ?? $major, 'major' => $major]);
+                $text = __('zimam.node.installed', ['version' => self::displayVersion($this->node()['version'] ?? $major), 'major' => $major]);
                 if ($release = $this->release($major)) {
                     $date = CarbonImmutable::parse($release['end_of_life'])->translatedFormat('M j, Y');
                     $text .= ' '.__($release['supported'] ? 'zimam.node.ends' : 'zimam.node.ended', ['major' => $major, 'date' => $date]);
