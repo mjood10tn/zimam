@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "not": {
+        "enum": [
+          "zimam",
+          "panel",
+          "default",
+          "acme"
+        ]
+      },
+      "pattern": "^[a-z][a-z0-9-]{0,22}[a-z0-9]$",
+      "type": "string"
+    },
+    "workers": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "backoff": {
+            "anyOf": [
+              {
+                "maximum": 3600,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "command": {
+            "maxLength": 4096,
+            "pattern": "^[^\\x00\\r\\n]+$",
+            "type": "string"
+          },
+          "connection": {
+            "pattern": "^[a-z0-9_-]{1,32}$",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[a-z][a-z0-9-]{0,15}$",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "laravel-queue",
+              "custom"
+            ],
+            "type": "string"
+          },
+          "max_time": {
+            "anyOf": [
+              {
+                "maximum": 86400,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "memory_mb": {
+            "maximum": 4096,
+            "minimum": 64,
+            "type": "integer"
+          },
+          "processes": {
+            "maximum": 10,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "queues": {
+            "items": {
+              "pattern": "^[A-Za-z0-9_.:-]{1,64}$",
+              "type": "string"
+            },
+            "maxItems": 10,
+            "type": "array"
+          },
+          "sleep": {
+            "anyOf": [
+              {
+                "maximum": 60,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timeout": {
+            "anyOf": [
+              {
+                "maximum": 86400,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tries": {
+            "anyOf": [
+              {
+                "maximum": 100,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "processes"
+        ],
+        "type": "object"
+      },
+      "maxItems": 10,
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "workers"
+  ],
+  "title": "site.workers params",
+  "type": "object"
+}

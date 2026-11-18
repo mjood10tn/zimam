@@ -48,8 +48,11 @@ func checkSiteName(f FieldErrors, s LogSource, name SiteName) {
 	}
 }
 
-// IsJournal reports whether the source is read from the journal.
-func (s LogSource) IsJournal() bool { return len(s) > 8 && s[:8] == "journal." }
+// IsJournal reports whether the source is read from the journal: the journal.*
+// sources and the journal of a site's worker units.
+func (s LogSource) IsJournal() bool {
+	return len(s) > 8 && s[:8] == "journal." || s == "site.workers"
+}
 
 // LogFile is a log file's size and when it last changed (§11.2).
 type LogFile struct {

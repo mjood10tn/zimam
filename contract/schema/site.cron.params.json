@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "jobs": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "maxLength": 4096,
+            "pattern": "^[^\\x00\\r\\n]+$",
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "not": {
+              "enum": [
+                "scheduler"
+              ]
+            },
+            "pattern": "^[a-z][a-z0-9-]{0,15}$",
+            "type": "string"
+          },
+          "schedule": {
+            "maxLength": 200,
+            "pattern": "^(@(hourly|daily|weekly|monthly|yearly)|[0-9A-Za-z*/,-]+( [0-9A-Za-z*/,-]+){4})$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command",
+          "enabled",
+          "id",
+          "schedule"
+        ],
+        "type": "object"
+      },
+      "maxItems": 50,
+      "type": "array"
+    },
+    "name": {
+      "not": {
+        "enum": [
+          "zimam",
+          "panel",
+          "default",
+          "acme"
+        ]
+      },
+      "pattern": "^[a-z][a-z0-9-]{0,22}[a-z0-9]$",
+      "type": "string"
+    },
+    "scheduler": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "jobs",
+    "name",
+    "scheduler"
+  ],
+  "title": "site.cron params",
+  "type": "object"
+}

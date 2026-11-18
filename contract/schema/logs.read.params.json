@@ -68,6 +68,8 @@
         "site.nginx-error",
         "site.php-error",
         "site.laravel",
+        "site.workers",
+        "site.cron",
         "journal.system",
         "journal.kernel",
         "journal.ssh",

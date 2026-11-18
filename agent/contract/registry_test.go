@@ -54,6 +54,13 @@ var designCommands = []struct {
 	{"db.user", KindJob, "site:<name>", true, true},
 	{"valkey.install", KindJob, "server", true, true},
 	{"cache.user", KindJob, "site:<name>", true, true},
+	// v0.4.0 worker, cron and Node commands.
+	{"site.workers", KindJob, "site:<name>", true, true},
+	{"site.workers.status", KindRead, "", false, true},
+	{"site.workers.restart", KindJob, "site:<name>", true, true},
+	{"site.cron", KindJob, "site:<name>", true, true},
+	{"node.install", KindJob, "server", true, true},
+	{"node.uninstall", KindJob, "server", true, true},
 }
 
 // subjectPattern turns a §5.3 subject such as "site:<name>" or
@@ -67,8 +74,8 @@ func subjectPattern(s string) *regexp.Regexp {
 }
 
 func TestDescriptorsMatchDesign(t *testing.T) {
-	if len(designCommands) != 31 {
-		t.Fatalf("the table has %d rows, want all 18 of §5.3, v0.2.0's 6 and v0.3.0's 7", len(designCommands))
+	if len(designCommands) != 37 {
+		t.Fatalf("the table has %d rows, want all 18 of §5.3, v0.2.0's 6, v0.3.0's 7 and v0.4.0's 6", len(designCommands))
 	}
 	rows := map[string]int{}
 	for i, row := range designCommands {
