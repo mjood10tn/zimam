@@ -369,13 +369,13 @@ func mysqlActive(active bool) sysexec.Script {
 // A server that never ran mysql.install reports no service installed, and
 // asks systemd about none.
 func TestStatusWithoutServices(t *testing.T) {
-	run := sysexec.NewFakeRunner(nginxV(t))
+	run := sysexec.NewFakeRunner(nginxV(t), sysexec.Script{Path: "/usr/bin/dpkg-query", Args: []string{"-W", "-f=${db:Status-Status} ${Version}", "nodejs"}, Result: sysexec.Result{ExitCode: 1}})
 	st := getStatus(t, statusDeps(t, run))
 	if want := (contract.ServicesStatus{MySQL: &contract.ServiceStatus{}, Valkey: &contract.ServiceStatus{}}); !reflect.DeepEqual(st.Services, want) {
 		t.Errorf("services = %+v, want none installed", st.Services)
 	}
-	if n := len(run.Calls()); n != 1 {
-		t.Errorf("ran %d commands, want only nginx -v", n)
+	if n := len(run.Calls()); n != 2 {
+		t.Errorf("ran %d commands, want only nginx -v and the nodejs query", n)
 	}
 }
 

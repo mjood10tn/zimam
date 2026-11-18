@@ -11,6 +11,7 @@ import (
 	"zimam/agent/contract"
 	"zimam/agent/internal/config"
 	"zimam/agent/internal/maintenance"
+	"zimam/agent/internal/node"
 	"zimam/agent/internal/php"
 	"zimam/agent/internal/release"
 	"zimam/agent/internal/services"
@@ -35,6 +36,7 @@ func systemStatus(d sysexec.Deps) Handler {
 			return nil, err
 		}
 		svc := servicesStatus(ctx, d)
+		nodeSt := nodeStatus(ctx, d)
 		reboot, err := exists(d.Paths.RebootRequired())
 		if err != nil {
 			return nil, err
@@ -45,6 +47,7 @@ func systemStatus(d sysexec.Deps) Handler {
 			NginxVersion:   nginxVersion(ctx, d),
 			PHP:            php,
 			Services:       svc,
+			Node:           nodeSt,
 			RebootRequired: reboot,
 			Updates:        updateCounts(d),
 			PanelDomain:    cfg.PanelDomain,
@@ -170,4 +173,25 @@ func servicesStatus(ctx context.Context, d sysexec.Deps) contract.ServicesStatus
 		MySQL:  one("mysql", st.MySQL, "mysql"),
 		Valkey: one("valkey", st.Valkey, "valkey-server"),
 	}
+}
+
+// nodeStatus reports Node.js live (R04-D6, ruling R1): the installed nodejs
+// package's version and major, and the allowlist with each major's end of
+// life. dpkg-query that fails leaves it unknown (nil) with a log line, as
+// nginx's version is, and never fails the status.
+func nodeStatus(ctx context.Context, d sysexec.Deps) *contract.NodeStatus {
+	version, err := node.Installed(ctx, d)
+	if err != nil {
+		d.Logf("system.status: Node.js unknown: %v", err)
+		return nil
+	}
+	st := &contract.NodeStatus{Installed: version != "", Available: []contract.AvailableNode{}}
+	if st.Installed {
+		st.Version, st.Major = version, string(node.MajorOf(version))
+	}
+	now := d.Now()
+	for _, r := range contract.NodeAllowlist {
+		st.Available = append(st.Available, contract.AvailableNode{Major: r.Major, EndOfLife: r.EndOfLife, Supported: r.SupportedOn(now), Recommended: r.Major == contract.DefaultNodeMajor})
+	}
+	return st
 }

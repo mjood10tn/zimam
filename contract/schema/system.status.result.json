@@ -11,6 +11,63 @@
     "nginx_version": {
       "type": "string"
     },
+    "node": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "available": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "end_of_life": {
+                    "type": "string"
+                  },
+                  "major": {
+                    "enum": [
+                      "24",
+                      "26"
+                    ],
+                    "type": "string"
+                  },
+                  "recommended": {
+                    "type": "boolean"
+                  },
+                  "supported": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "end_of_life",
+                  "major",
+                  "recommended",
+                  "supported"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "installed": {
+              "type": "boolean"
+            },
+            "major": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "available",
+            "installed"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "panel_domain": {
       "maxLength": 253,
       "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+([a-z]{1,63}|xn--[a-z0-9-]{0,58}[a-z0-9])$",

@@ -158,3 +158,8 @@ type CronLine struct {
 	ID       contract.WorkerID
 	Schedule contract.CronSchedule
 }
+
+// NodeRepo fills apt/zimam-nodesource.sources (R04-D6).
+type NodeRepo struct {
+	Major contract.NodeMajor // the one NodeSource major APT follows
+}

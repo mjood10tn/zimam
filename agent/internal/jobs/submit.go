@@ -11,6 +11,7 @@ import (
 
 	"zimam/agent/contract"
 	"zimam/agent/internal/audit"
+	"zimam/agent/internal/paths"
 	"zimam/agent/internal/sysexec"
 )
 
@@ -144,4 +145,18 @@ func newJobID(now time.Time) contract.JobID {
 		hi >>= 5
 	}
 	return contract.JobID(out[:])
+}
+
+// ActiveSubjects lists the subjects of the jobs that are queued or running,
+// for a command that must not start while a site's job is in flight.
+func ActiveSubjects(p paths.Paths) ([]string, error) {
+	active, err := (&Manager{Paths: p}).activeJobs()
+	if err != nil {
+		return nil, err
+	}
+	subjects := make([]string, len(active))
+	for i, st := range active {
+		subjects[i] = st.Subject
+	}
+	return subjects, nil
 }

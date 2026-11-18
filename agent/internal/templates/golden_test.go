@@ -51,6 +51,9 @@ var goldenCases = map[string][]goldenFile{
 	// mirror.
 	"apt-sury":        suryRepo("https://packages.sury.org/php/", "packages.sury.org"),
 	"apt-sury-mirror": suryRepo("https://mirror.example.com/sury/php/", "mirror.example.com"),
+	// The NodeSource repository (R04-D6), one case per major on the allowlist.
+	"apt-node-24": nodeRepo("24"),
+	"apt-node-26": nodeRepo("26"),
 	// What php.install writes for each version on the allowlist (§8.3).
 	"php-base": phpBase(),
 	// What mysql.install writes beside the package's own files.
@@ -459,5 +462,13 @@ func TestRenderedStringsFindsTemplateFields(t *testing.T) {
 				t.Errorf("%s: found = %v, want %v", what, found[what], want)
 			}
 		}
+	}
+}
+
+func nodeRepo(major contract.NodeMajor) []goldenFile {
+	var p paths.Paths
+	return []goldenFile{
+		{path: p.NodeSources(), tmpl: "apt/zimam-nodesource.sources", data: func() any { return NodeRepo{Major: major} }},
+		{path: p.NodePin(), tmpl: "apt/zimam-nodesource.pref"},
 	}
 }

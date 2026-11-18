@@ -2,10 +2,13 @@
 # systemd, MySQL, Valkey and PHP 8.2–8.5 FPM, where check.sh tests the golden
 # files. PHP comes from packages.sury.org, set up as §8.2 does it, and the keyring is
 # trusted only if its primary key has the fingerprint the agent checks
-# (php.SuryFingerprint). MySQL and Valkey come from Ubuntu main.
+# (php.SuryFingerprint). The NodeSource keyring is there too, dearmored and
+# checked against node.Fingerprint, for the apt-node-* golden cases. MySQL and
+# Valkey come from Ubuntu main.
 FROM ubuntu:26.04
 
 ARG SURY_FINGERPRINT=15058500A0235D97F5D10063B188E2B695BD4743
+ARG NODE_FINGERPRINT=6F71F525282841EEDAF851B42F59B5F99B1BE0B4
 ARG PHP_VERSIONS="8.2 8.3 8.4 8.5"
 
 RUN set -eux; \
@@ -23,7 +26,11 @@ RUN set -eux; \
 	packages=""; \
 	for v in $PHP_VERSIONS; do packages="$packages php$v-fpm"; done; \
 	apt-get install -y --no-install-recommends $packages; \
-	rm -rf /var/lib/apt/lists/* /tmp/sury.gpg
+	curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key -o /tmp/nodesource.key; \
+	fingerprint="$(gpg --show-keys --with-colons /tmp/nodesource.key | awk -F: '$1 == "fpr" { print $10; exit }')"; \
+	test "$fingerprint" = "$NODE_FINGERPRINT"; \
+	gpg --dearmor < /tmp/nodesource.key > /etc/apt/keyrings/zimam-nodesource.gpg; \
+	rm -rf /var/lib/apt/lists/* /tmp/sury.gpg /tmp/nodesource.key
 
 COPY --chmod=0755 check.sh /usr/local/bin/zimam-configcheck
 ENTRYPOINT ["/usr/local/bin/zimam-configcheck"]
