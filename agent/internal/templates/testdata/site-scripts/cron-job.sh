@@ -12,6 +12,6 @@ echo "$(date -Is) [backup] started" >>"$ZIMAM_LOG"
 ZIMAM_RC=0
 (
 php artisan backup:run && echo 'done'
-) >>"$ZIMAM_LOG" 2>&1 || ZIMAM_RC=$?
+) 9>&- >>"$ZIMAM_LOG" 2>&1 || ZIMAM_RC=$?
 echo "$(date -Is) [backup] finished with status $ZIMAM_RC" >>"$ZIMAM_LOG"
 exit "$ZIMAM_RC"
