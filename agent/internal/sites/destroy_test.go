@@ -2,6 +2,7 @@ package sites
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -11,6 +12,7 @@ import (
 
 	"zimam/agent/contract"
 	"zimam/agent/internal/logpolicy"
+	"zimam/agent/internal/sysexec"
 )
 
 const (
@@ -294,5 +296,51 @@ func TestPolicyDuringDestroyWritesNoRulesForTheSite(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("the policy job never got the lock")
+	}
+}
+
+// The worker units go before the user's processes are killed and the user
+// deleted: stopped and disabled, their files and the target deleted, and
+// systemd reloaded (R04-D4). A site without units makes no such call, as
+// TestDestroySequence shows.
+func TestDestroyRemovesUnitsFirst(t *testing.T) {
+	e := provisioned(t)
+	unit := e.p.SystemdUnit("zimam-worker-shop_q@.service")
+	target := e.p.SystemdUnit("zimam-site-shop.target")
+	mkdir(t, e.p.SystemdUnitDir())
+	writeFile(t, unit, "[Service]\n")
+	writeFile(t, target, "[Unit]\n")
+	mkdir(t, target+".wants")
+	// Another site's unit stays.
+	other := e.p.SystemdUnit("zimam-worker-shop2_q@.service")
+	writeFile(t, other, "[Service]\n")
+	stopUnits := []string{"disable", "--now", "--no-block"}
+	for n := 1; n <= 10; n++ {
+		stopUnits = append(stopUnits, fmt.Sprintf("zimam-worker-shop_q@%d.service", n))
+	}
+	for _, args := range [][]string{{"disable", "--now", "--no-block", "zimam-site-shop.target"}, stopUnits, {"daemon-reload"}} {
+		e.run.Add(sysexec.Script{Path: "/usr/bin/systemctl", Args: args})
+	}
+	n := len(e.run.Calls())
+	if _, err := e.destroy(); err != nil {
+		t.Fatal(err)
+	}
+	got := e.callsSince(n)
+	want := []string{
+		"/usr/bin/systemctl disable --now --no-block zimam-site-shop.target",
+		"/usr/bin/systemctl " + strings.Join(stopUnits, " "),
+		"/usr/bin/systemctl daemon-reload",
+	}
+	kill := slices.Index(got, pkillCmd)
+	if kill < 3 || !slices.Equal(got[kill-3:kill], want) {
+		t.Errorf("ran\n%s\nwant the units removed just before %s", strings.Join(got, "\n"), pkillCmd)
+	}
+	for _, p := range []string{unit, target, target + ".wants"} {
+		if exists(p) {
+			t.Errorf("%s is left", p)
+		}
+	}
+	if !exists(other) {
+		t.Error("another site's unit was removed")
 	}
 }
