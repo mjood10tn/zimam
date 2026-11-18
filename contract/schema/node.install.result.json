@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "major": {
+      "enum": [
+        "24",
+        "26"
+      ],
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "major",
+    "version"
+  ],
+  "title": "node.install result",
+  "type": "object"
+}

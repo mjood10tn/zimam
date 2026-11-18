@@ -52,6 +52,60 @@ type State struct {
 	// large the keyspace is. It is cleared when the keys are gone, and by
 	// cache.user, which starts the site's keys afresh.
 	CachePurge *CachePurge `json:"cache_purge,omitempty"`
+	// Workers and Cron are set by site.workers and site.cron (v0.4.0, R04-D16):
+	// the workers and cron jobs the site's units and cron file are rendered
+	// from. They hold every setting but the owner's command text, which lives
+	// only in the scripts in the site's home. A site that never had either
+	// leaves them out.
+	Workers []WorkerState `json:"workers,omitempty"`
+	Cron    *CronState    `json:"cron,omitempty"`
+}
+
+// WorkerState is a contract.WorkerSpec without its command, as the state file
+// keeps it. The command is not a field here, so no code path can store it.
+type WorkerState struct {
+	ID         contract.WorkerID        `json:"id"`
+	Kind       contract.WorkerKind      `json:"kind"`
+	Processes  int                      `json:"processes"`
+	MemoryMB   contract.WorkerMemoryMB  `json:"memory_mb,omitempty"`
+	Connection contract.QueueConnection `json:"connection,omitempty"`
+	Queues     []contract.QueueName     `json:"queues,omitempty"`
+	Tries      *int                     `json:"tries,omitempty"`
+	Timeout    *int                     `json:"timeout,omitempty"`
+	Sleep      *int                     `json:"sleep,omitempty"`
+	MaxTime    *int                     `json:"max_time,omitempty"`
+	Backoff    *int                     `json:"backoff,omitempty"`
+}
+
+// NewWorkerState is spec without its command.
+func NewWorkerState(spec contract.WorkerSpec) WorkerState {
+	return WorkerState{
+		ID: spec.ID, Kind: spec.Kind, Processes: spec.Processes, MemoryMB: spec.MemoryMB,
+		Connection: spec.Connection, Queues: spec.Queues, Tries: spec.Tries, Timeout: spec.Timeout,
+		Sleep: spec.Sleep, MaxTime: spec.MaxTime, Backoff: spec.Backoff,
+	}
+}
+
+// Spec is the worker as a WorkerSpec, without a command.
+func (w WorkerState) Spec() contract.WorkerSpec {
+	return contract.WorkerSpec{
+		ID: w.ID, Kind: w.Kind, Processes: w.Processes, MemoryMB: w.MemoryMB,
+		Connection: w.Connection, Queues: w.Queues, Tries: w.Tries, Timeout: w.Timeout,
+		Sleep: w.Sleep, MaxTime: w.MaxTime, Backoff: w.Backoff,
+	}
+}
+
+// CronState is whether the site runs the Laravel scheduler, and its cron jobs.
+type CronState struct {
+	Scheduler bool           `json:"scheduler"`
+	Jobs      []CronJobState `json:"jobs"`
+}
+
+// CronJobState is a cron job without its command.
+type CronJobState struct {
+	ID       contract.WorkerID     `json:"id"`
+	Schedule contract.CronSchedule `json:"schedule"`
+	Enabled  bool                  `json:"enabled"`
 }
 
 // KeyFingerprint is the shape of an OpenSSH SHA-256 key fingerprint:
@@ -140,7 +194,50 @@ func (s State) validate() error {
 			f["cache_purge"] = "needs a cache user hash"
 		}
 	}
+	if msg := s.checkWorkers(); msg != "" {
+		f["workers"] = msg
+	}
+	if msg := s.checkCron(); msg != "" {
+		f["cron"] = msg
+	}
 	return f.Err()
+}
+
+// checkWorkers says what is wrong with the site's workers, or "": each must
+// pass the contract's rules, and an id may appear once.
+func (s State) checkWorkers() string {
+	seen := map[contract.WorkerID]bool{}
+	for _, w := range s.Workers {
+		switch err := w.Spec().ValidateStored(); {
+		case err != nil:
+			return fmt.Sprintf("worker %q: %v", w.ID, err)
+		case seen[w.ID]:
+			return fmt.Sprintf("worker %q is listed twice", w.ID)
+		}
+		seen[w.ID] = true
+	}
+	return ""
+}
+
+// checkCron says what is wrong with the site's cron jobs, or "": each id and
+// schedule must pass the contract's rules, and an id may appear once.
+func (s State) checkCron() string {
+	if s.Cron == nil {
+		return ""
+	}
+	seen := map[contract.WorkerID]bool{}
+	for _, j := range s.Cron.Jobs {
+		// The command is the one field a state file lacks, so a placeholder
+		// stands in for it.
+		switch err := (contract.CronJobSpec{ID: j.ID, Schedule: j.Schedule, Command: "-", Enabled: j.Enabled}).Validate(); {
+		case err != nil:
+			return fmt.Sprintf("job %q: %v", j.ID, err)
+		case seen[j.ID]:
+			return fmt.Sprintf("job %q is listed twice", j.ID)
+		}
+		seen[j.ID] = true
+	}
+	return ""
 }
 
 // Load reads a site's state file strictly. A site without one is

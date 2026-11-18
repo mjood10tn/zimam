@@ -151,3 +151,43 @@ func FuzzDatabaseName(f *testing.F) {
 		checkSchemaAgrees(t, v, ok)
 	})
 }
+
+// cronSafe is every character an accepted schedule renders as: digits and
+// the grammar's punctuation, never a name, %, quote, newline or any byte a
+// shell or cron treats specially.
+var cronSafe = regexp.MustCompile(`^[0-9*/,-]+( [0-9*/,-]+){4}$`)
+
+func FuzzCronSchedule(f *testing.F) {
+	for _, s := range []string{"*/5 * * * *", "0 3 * * mon-fri", "@daily", "@reboot", "* * * * * *", "60 * * * *", "*/0 * * * *", "1- * * * *", "0 3 * * 1%x", "* * * * *\n", "0 0 * * sat-sun"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		n, err := ParseCronSchedule(s)
+		if err != nil {
+			if CronSchedule(s).Validate() == nil {
+				t.Errorf("Parse refused %q, Validate accepted it", s)
+			}
+			return
+		}
+		if !cronSafe.MatchString(string(n)) {
+			t.Errorf("accepted %q, which renders as %q", s, n)
+		}
+		if again, err := ParseCronSchedule(string(n)); err != nil || again != n {
+			t.Errorf("%q normalises to %q, which parses to %q, %v", s, n, again, err)
+		}
+		checkSchemaShape(t, CronSchedule(s), true)
+	})
+}
+
+func FuzzOwnerCommand(f *testing.F) {
+	for _, s := range []string{"php artisan horizon", "a\nb", "a\rb", "a\x00b", "\xff", strings.Repeat("x", 4097), ""} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		ok := OwnerCommand(s).Validate() == nil
+		if ok && (s == "" || len(s) > 4096 || !utf8.ValidString(s) || strings.ContainsAny(s, "\x00\r\n")) {
+			t.Errorf("accepted %q", s)
+		}
+		checkSchemaShape(t, OwnerCommand(s), ok)
+	})
+}

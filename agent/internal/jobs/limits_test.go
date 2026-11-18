@@ -34,6 +34,12 @@ func TestLimitsMatchDesign(t *testing.T) {
 		"db.user":        {MemoryMax: "256M", RuntimeMaxSec: 120},
 		"valkey.install": {MemoryMax: "512M", RuntimeMaxSec: 900},
 		"cache.user":     {MemoryMax: "256M", RuntimeMaxSec: 120},
+		// v0.4.0 worker, cron and Node commands (the plan's "New agent commands" table).
+		"site.workers":         {MemoryMax: "256M", RuntimeMaxSec: 300},
+		"site.workers.restart": {MemoryMax: "128M", RuntimeMaxSec: 300},
+		"site.cron":            {MemoryMax: "128M", RuntimeMaxSec: 120},
+		"node.install":         {MemoryMax: "1G", RuntimeMaxSec: 900},
+		"node.uninstall":       {MemoryMax: "512M", RuntimeMaxSec: 600},
 	}
 	for name, w := range want {
 		if got, ok := LimitsFor(name); !ok || got != w {

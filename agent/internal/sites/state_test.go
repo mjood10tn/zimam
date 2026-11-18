@@ -332,3 +332,103 @@ func TestStateCachePurge(t *testing.T) {
 		t.Error("Save accepted progress for a site with no cache user")
 	}
 }
+
+func TestStateWithoutWorkersReadsV03File(t *testing.T) {
+	const v030 = `{
+  "name": "shop",
+  "domain": "shop.example.com",
+  "type": "php",
+  "php_version": "8.4",
+  "template_version": 2,
+  "security": {
+    "force_https": true,
+    "hsts_max_age": 0,
+    "hsts_include_subdomains": false,
+    "headers_preset": true,
+    "block_risky_functions": false,
+    "restrict_to_site_folder": false,
+    "ip_allow": [],
+    "ip_deny": [],
+    "password_protection": false
+  },
+  "repository": "octo/app",
+  "branch": "main",
+  "deploy_key_fingerprint": "SHA256:abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOP0",
+  "keep_releases": 3,
+  "databases": [
+    "s_shop_main"
+  ],
+  "db_user": true,
+  "cache_user_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+}
+`
+	p := paths.Paths{Root: t.TempDir()}
+	if err := os.MkdirAll(p.SitesStateDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p.SiteState("shop"), []byte(v030), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := Load(p, "shop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Workers != nil || st.Cron != nil {
+		t.Errorf("workers %v, cron %v on a file without them", st.Workers, st.Cron)
+	}
+	if err := Save(p, st); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(p.SiteState("shop"))
+	if err != nil || string(got) != v030 {
+		t.Errorf("saved file differs (%v):\n%s", err, got)
+	}
+}
+
+func shopState() State {
+	return State{Name: "shop", Domain: "shop.example.com", Type: contract.SitePHP, PHPVersion: "8.4", TemplateVersion: 3, Security: DefaultSecurity()}
+}
+
+// R04-D16: the owner's command text lives only in the script in the site's
+// home, never in the state file.
+func TestStateNeverStoresCommand(t *testing.T) {
+	spec := contract.WorkerSpec{ID: "horizon", Kind: contract.WorkerCustom, Processes: 2, MemoryMB: 256, Command: "php artisan horizon --secret=hunter2"}
+	st := shopState()
+	st.Workers = []WorkerState{NewWorkerState(spec)}
+	st.Cron = &CronState{Scheduler: true, Jobs: []CronJobState{{ID: "backup", Schedule: "0 3 * * *", Enabled: true}}}
+	p := paths.Paths{Root: t.TempDir()}
+	if err := Save(p, st); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(p.SiteState("shop"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "command") || strings.Contains(string(raw), "hunter2") || strings.Contains(string(raw), "artisan") {
+		t.Errorf("state holds the command:\n%s", raw)
+	}
+	got, err := Load(p, "shop")
+	if err != nil || !reflect.DeepEqual(got, st) {
+		t.Errorf("Load = %+v, %v; want %+v", got, err, st)
+	}
+}
+
+func TestStateWorkersAndCronAreChecked(t *testing.T) {
+	two := []WorkerState{{ID: "q", Kind: contract.WorkerLaravelQueue, Processes: 1}, {ID: "q", Kind: contract.WorkerLaravelQueue, Processes: 1}}
+	for name, mod := range map[string]func(*State){
+		"bad worker id":      func(s *State) { s.Workers = []WorkerState{{ID: "Q", Kind: contract.WorkerLaravelQueue, Processes: 1}} },
+		"zero processes":     func(s *State) { s.Workers = []WorkerState{{ID: "q", Kind: contract.WorkerLaravelQueue}} },
+		"repeated worker id": func(s *State) { s.Workers = two },
+		"bad schedule":       func(s *State) { s.Cron = &CronState{Jobs: []CronJobState{{ID: "a", Schedule: "@reboot"}}} },
+		"repeated job id": func(s *State) {
+			s.Cron = &CronState{Jobs: []CronJobState{{ID: "a", Schedule: "* * * * *"}, {ID: "a", Schedule: "* * * * *"}}}
+		},
+		"reserved job id": func(s *State) { s.Cron = &CronState{Jobs: []CronJobState{{ID: "scheduler", Schedule: "* * * * *"}}} },
+	} {
+		st := shopState()
+		mod(&st)
+		if err := Save(paths.Paths{Root: t.TempDir()}, st); err == nil {
+			t.Errorf("%s: Save accepted %+v", name, st)
+		}
+	}
+}

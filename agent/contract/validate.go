@@ -199,6 +199,8 @@ type LogSource string
 
 var fixedLogSources = []string{
 	"site.nginx-access", "site.nginx-error", "site.php-error", "site.laravel",
+	// v0.4.0: the journal of the site's worker units, and its cron log.
+	"site.workers", "site.cron",
 	"journal.system", "journal.kernel", "journal.ssh", "journal.nginx",
 	"journal.zimam-agent", "journal.zimam-panel",
 	"file.nginx-error", "file.certbot", "file.apt-history",
