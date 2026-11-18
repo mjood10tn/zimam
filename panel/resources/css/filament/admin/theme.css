@@ -442,6 +442,10 @@
 
 .zimam-stack {
     display: grid;
+    /* minmax(0, 1fr), not the implicit auto track: a table's min-content
+       width would otherwise widen every block past a phone screen, when only
+       the table should scroll, inside its own container (DESIGN.md, layout). */
+    grid-template-columns: minmax(0, 1fr);
     gap: 24px;
 }
 
