@@ -1,6 +1,7 @@
 package sites
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"os"
@@ -58,6 +59,56 @@ func TestDestroyRemovesCrontabFromTheSpool(t *testing.T) {
 	for _, c := range e.callsSince(n) {
 		if strings.Contains(c, "crontab") {
 			t.Errorf("ran %q; crontab refuses a user cron.allow doesn't list", c)
+		}
+	}
+}
+
+// spyRunner calls before ahead of every command it runs.
+type spyRunner struct {
+	sysexec.Runner
+	before func(sysexec.Cmd)
+}
+
+func (s spyRunner) Run(ctx context.Context, c sysexec.Cmd) (sysexec.Result, error) {
+	s.before(c)
+	return s.Runner.Run(ctx, c)
+}
+
+// The crontab goes before the processes are killed and before userdel, so
+// cron can't start a job in between that makes userdel fail with "currently
+// used by process". A removal that fails for another reason than a missing
+// file stops site.destroy there, before anything is killed.
+func TestDestroyRemovesCrontabBeforeKillAndUserdel(t *testing.T) {
+	e := provisioned(t)
+	install(t, e.p.Crontab())
+	spool := e.p.CrontabSpool("s_shop")
+	mkdir(t, filepath.Dir(spool))
+	writeFile(t, spool, "* * * * * true\n")
+	e.d.Run = spyRunner{e.d.Run, func(c sysexec.Cmd) {
+		if c.Path != "/usr/bin/pkill" && c.Path != "/usr/sbin/userdel" {
+			return
+		}
+		if _, err := os.Lstat(spool); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("%s ran with the crontab still in the spool: %v", c.Path, err)
+		}
+	}}
+	if _, err := e.destroy(); err != nil {
+		t.Fatalf("Destroy: %v", err)
+	}
+
+	// A spool entry that can't be removed: a directory with a file in it.
+	e = provisioned(t)
+	install(t, e.p.Crontab())
+	spool = e.p.CrontabSpool("s_shop")
+	mkdir(t, spool)
+	writeFile(t, filepath.Join(spool, "x"), "")
+	n := len(e.run.Calls())
+	if _, err := e.destroy(); err == nil || !strings.Contains(err.Error(), "removing the crontab of s_shop") {
+		t.Fatalf("Destroy = %v, want the crontab removal's error", err)
+	}
+	for _, c := range e.callsSince(n) {
+		if c == pkillCmd || c == userdelCmd {
+			t.Errorf("ran %q after the crontab removal failed", c)
 		}
 	}
 }
