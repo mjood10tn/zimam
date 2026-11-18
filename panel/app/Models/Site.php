@@ -118,6 +118,12 @@ class Site extends Model
         return $this->hasMany(SecurityFinding::class);
     }
 
+    /** The site's queue workers, as last saved from the Workers tab. */
+    public function workers(): HasMany
+    {
+        return $this->hasMany(SiteWorker::class);
+    }
+
     public function certificate(): HasOne
     {
         return $this->hasOne(Certificate::class);

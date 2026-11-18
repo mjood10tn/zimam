@@ -8,12 +8,13 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * One minute's system.metrics (§7.5, §7.6): CPU and network counters as the
  * agent reported them, load, memory and swap, each mount's use and each
- * monitored service's state. Written once, pruned after seven days.
+ * monitored service's state, and each worker's restarts (v0.4.0). Written once, pruned after seven days.
  *
  * @property CarbonImmutable $sampled_at
  * @property array<string, int> $cpu
  * @property list<array<string, mixed>> $disks
  * @property list<array{unit: string, active_state: string, unit_file_state: string}> $services
+ * @property list<array{site: string, worker: string, restarts: int, failing: bool, failed: bool}>|null $workers
  */
 class MetricSample extends Model
 {
@@ -24,7 +25,7 @@ class MetricSample extends Model
 
     protected $fillable = [
         'sampled_at', 'cpu', 'load1', 'load5', 'load15', 'mem_total', 'mem_available',
-        'swap_total', 'swap_free', 'disks', 'net_rx', 'net_tx', 'services',
+        'swap_total', 'swap_free', 'disks', 'net_rx', 'net_tx', 'services', 'workers',
     ];
 
     protected function casts(): array
@@ -43,6 +44,7 @@ class MetricSample extends Model
             'net_rx' => 'integer',
             'net_tx' => 'integer',
             'services' => 'array',
+            'workers' => 'array',
         ];
     }
 
@@ -67,6 +69,8 @@ class MetricSample extends Model
             'net_rx' => $data['network']['rx_bytes'],
             'net_tx' => $data['network']['tx_bytes'],
             'services' => $data['services'],
+            // Left out by an agent before v0.4.0 and on a server without workers.
+            'workers' => $data['workers'] ?? [],
         ];
     }
 }

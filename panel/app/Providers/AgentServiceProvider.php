@@ -18,6 +18,7 @@ use App\Agent\Outcomes\PhpOutcomes;
 use App\Agent\Outcomes\SecurityOutcomes;
 use App\Agent\Outcomes\SettingsOutcomes;
 use App\Agent\Outcomes\SiteOutcomes;
+use App\Agent\Outcomes\WorkerOutcomes;
 use App\Agent\SocketAgentClient;
 use App\Agent\UnixSocketTransport;
 use Illuminate\Support\ServiceProvider;
@@ -41,6 +42,7 @@ class AgentServiceProvider extends ServiceProvider
             DeploymentOutcomes::register($outcomes);
             DatabaseOutcomes::register($outcomes);
             CacheOutcomes::register($outcomes);
+            WorkerOutcomes::register($outcomes);
 
             return $outcomes;
         });

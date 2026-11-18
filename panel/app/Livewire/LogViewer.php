@@ -63,7 +63,8 @@ class LogViewer extends Component
 
     public function isJournal(): bool
     {
-        return str_starts_with($this->source, 'journal.');
+        // site.workers is the journal of the site's worker units (v0.4.0), as the agent's IsJournal says.
+        return str_starts_with($this->source, 'journal.') || $this->source === 'site.workers';
     }
 
     public function updatedSearch(): void

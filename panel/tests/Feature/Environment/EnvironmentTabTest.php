@@ -230,18 +230,25 @@ final class EnvironmentTabTest extends TestCase
         $this->assertStringNotContainsString($this->marker, json_encode(session()->all()));
     }
 
-    /** A busy site's save waits in the queue (D8): the payload holds the content, so it must be encrypted. */
-    public function testEnvNeverStoredWhileWaiting(): void
+    /**
+     * A busy agent refuses the save instead of queueing it (R04-D11): the
+     * .env may hold passwords, and no password waits in a queue table.
+     */
+    public function testEnvironmentSaveRefusedWhenBusy(): void
     {
         config(['queue.default' => 'database']);
         $site = $this->site();
         $this->agent->env('shop', "APP_KEY=old\n");
         $this->agent->respond('site.env.write', new AgentBusy('site:shop already has a job running'));
 
-        $this->revealed($site)->call('save', "APP_KEY={$this->marker}\n")->assertHasNoErrors();
+        $this->revealed($site)->call('save', "APP_KEY={$this->marker}\n")
+            ->assertHasNoErrors()
+            ->assertNotified(__('zimam.sites.busy'))
+            ->assertSet('revealed', true);
 
-        $this->assertSame(AgentJob::WAITING, AgentJob::sole()->status);
-        $this->assertSame(1, DB::table('jobs')->count(), 'the retry is queued in the database');
+        $this->assertCount(1, $this->calls('site.env.write'), 'the agent was asked once');
+        $this->assertSame(0, AgentJob::count(), 'no agent_jobs row waits');
+        $this->assertSame(0, DB::table('jobs')->count(), 'no retry is queued');
         $this->assertNoTableHolds($this->marker);
     }
 

@@ -7,6 +7,7 @@ use App\Agent\AgentClient;
 use App\Agent\AgentHealth;
 use App\Agent\Commands\SiteEnvRead;
 use App\Agent\Commands\SiteEnvWrite;
+use App\Agent\Exceptions\AgentBusy;
 use App\Agent\Exceptions\AgentException;
 use App\Agent\Exceptions\AgentNotFound;
 use App\Agent\Exceptions\AgentValidationFailed;
@@ -142,8 +143,14 @@ class EnvironmentTab extends Component implements HasActions, HasSchemas
             return;
         }
         try {
-            app(SubmitAgentCommand::class)->run(new SiteEnvWrite($this->site->name, $content), $this->site);
+            // A busy agent refuses it rather than queueing it (R04-D11): the
+            // .env may hold passwords, and no password waits in a queue table.
+            app(SubmitAgentCommand::class)->run(new SiteEnvWrite($this->site->name, $content), $this->site, waitWhenBusy: false);
         } catch (Halt) {
+            return;
+        } catch (AgentBusy) {
+            Notification::make()->title(__('zimam.sites.busy'))->warning()->send();
+
             return;
         } catch (AgentValidationFailed $e) {
             foreach ($e->fields() as $field => $message) {
