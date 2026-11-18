@@ -123,7 +123,11 @@ type WorkerScript struct {
 }
 
 // CronScript fills site/cron.sh (R04-D1): one cron job, or the Laravel
-// scheduler with ID "scheduler" and its artisan line as Command.
+// scheduler with ID "scheduler" and its artisan line as Command. A job takes
+// flock -n on its own lock; the scheduler takes none (ruling R8, against
+// R04-D1's text): Laravel expects schedule:run every minute and handles
+// overlap per task (withoutOverlapping), so a lock would skip every task due
+// while one long task runs.
 type CronScript struct {
 	ID      contract.WorkerID
 	Command contract.OwnerCommand
