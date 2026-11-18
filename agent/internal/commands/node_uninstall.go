@@ -28,6 +28,12 @@ func checkNodeUninstall(ctx context.Context, d sysexec.Deps) error {
 	if version == "" {
 		return &contract.AgentError{Code: contract.ErrNotFound, Message: "Node.js isn't installed."}
 	}
+	return checkNoSiteJob(d)
+}
+
+// checkNoSiteJob answers busy while any site job is queued or running: it
+// may be using Node.js.
+func checkNoSiteJob(d sysexec.Deps) error {
 	subjects, err := jobs.ActiveSubjects(d.Paths)
 	if err != nil {
 		return err
