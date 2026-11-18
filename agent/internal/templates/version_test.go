@@ -30,10 +30,10 @@ var v1SiteRenders = []struct {
 
 // Version 2 changes only a laravel site's log rules, so a static or PHP site
 // renders byte-identical files and keeps template_version 1 with nothing to
-// re-render (R02-D9).
-func TestV1SitesRenderUnchangedAtV2(t *testing.T) {
-	if Version != 2 {
-		t.Errorf("Version = %d, want 2", Version)
+// re-render (R02-D9). Version 3 only adds files (R04-D7), so this still holds.
+func TestV1SitesRenderUnchangedAtV3(t *testing.T) {
+	if Version != 3 {
+		t.Errorf("Version = %d, want 3", Version)
 	}
 	for _, c := range v1SiteRenders {
 		out, err := Render(c.tmpl, c.data)

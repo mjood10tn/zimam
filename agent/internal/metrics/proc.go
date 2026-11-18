@@ -16,6 +16,7 @@ import (
 
 	"zimam/agent/contract"
 	"zimam/agent/internal/paths"
+	"zimam/agent/internal/siteprocs"
 	"zimam/agent/internal/sysexec"
 )
 
@@ -52,6 +53,12 @@ func Collect(ctx context.Context, d sysexec.Deps) (contract.SystemMetricsResult,
 	}
 	if m.Services, err = Services(ctx, d); err != nil {
 		return contract.SystemMetricsResult{}, err
+	}
+	// The workers come last and alone: a site whose state can't be read must
+	// not take the server's metrics with it (R04-D8).
+	if m.Workers, err = siteprocs.Metrics(ctx, d); err != nil {
+		d.Logf("Reading the sites' workers: %v", err)
+		m.Workers = nil
 	}
 	return m, nil
 }

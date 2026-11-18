@@ -73,7 +73,7 @@ func TestProvisionLaravelCreatesShared(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Provision: %v", err)
 	}
-	if res != (contract.SiteProvisionResult{Name: "shop", TemplateVersion: 2}) {
+	if res != (contract.SiteProvisionResult{Name: "shop", TemplateVersion: templates.Version}) {
 		t.Errorf("result = %+v", res)
 	}
 	want := []string{groupaddCmd, useraddCmd, usermodCmd, fpmTest84, fpmTest84, fpmActive84, fpmEnable84, nginxTest, nginxReload, e.logrotateTest()}

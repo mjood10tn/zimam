@@ -1,0 +1,14 @@
+{{- /* R04-D2's sandbox (R04-D20): the system read-only, /tmp private, every
+home hidden but the one bound, which stays writable. Its one input is that
+home. v0.7 includes it in the panel's units with /home/zimam. */ -}}
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindPaths={{safe .}}
+ReadWritePaths={{safe .}}
+RestrictSUIDSGID=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+UMask=0027

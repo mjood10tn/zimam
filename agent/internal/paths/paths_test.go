@@ -107,6 +107,7 @@ var production = map[string]string{
 	"PanelPool":             "/etc/php/8.4/fpm/pool.d/zimam-panel.conf",
 	"SystemdUnit":           "/etc/systemd/system/site:shop", // the test passes every string argument "site:shop"
 	"JournaldDropIn":        "/etc/systemd/journald.conf.d/50-zimam.conf",
+	"SystemdUnitDir":        "/etc/systemd/system",
 	"OwnLogrotateConf":      "/etc/zimam/logrotate.d/zimam-own.conf",
 	"LetsEncryptCert":       "/etc/letsencrypt/live/site:shop/cert.pem",
 	"CertRecord":            "/var/lib/zimam/certs/site:shop.json",

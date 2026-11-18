@@ -32,14 +32,15 @@ type Handlers map[string]Handler
 // manager can run.
 func New(d sysexec.Deps, m *jobs.Manager) Handlers {
 	h := Handlers{
-		"agent.version":  agentVersion,
-		"system.status":  systemStatus(d),
-		"system.metrics": systemMetrics(d),
-		"logs.list":      logsList(d),
-		"logs.read":      logsRead(d),
-		"site.releases":  siteReleases(d),
-		"site.env.read":  siteEnvRead(d),
-		"db.list":        dbList(d),
+		"agent.version":       agentVersion,
+		"system.status":       systemStatus(d),
+		"system.metrics":      systemMetrics(d),
+		"logs.list":           logsList(d),
+		"logs.read":           logsRead(d),
+		"site.releases":       siteReleases(d),
+		"site.env.read":       siteEnvRead(d),
+		"db.list":             dbList(d),
+		"site.workers.status": siteWorkersStatus(d),
 	}
 	if m == nil {
 		return h
