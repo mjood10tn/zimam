@@ -10,6 +10,7 @@ use App\Livewire\SiteLogs;
 use App\Models\AgentJob;
 use App\Models\Site;
 use App\Models\SiteCronJob;
+use Illuminate\Support\Facades\Cache;
 use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
 use Tests\Feature\Databases\DatabasesTestCase;
@@ -231,6 +232,19 @@ final class ScheduleTabTest extends DatabasesTestCase
         $this->job($site, 'report');
 
         $this->tab($site)->assertSee('UTC');
+    }
+
+    /** A server on a legacy zone alias keeps its zone, not a UTC preview. */
+    public function testLegacyZoneAliasKept(): void
+    {
+        $site = $this->site();
+        $this->job($site, 'report');
+
+        foreach (['US/Pacific', 'Asia/Calcutta', 'Etc/UTC'] as $zone) {
+            $this->agent->changeServer(fn (array $s): array => [...$s, 'timezone' => $zone]);
+            Cache::flush();
+            $this->tab($site)->assertSee($zone);
+        }
     }
 
     public function testCronLogListed(): void
