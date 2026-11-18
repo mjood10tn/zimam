@@ -41,8 +41,8 @@ var renderCron = func(site contract.SiteName, scheduler bool, jobs []contract.Cr
 }
 
 // ReconcileCron is site.cron (R04-D5), under the site's lock. It writes the
-// scripts first, then /etc/cron.d/zimam-<site>, so cron never names a script
-// that isn't there; the file goes through configtx and an in-agent check
+// scripts first, then /etc/cron.d/zimam-<site>, so the new scripts exist
+// before the file names them (stale ones are pruned first); the file goes through configtx and an in-agent check
 // (cron has no test of its own), and a file that fails it is rolled back.
 // With nothing to run, the file is removed first and the scripts after. Cron
 // reads a new or changed file within a minute (spike), so nothing is
@@ -96,6 +96,9 @@ func ReconcileCron(ctx context.Context, d sysexec.Deps, h Helper, a helper.Accou
 			// is the previous file, which passed this check when it was
 			// written, so only the new one is checked.
 			b, err := os.ReadFile(file)
+			if err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return err
+			}
 			if err != nil || !bytes.Equal(b, content) {
 				return nil
 			}
