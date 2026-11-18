@@ -288,6 +288,20 @@ func (p Paths) ValkeyTestDir() string { return p.at("run/zimam-valkey-test") }
 func (p Paths) SystemdUnit(name string) string { return p.at("etc/systemd/system", name) }
 func (p Paths) JournaldDropIn() string         { return p.at("etc/systemd/journald.conf.d/50-zimam.conf") }
 
+// CronDFile is a site's cron file (R04-D5). Cron ignores a name with a dot,
+// and a site name has none.
+func (p Paths) CronDFile(name contract.SiteName) string {
+	return p.at("etc/cron.d", "zimam-"+string(name))
+}
+
+// CronDDir holds the cron files; the cron package makes it.
+func (p Paths) CronDDir() string { return p.at("etc/cron.d") }
+
+// CronAllow and AtAllow hold "root" only (OQ1): site users can't use crontab
+// or at. Neither affects /etc/cron.d (spike).
+func (p Paths) CronAllow() string { return p.at("etc/cron.allow") }
+func (p Paths) AtAllow() string   { return p.at("etc/at.allow") }
+
 // SystemdUnitDir holds the units, a site's worker units among them (R04-D2).
 func (p Paths) SystemdUnitDir() string { return p.at("etc/systemd/system") }
 

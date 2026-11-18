@@ -112,3 +112,21 @@ func TestHtpasswdLineRevalidates(t *testing.T) {
 		}
 	}
 }
+
+// A schedule reaches the cron file only in its normal form: the template
+// refuses a stored one that isn't, so nothing but the parser's own output is
+// ever written (R04-D5).
+func TestCronScheduleRendersOnlyNormalForm(t *testing.T) {
+	for s, ok := range map[string]bool{
+		"0 3 * * 1": true, "*/15 1-5,7 * 1-3 *": true, "0 0 * * *": true,
+		"0 3 * * MON": false, "@daily": false, "0 3  * * 1": false, "0 3 * * 1\n* * * * * root x": false, "": false, "61 * * * *": false,
+	} {
+		_, err := Render("cron/site.cron", SiteCron{Site: "shop", Jobs: []CronLine{{ID: "a", Schedule: contract.CronSchedule(s)}}})
+		if (err == nil) != ok {
+			t.Errorf("schedule %q: err = %v, want ok = %v", s, err, ok)
+		}
+	}
+	if _, err := Render("cron/site.cron", SiteCron{Site: "sh.op"}); err == nil {
+		t.Error("a site name with a dot rendered: cron would ignore the file")
+	}
+}

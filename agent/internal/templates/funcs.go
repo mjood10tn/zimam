@@ -20,6 +20,8 @@ var funcs = template.FuncMap{
 	"laravelKey":   laravelKey,
 	"sha256hex":    sha256hex,
 	"shquote":      shquote,
+	"cronSchedule": cronSchedule,
+	"siteName":     siteName,
 }
 
 // safeRe is all a string may contain on its way into a config file. Without
@@ -91,4 +93,34 @@ func shquote(v any) (string, error) {
 		return "", fmt.Errorf("shquote: the word contains NUL")
 	}
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'", nil
+}
+
+// cronSchedule renders a schedule only in its normal form: what
+// contract.ParseCronSchedule returns. A stored schedule need not be normal, so
+// the caller passes the parsed one; anything else is refused here, so a
+// schedule that is not one never becomes a cron line (R04-D5).
+func cronSchedule(v any) (string, error) {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.String {
+		return "", fmt.Errorf("cronSchedule: %T is not a string", v)
+	}
+	s := rv.String()
+	if n, err := contract.ParseCronSchedule(s); err != nil || string(n) != s {
+		return "", fmt.Errorf("cronSchedule: %q isn't a schedule in normal form", s)
+	}
+	return s, nil
+}
+
+// siteName renders a site name only if it is one. A name with a dot would
+// make cron ignore /etc/cron.d/zimam-<name> without a word (spike), and one
+// that isn't a site's would name another user.
+func siteName(v any) (string, error) {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.String {
+		return "", fmt.Errorf("siteName: %T is not a string", v)
+	}
+	if err := contract.SiteName(rv.String()).Validate(); err != nil {
+		return "", fmt.Errorf("siteName: %q %v", rv.String(), err)
+	}
+	return rv.String(), nil
 }

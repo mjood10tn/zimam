@@ -141,3 +141,20 @@ type WorkerUnit struct {
 
 // SiteTarget fills systemd/zimam-site.target, which groups a site's workers.
 type SiteTarget struct{ Site contract.SiteName }
+
+// SiteCron fills cron/site.cron, a site's /etc/cron.d/zimam-<site> (R04-D5):
+// a line for the Laravel scheduler when it is on, then one per enabled job.
+// Every line runs as s_<Site>, and the owner's command is in the job's script,
+// never in this file.
+type SiteCron struct {
+	Site      contract.SiteName
+	Scheduler bool
+	Jobs      []CronLine
+}
+
+// CronLine is one enabled job. Schedule must be in normal form, as
+// contract.ParseCronSchedule returns it.
+type CronLine struct {
+	ID       contract.WorkerID
+	Schedule contract.CronSchedule
+}

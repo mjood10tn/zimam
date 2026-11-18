@@ -638,3 +638,36 @@ func TestArtisanRunsInNewSession(t *testing.T) {
 		t.Fatalf("saw %d artisan calls, want the migrate and the setup link at least", seen)
 	}
 }
+
+// /etc/cron.allow and /etc/at.allow hold root only (OQ1), so a site user can't
+// use crontab or at. A re-run is the repair path: a changed or missing file is
+// written again, and one that is right is left alone.
+func TestBootstrapWritesAllowFiles(t *testing.T) {
+	w := newWorld(t)
+	w.mustRun(opts())
+	for _, f := range []string{w.p.CronAllow(), w.p.AtAllow()} {
+		b, err := os.ReadFile(f)
+		fi, serr := os.Stat(f)
+		if err != nil || serr != nil || string(b) != "root\n" || fi.Mode().Perm() != 0o644 {
+			t.Errorf("%s: %q, %v, %v; want root\n at 0644", f, b, fi, err)
+		}
+	}
+	if err := os.WriteFile(w.p.CronAllow(), []byte("root\ns_shop\n"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(w.p.AtAllow()); err != nil {
+		t.Fatal(err)
+	}
+	entries := len(w.auditEntries())
+	w.mustRun(opts())
+	if got := w.auditedSteps(entries); !slices.Equal(got, []string{"directories", "setup-link"}) {
+		t.Errorf("the repair run applied %q", got)
+	}
+	for _, f := range []string{w.p.CronAllow(), w.p.AtAllow()} {
+		b, _ := os.ReadFile(f)
+		fi, _ := os.Stat(f)
+		if string(b) != "root\n" || fi.Mode().Perm() != 0o644 {
+			t.Errorf("%s: %q %v after the repair", f, b, fi.Mode())
+		}
+	}
+}

@@ -193,6 +193,23 @@ func (r *run) auditDirs() []dirSpec {
 	})
 }
 
+// allowFiles are /etc/cron.allow and /etc/at.allow, root only (OQ1): a site
+// user can't use crontab or at. Cron reads cron.allow as the crontab command,
+// which isn't root, so they are 0644. Neither file affects /etc/cron.d, where
+// Zimam's own cron files are (spike). They belong to the directories step: a
+// re-run, the repair and upgrade path, writes them again.
+func (r *run) allowFiles() (map[string][]byte, error) {
+	files := map[string][]byte{}
+	for path, tmpl := range map[string]string{r.Deps.Paths.CronAllow(): "cron/cron.allow", r.Deps.Paths.AtAllow(): "cron/at.allow"} {
+		b, err := templates.Render(tmpl, nil)
+		if err != nil {
+			return nil, err
+		}
+		files[path] = b
+	}
+	return files, nil
+}
+
 func (r *run) dirsDone(ctx context.Context) (bool, error) {
 	for _, d := range r.rootDirs() {
 		fi, err := os.Lstat(d.path)
@@ -203,10 +220,32 @@ func (r *run) dirsDone(ctx context.Context) (bool, error) {
 			return false, nil
 		}
 	}
+	files, err := r.allowFiles()
+	if err != nil {
+		return false, err
+	}
+	for path, content := range files {
+		if fi, err := os.Lstat(path); !fileIs(path, content) || err != nil || fi.Mode().Perm() != 0o644 {
+			return false, nil
+		}
+	}
 	return true, nil
 }
 
-func (r *run) dirsApply(ctx context.Context) error { return ensureDirs(r.rootDirs()) }
+func (r *run) dirsApply(ctx context.Context) error {
+	if err := ensureDirs(r.rootDirs()); err != nil {
+		return err
+	}
+	files, err := r.allowFiles()
+	if err != nil {
+		return err
+	}
+	var changes []configtx.Change
+	for path, content := range files {
+		changes = append(changes, configtx.RootFile(path, content, 0o644))
+	}
+	return configtx.Apply(ctx, changes, func(context.Context) error { return nil })
+}
 
 func ensureDirs(dirs []dirSpec) error {
 	for _, d := range dirs {

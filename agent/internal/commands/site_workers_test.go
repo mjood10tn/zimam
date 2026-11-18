@@ -51,3 +51,31 @@ func TestSiteWorkersWired(t *testing.T) {
 		t.Errorf("blog: %+v, %v", res, err)
 	}
 }
+
+func TestSiteCronWired(t *testing.T) {
+	if commands.JobHandlers()["site.cron"] == nil {
+		t.Fatal("site.cron has no job handler")
+	}
+	e := newPHPEnv(t)
+	pre := commands.Prechecks(e.d)["site.cron"]
+	ctx := context.Background()
+	wantCode(t, pre(ctx, &contract.SiteCronParams{Name: "shop", Jobs: contract.CronJobList{}}), contract.ErrNotFound)
+
+	static := sites.State{Name: "blog", Domain: "blog.example.com", Type: contract.SiteStatic, TemplateVersion: 3, Security: sites.DefaultSecurity()}
+	if err := sites.Save(e.p, static); err != nil {
+		t.Fatal(err)
+	}
+	// A static site has no Laravel to schedule, but a plain job runs.
+	wantCode(t, pre(ctx, &contract.SiteCronParams{Name: "blog", Scheduler: true, Jobs: contract.CronJobList{}}), contract.ErrConflict)
+	if err := pre(ctx, &contract.SiteCronParams{Name: "blog", Jobs: contract.CronJobList{{ID: "a", Schedule: "0 * * * *", Command: "date", Enabled: true}}}); err != nil {
+		t.Errorf("a job on a static site: %v", err)
+	}
+
+	shop := sites.State{Name: "shop", Domain: "shop.example.com", Type: contract.SiteLaravel, PHPVersion: "8.4", TemplateVersion: 3, Security: sites.DefaultSecurity()}
+	if err := sites.Save(e.p, shop); err != nil {
+		t.Fatal(err)
+	}
+	if err := pre(ctx, &contract.SiteCronParams{Name: "shop", Scheduler: true, Jobs: contract.CronJobList{}}); err != nil {
+		t.Errorf("a laravel site: %v", err)
+	}
+}

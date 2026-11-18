@@ -1,0 +1,6 @@
+# Managed by Zimam for site shop. Changes here are overwritten.
+SHELL=/bin/sh
+PATH=/usr/bin:/bin
+MAILTO=""
+0 3 * * 1 s_shop /bin/bash /home/s_shop/.zimam/cron/backup.sh
+*/15 1-5,7 * 1-3 * s_shop /bin/bash /home/s_shop/.zimam/cron/tidy.sh
