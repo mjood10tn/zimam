@@ -87,7 +87,7 @@ func (f cronField) parseItem(item string) (string, error) {
 		return "*" + stepText, nil
 	}
 	loText, hiText, isRange := strings.Cut(span, "-")
-	lo, err := f.value(loText, false)
+	lo, err := f.value(loText)
 	if err != nil {
 		return "", err
 	}
@@ -100,9 +100,14 @@ func (f cronField) parseItem(item string) (string, error) {
 		}
 		return strconv.Itoa(lo), nil
 	}
-	hi, err := f.value(hiText, true)
+	hi, err := f.value(hiText)
 	if err != nil {
 		return "", err
+	}
+	// The name sun ends a range after Sunday as 7 (sat-sun is 6-7), but a range
+	// that starts at Sunday stays Sunday-only: sun-sun is 0-0, never 0-7.
+	if f.hi == 7 && hi == 0 && lo > 0 && !isCronDigits(hiText) {
+		hi = 7
 	}
 	if lo > hi {
 		return "", fmt.Errorf("has the range %q, which runs backwards", span)
@@ -110,16 +115,13 @@ func (f cronField) parseItem(item string) (string, error) {
 	return strconv.Itoa(lo) + "-" + strconv.Itoa(hi) + stepText, nil
 }
 
-// value reads a number or a name. Sunday ends a range as 7, so sat-sun works.
-func (f cronField) value(s string, rangeEnd bool) (int, error) {
+// value reads a number or a name.
+func (f cronField) value(s string) (int, error) {
 	n, ok := cronNumber(s)
 	if !ok {
 		for i, name := range f.names {
 			if strings.EqualFold(s, name) {
 				n, ok = f.base+i, true
-				if rangeEnd && f.hi == 7 && n == 0 {
-					n = 7
-				}
 			}
 		}
 	}
@@ -171,3 +173,5 @@ func (CronSchedule) JSONSchema() Schema {
 		"pattern":   `^(@(hourly|daily|weekly|monthly|yearly)|` + field + `( ` + field + `){4})$`,
 	}
 }
+
+func isCronDigits(s string) bool { _, ok := cronNumber(s); return ok }
