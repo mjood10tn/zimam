@@ -28,6 +28,7 @@ func nodePrecheck(t *testing.T, d sysexec.Deps, command string, p contract.Param
 func TestEndOfLifeMajorRefused(t *testing.T) {
 	e := newPHPEnv(t)
 	params := &contract.NodeInstallParams{Major: "24"}
+	e.dpkgNode("not-installed", "")
 	e.now = time.Date(2028, 4, 30, 23, 59, 0, 0, time.UTC)
 	if err := nodePrecheck(t, e.d, "node.install", params); err != nil {
 		t.Fatalf("on its last day, installing 24: %v, want allowed", err)
@@ -75,6 +76,37 @@ func TestUninstallRefusedWhileSiteJobRuns(t *testing.T) {
 	writeJob(t, e, "01JBX7Q3A1B2C3D4E5F6G7H8J9", "site:shop", "succeeded")
 	if err := nodePrecheck(t, e.d, "node.uninstall", &contract.NodeUninstallParams{}); err != nil {
 		t.Errorf("with no site job running: %v", err)
+	}
+}
+
+// Switching the major purges nodejs first, so like node.uninstall it waits
+// for every site job; the same major (an update) and a first install don't.
+func TestMajorSwitchRefusedWhileSiteJobRuns(t *testing.T) {
+	e := newPHPEnv(t)
+	e.dpkgNode("installed", "26.13.1-1nodesource1")
+	writeJob(t, e, "01JBX7Q3A1B2C3D4E5F6G7H8J9", "site:shop", "running")
+	ae := wantCode(t, nodePrecheck(t, e.d, "node.install", &contract.NodeInstallParams{Major: "24"}), contract.ErrBusy)
+	if !strings.Contains(ae.Message, "site") {
+		t.Errorf("message = %q", ae.Message)
+	}
+	// The handler checks again, before anything is purged.
+	n := len(e.run.Calls())
+	_, err := e.handleParams(t, "node.install", &contract.NodeInstallParams{Major: "24"})
+	wantCode(t, err, contract.ErrBusy)
+	for _, c := range e.run.Calls()[n:] {
+		if c.Path == "/usr/bin/apt-get" {
+			t.Errorf("ran apt-get %q while a site job runs", c.Args)
+		}
+	}
+	if err := nodePrecheck(t, e.d, "node.install", &contract.NodeInstallParams{Major: "26"}); err != nil {
+		t.Errorf("updating the same major: %v", err)
+	}
+
+	e = newPHPEnv(t)
+	e.run.Add(sysexec.Script{Path: "/usr/bin/dpkg-query", Args: []string{"-W", "-f=${db:Status-Status} ${Version}", "nodejs"}, Result: sysexec.Result{ExitCode: 1}})
+	writeJob(t, e, "01JBX7Q3A1B2C3D4E5F6G7H8J9", "site:shop", "running")
+	if err := nodePrecheck(t, e.d, "node.install", &contract.NodeInstallParams{Major: "24"}); err != nil {
+		t.Errorf("a first install: %v", err)
 	}
 }
 
