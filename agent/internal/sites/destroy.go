@@ -16,6 +16,7 @@ import (
 	"zimam/agent/internal/logpolicy"
 	"zimam/agent/internal/nginx"
 	"zimam/agent/internal/sysexec"
+	"zimam/agent/internal/systemd"
 )
 
 const (
@@ -103,6 +104,13 @@ func Destroy(ctx context.Context, d sysexec.Deps, h Helper, lookup Lookup, name 
 				return contract.SiteNameResult{}, err
 			}
 		}
+	}
+
+	// Step 2b: the site's worker units and target go while the user still
+	// exists (R04-D4): stopped first, so systemd restarts nothing during the
+	// kill, and a unit left naming a deleted user would only fail (spike).
+	if err := systemd.RemoveSiteUnits(ctx, d, name); err != nil {
+		return contract.SiteNameResult{}, err
 	}
 
 	a, err := lookup(username)

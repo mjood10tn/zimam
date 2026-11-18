@@ -16,6 +16,7 @@ import (
 	"zimam/agent/internal/helper"
 	"zimam/agent/internal/php"
 	"zimam/agent/internal/siteexec"
+	"zimam/agent/internal/siteprocs"
 	"zimam/agent/internal/sites"
 	"zimam/agent/internal/sysexec"
 )
@@ -96,7 +97,8 @@ func deployable(d sysexec.Deps, name contract.SiteName) (sites.State, error) {
 //  8. bootstrap/cache 0700 and its files 0600; the release must have a
 //     public/ folder, or the swap would leave the site answering 404;
 //  9. swap current to the release, and record it in the state file;
-//  10. mark the site's PHP version for maintenance's graceful reload (A3);
+//  10. mark the site's PHP version for maintenance's graceful reload (A3),
+//     and restart the site's workers gracefully, by name (R04-D4);
 //  11. prune releases beyond keep_releases, never the live one or the one
 //     before it.
 //
@@ -187,6 +189,9 @@ func Run(ctx context.Context, d sysexec.Deps, h DeployHelper, lookup sites.Looku
 		if err := php.MarkReload(d.Paths, st.PHPVersion); err != nil {
 			after = append(after, fmt.Errorf("marking PHP %s for a reload failed: %w", st.PHPVersion, err))
 		}
+	}
+	if err := restartWorkers(ctx, d, st); err != nil {
+		after = append(after, err)
 	}
 	if err := prune(ctx, d, h, a, st.Keep(), kept); err != nil {
 		after = append(after, fmt.Errorf("pruning old releases failed: %w", err))
@@ -676,6 +681,17 @@ func (b *build) discard(rel, live string) {
 	if err := b.h.RemoveTree(ctx, b.a, rel); err != nil {
 		b.d.Logf("Removing ~/%s failed (%v); the next deploy removes it", rel, err)
 	}
+}
+
+// restartWorkers is the step after a swap (R04-D4, D9): the site's workers
+// restart gracefully onto the release now live. It runs after the swap, so a
+// failure is one more "live, but" and never undoes it; the job then fails
+// with the release live, as for a failed prune.
+func restartWorkers(ctx context.Context, d sysexec.Deps, st sites.State) error {
+	if err := siteprocs.RestartWorkers(ctx, d, st); err != nil {
+		return fmt.Errorf("restarting the site's workers failed, so they may run the previous release until restarted: %w", err)
+	}
+	return nil
 }
 
 // liveBut reports failures after the swap: the deploy's release is live.

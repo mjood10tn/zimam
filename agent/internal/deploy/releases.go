@@ -170,6 +170,9 @@ func Rollback(ctx context.Context, d sysexec.Deps, h RollbackHelper, lookup site
 		if err := markPHP(d, st); err != nil {
 			after = append(after, err)
 		}
+		if err := restartWorkers(ctx, d, st); err != nil {
+			after = append(after, err)
+		}
 		if len(after) > 0 {
 			return res, liveBut(id, after)
 		}
@@ -195,6 +198,9 @@ func Rollback(ctx context.Context, d sysexec.Deps, h RollbackHelper, lookup site
 		return res, liveBut(id, append(after, fmt.Errorf("recording it failed: %w", err)))
 	}
 	if err := markPHP(d, st); err != nil {
+		after = append(after, err)
+	}
+	if err := restartWorkers(ctx, d, st); err != nil {
 		after = append(after, err)
 	}
 	if len(after) > 0 {
