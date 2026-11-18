@@ -71,6 +71,8 @@ func serverTimezone(d sysexec.Deps) string {
 		return "UTC"
 	}
 	_, zone, ok := strings.Cut(target, "/zoneinfo/")
+	// posix/ and right/ are zoneinfo's variants of the same zone name.
+	zone = strings.TrimPrefix(strings.TrimPrefix(zone, "posix/"), "right/")
 	if !ok || !zoneName.MatchString(zone) {
 		return "UTC"
 	}
