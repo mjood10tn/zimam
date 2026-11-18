@@ -1,6 +1,7 @@
 package contract
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -36,6 +37,9 @@ func TestWorkerSpecRules(t *testing.T) {
 		{ID: "q", Kind: WorkerLaravelQueue, Processes: 10, MemoryMB: 4096, Connection: "redis", Queues: []QueueName{"a", "b"},
 			Tries: ptr(3), Timeout: ptr(0), Sleep: ptr(0), MaxTime: ptr(3600), Backoff: ptr(60)},
 		{ID: "q", Kind: WorkerLaravelQueue, Processes: 1, MemoryMB: 64},
+		// max_time 0 is no limit, and 60 the shortest (ruling R5).
+		{ID: "q", Kind: WorkerLaravelQueue, Processes: 1, MaxTime: ptr(0)},
+		{ID: "q", Kind: WorkerLaravelQueue, Processes: 1, MaxTime: ptr(60)},
 	}
 	for _, w := range ok {
 		if err := w.Validate(); err != nil {
@@ -64,6 +68,8 @@ func TestWorkerSpecRules(t *testing.T) {
 		"timeout 86401":          mod(func(w *WorkerSpec) { w.Timeout = ptr(86401) }),
 		"sleep 61":               mod(func(w *WorkerSpec) { w.Sleep = ptr(61) }),
 		"max_time -1":            mod(func(w *WorkerSpec) { w.MaxTime = ptr(-1) }),
+		"max_time 1":             mod(func(w *WorkerSpec) { w.MaxTime = ptr(1) }),
+		"max_time 59":            mod(func(w *WorkerSpec) { w.MaxTime = ptr(59) }),
 		"backoff 3601":           mod(func(w *WorkerSpec) { w.Backoff = ptr(3601) }),
 		"command on laravel":     mod(func(w *WorkerSpec) { w.Command = "php artisan queue:work" }),
 		"custom without command": {ID: "x", Kind: WorkerCustom, Processes: 1},
@@ -203,5 +209,22 @@ func TestCronJobSpecAndParams(t *testing.T) {
 func TestNewSiteWorkersStatusResultIsNotNull(t *testing.T) {
 	if NewSiteWorkersStatusResult("shop").Workers == nil {
 		t.Error("workers is nil, which encodes as null")
+	}
+}
+
+// A worker that exits every few seconds would spend the unit's start limit
+// (10 starts in 600 s) on clean exits, so max_time is 0 or at least 60
+// (ruling R5), in Validate and in the schema alike.
+func TestWorkerMaxTimeFloor(t *testing.T) {
+	w := laravel()
+	w.MaxTime = ptr(30)
+	err := WorkerList{w}.Validate()
+	if err == nil || !strings.Contains(err.Error(), "max_time must be 0 or between 60 and 86400") {
+		t.Errorf("err = %v", err)
+	}
+	s := WorkerSpec{}.JSONSchema()["properties"].(map[string]Schema)["max_time"]
+	want := Schema{"anyOf": []Schema{{"anyOf": []Schema{{"const": 0}, {"type": "integer", "minimum": 60, "maximum": 86400}}}, {"type": "null"}}}
+	if fmt.Sprint(s) != fmt.Sprint(want) {
+		t.Errorf("max_time schema = %v, want %v", s, want)
 	}
 }

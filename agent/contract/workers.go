@@ -54,6 +54,7 @@ const (
 	minWorkerMemoryMB      = 64
 	maxWorkerMemoryMB      = 4096
 	maxOwnerCommandBytes   = 4096
+	minMaxTime             = 60 // a max_time other than 0 (ruling R5)
 	DefaultWorkerMemoryMB  = WorkerMemoryMB(512)
 	DefaultQueueConnection = QueueConnection("default")
 	// MaxWorkerProcesses is the most processes a worker has; the agent
@@ -246,6 +247,12 @@ func (w WorkerSpec) check(commandRequired bool) FieldErrors {
 			f[o.name] = fmt.Sprintf("must be between %d and %d", o.lo, o.hi)
 		}
 	}
+	// Every exit, a clean one too, counts against the unit's start limit (10
+	// starts in 600 s), so a worker may not end itself more often than once a
+	// minute (ruling R5). 0 is no limit.
+	if m := w.MaxTime; m != nil && *m >= 1 && *m < minMaxTime {
+		f["max_time"] = "must be 0 or between 60 and 86400"
+	}
 	switch w.Kind {
 	case WorkerLaravelQueue:
 		if w.Command != "" {
@@ -301,7 +308,7 @@ func (WorkerSpec) JSONSchema() Schema {
 			"tries":      intSchema(1, 100),
 			"timeout":    intSchema(0, 86400),
 			"sleep":      intSchema(0, 60),
-			"max_time":   intSchema(0, 86400),
+			"max_time":   {"anyOf": []Schema{{"anyOf": []Schema{{"const": 0}, {"type": "integer", "minimum": minMaxTime, "maximum": 86400}}}, {"type": "null"}}},
 			"backoff":    intSchema(0, 3600),
 			"command":    OwnerCommand("").JSONSchema(),
 		},

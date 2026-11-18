@@ -53,9 +53,16 @@
           "max_time": {
             "anyOf": [
               {
-                "maximum": 86400,
-                "minimum": 0,
-                "type": "integer"
+                "anyOf": [
+                  {
+                    "const": 0
+                  },
+                  {
+                    "maximum": 86400,
+                    "minimum": 60,
+                    "type": "integer"
+                  }
+                ]
               },
               {
                 "type": "null"
