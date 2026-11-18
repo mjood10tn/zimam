@@ -216,7 +216,7 @@ class DeploymentsTab extends Component implements HasActions, HasSchemas
             return new HtmlString($text.e(__('zimam.deployments.settings.script_node_unknown')));
         }
         if ($node['installed'] ?? false) {
-            return new HtmlString($text.e(__('zimam.deployments.settings.script_node_installed', ['version' => $node['version'] ?? $node['major'] ?? ''])));
+            return new HtmlString($text.e(__('zimam.deployments.settings.script_node_installed', ['version' => Node::displayVersion($node['version'] ?? $node['major'] ?? '')])));
         }
 
         return new HtmlString($text.e(__('zimam.deployments.settings.script_node_missing')).' <a href="'.e(Node::getUrl()).'" class="underline">'.e(__('zimam.deployments.settings.script_node_link')).'</a>');
