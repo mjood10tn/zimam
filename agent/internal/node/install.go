@@ -13,10 +13,11 @@ import (
 )
 
 // Install installs Node.js from NodeSource's major (R04-D6, D19). A
-// different installed major is purged first: going from 26 to 24 would be a
-// downgrade. The same major is upgraded in place, which is what its Update
-// does. Afterwards the version is checked: the pin forbids Ubuntu's own
-// nodejs, but a wrong package never passes as installed.
+// different installed major is purged first, since going from 26 to 24 would
+// be a downgrade, but only once the new repository is set up, so a network or
+// key failure leaves the old one working. The same major is upgraded in place,
+// which is what its Update does. Afterwards the version is checked: the pin
+// forbids Ubuntu's own nodejs, but a wrong package never passes as installed.
 func Install(ctx context.Context, d sysexec.Deps, major contract.NodeMajor) (contract.NodeInstallResult, error) {
 	if err := major.Validate(); err != nil {
 		return contract.NodeInstallResult{}, fmt.Errorf("Node %q %v", major, err)
@@ -25,14 +26,14 @@ func Install(ctx context.Context, d sysexec.Deps, major contract.NodeMajor) (con
 	if err != nil {
 		return contract.NodeInstallResult{}, err
 	}
+	if err := EnsureRepo(ctx, d, major); err != nil {
+		return contract.NodeInstallResult{}, err
+	}
 	if have != "" && MajorOf(have) != major {
 		d.Logf("Purging Node.js %s before installing %s", have, major)
 		if err := purge(ctx, d); err != nil {
 			return contract.NodeInstallResult{}, err
 		}
-	}
-	if err := EnsureRepo(ctx, d, major); err != nil {
-		return contract.NodeInstallResult{}, err
 	}
 	d.Logf("Installing Node.js %s", major)
 	// Never stop at a dpkg question about a changed config file.

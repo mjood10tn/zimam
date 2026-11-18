@@ -206,12 +206,26 @@ func TestChangeMajorPurgesFirst(t *testing.T) {
 	if got.Major != "24" {
 		t.Errorf("result = %+v", got)
 	}
-	want := []string{line(queryScript), line(purgeNode), line(aptUpdate), line(installNode), line(queryScript)}
+	want := []string{line(queryScript), line(aptUpdate), line(purgeNode), line(installNode), line(queryScript)}
 	if lines := e.lines(); !slices.Equal(lines, want) {
 		t.Errorf("ran\n%s\nwant\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
 	}
 	if src := readFile(t, e.p.NodeSources()); !strings.Contains(src, "node_24.x") {
 		t.Errorf("sources:\n%s", src)
+	}
+}
+
+// The new major's repository is set up before the old Node is purged, so a
+// network or key failure leaves the old one working.
+func TestChangeMajorKeepsOldNodeWhenRepoFails(t *testing.T) {
+	e := newEnv(t, suryKey(t))
+	e.dpkgSays("installed", "26.13.1-1nodesource1")
+	e.run.Add(purgeNode)
+	if _, err := Install(context.Background(), e.d, "24"); err == nil {
+		t.Fatal("Install succeeded with the wrong key")
+	}
+	if lines := e.lines(); slices.Contains(lines, line(purgeNode)) {
+		t.Errorf("purged the old Node although the new repository failed:\n%s", strings.Join(lines, "\n"))
 	}
 }
 
