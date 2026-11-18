@@ -110,12 +110,13 @@ final class ServerStatus
     /**
      * The zone cron runs jobs in (ruling R7): the status's IANA name, or UTC
      * from an agent that predates it or one that names a zone PHP doesn't know.
+     * Legacy aliases (US/Pacific, Asia/Calcutta, Etc/UTC) count: servers still use them.
      */
     public function timezone(): string
     {
         $zone = $this->data['timezone'] ?? 'UTC';
 
-        return is_string($zone) && in_array($zone, DateTimeZone::listIdentifiers(), true) ? $zone : 'UTC';
+        return is_string($zone) && in_array($zone, DateTimeZone::listIdentifiers(DateTimeZone::ALL_WITH_BC), true) ? $zone : 'UTC';
     }
 
     /** When the next answer is due, for the bulletin's "Next" time. */
