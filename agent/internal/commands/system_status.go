@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -48,12 +49,32 @@ func systemStatus(d sysexec.Deps) Handler {
 			PHP:            php,
 			Services:       svc,
 			Node:           nodeSt,
+			Timezone:       serverTimezone(d),
 			RebootRequired: reboot,
 			Updates:        updateCounts(d),
 			PanelDomain:    cfg.PanelDomain,
 			ACMEDirectory:  cfg.ACMEDirectory,
 		}, nil
 	}
+}
+
+// zoneName is an IANA zone as a path under zoneinfo: segments of letters,
+// digits and _+-, so a link pointing anywhere else is not taken as one.
+var zoneName = regexp.MustCompile(`^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$`)
+
+// serverTimezone is the zone cron runs jobs in (ruling R7): the part of
+// /etc/localtime's link target after /zoneinfo/, absolute as Debian writes it
+// and relative as timedatectl does. UTC when it is not a link or names no zone.
+func serverTimezone(d sysexec.Deps) string {
+	target, err := os.Readlink(d.Paths.Localtime())
+	if err != nil {
+		return "UTC"
+	}
+	_, zone, ok := strings.Cut(target, "/zoneinfo/")
+	if !ok || !zoneName.MatchString(zone) {
+		return "UTC"
+	}
+	return zone
 }
 
 // phpStatus lists the installed versions, each with whether its FPM service

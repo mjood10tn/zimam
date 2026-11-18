@@ -115,6 +115,10 @@ func (p Paths) KeyringRefresh() string { return p.at("var/lib/zimam/keyring-refr
 func (p Paths) RebootRequired() string { return p.at("run/reboot-required") }
 func (p Paths) AptCheck() string       { return p.at("usr/lib/update-notifier/apt-check") }
 
+// Localtime is the symlink to the server's zone file; cron runs jobs in that
+// zone (ruling R7), which system.status reports.
+func (p Paths) Localtime() string { return p.at("etc/localtime") }
+
 // What system.metrics reads from /proc (§7.5).
 
 func (p Paths) ProcUptime() string  { return p.at("proc/uptime") }
