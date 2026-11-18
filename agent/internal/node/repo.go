@@ -39,6 +39,11 @@ func EnsureRepo(ctx context.Context, d sysexec.Deps, major contract.NodeMajor) e
 		return err
 	}
 	defer unlock()
+	return ensureRepoLocked(ctx, d, major)
+}
+
+// ensureRepoLocked is EnsureRepo for a caller that holds the repository lock.
+func ensureRepoLocked(ctx context.Context, d sysexec.Deps, major contract.NodeMajor) error {
 	d.Logf("Downloading %s", KeyURL)
 	raw, err := php.Download(ctx, d.HTTPClient(), KeyURL)
 	if err != nil {
@@ -82,10 +87,17 @@ func EnsureRepo(ctx context.Context, d sysexec.Deps, major contract.NodeMajor) e
 // RefreshRepo downloads the key again and rewrites the repository files for
 // the major APT follows now (D23), for maintenance's weekly refresh. Without
 // the source file there is nothing to refresh.
+// The major is read under the repository lock: a node.install that changes it
+// meanwhile must not be written back to the old one.
 func RefreshRepo(ctx context.Context, d sysexec.Deps) error {
+	unlock, err := sysexec.Lock(ctx, d.Paths.AptRepoLock())
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	major, err := RepoMajor(d.Paths)
 	if err != nil || major == "" {
 		return err
 	}
-	return EnsureRepo(ctx, d, major)
+	return ensureRepoLocked(ctx, d, major)
 }
