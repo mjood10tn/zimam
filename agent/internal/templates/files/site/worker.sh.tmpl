@@ -1,0 +1,5 @@
+#!/bin/bash
+set -eo pipefail
+. "$HOME/.zimam/site.env.sh"
+cd "$HOME/site/current"
+{{if .Argv}}exec{{range .Argv}} {{shquote .}}{{end}}{{else}}{{.Command}}{{end}}

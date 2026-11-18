@@ -1,0 +1,17 @@
+#!/bin/bash
+set -eo pipefail
+. "$HOME/.zimam/site.env.sh"
+cd "$HOME/site/current"
+ZIMAM_LOG="$HOME/logs/cron.log"
+exec 9>"$HOME/.zimam/cron/{{safe .ID}}.lock"
+if ! flock -n 9; then
+  echo "$(date -Is) [{{safe .ID}}] skipped: the previous run is still going" >>"$ZIMAM_LOG"
+  exit 0
+fi
+echo "$(date -Is) [{{safe .ID}}] started" >>"$ZIMAM_LOG"
+ZIMAM_RC=0
+(
+{{.Command}}
+) >>"$ZIMAM_LOG" 2>&1 || ZIMAM_RC=$?
+echo "$(date -Is) [{{safe .ID}}] finished with status $ZIMAM_RC" >>"$ZIMAM_LOG"
+exit "$ZIMAM_RC"
