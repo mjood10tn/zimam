@@ -65,6 +65,7 @@ var production = map[string]string{
 	"EtcLoginDefs":          "/etc/login.defs",
 	"Crontab":               "/usr/bin/crontab",
 	"Atq":                   "/usr/bin/atq",
+	"CrontabSpool":          "/var/spool/cron/crontabs/site:shop",
 	"UIDHighwater":          "/var/lib/zimam/uid-highwater.json",
 	"ProcUptime":            "/proc/uptime",
 	"ProcLoadavg":           "/proc/loadavg",
