@@ -257,11 +257,11 @@ write_state() {
 # Step 2: packages from Ubuntu.
 
 install_packages() {
-	log "Installing nginx, certbot, ufw, curl, ca-certificates and openssl"
+	log "Installing nginx, certbot, ufw, cron, curl, ca-certificates and openssl"
 	# On a server that has just booted, cloud-init or unattended-upgrades may
 	# hold the dpkg lock for a few minutes: wait for it, as the agent does.
 	DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 update -q
-	DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y -q nginx certbot ufw curl ca-certificates openssl
+	DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y -q nginx certbot ufw cron curl ca-certificates openssl
 }
 
 # Step 3: the accounts (§4, §5.1). Only zimam is in zimam-agent; www-data
