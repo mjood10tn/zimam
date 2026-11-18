@@ -4,7 +4,7 @@
 
 <p align="center">
   A self-hosted server control panel for Ubuntu 26.04 LTS.<br>
-  Run PHP and static sites on your own VPS, with a panel that can't hand out root.
+  Run Laravel, PHP and static sites on your own VPS, with a panel that can't hand out root.
 </p>
 
 <p align="center">
@@ -18,11 +18,11 @@
 ---
 
 > [!WARNING]
-> **Zimam is early software.** v0.1.0 is the first release. It proves the core end to end: install, sites, PHP versions, certificates, monitoring, security settings and logs. Many features a production panel needs are still missing (see [Not yet](#not-yet)). Releases are signed with a development key. Try it on a fresh server you can throw away, not on one that matters.
+> **Zimam is early software.** v0.3.0 is the current release. It covers install, sites, PHP versions, certificates, monitoring, security settings and logs, Git deploys and Laravel sites, and MySQL and Valkey. Many features a production panel needs are still missing (see [Not yet](#not-yet)). Releases are signed with a development key. Try it on a fresh server you can throw away, not on one that matters.
 
 ## What is Zimam?
 
-Zimam (زِمَام, Arabic for "reins") is for solo developers who run their own VPS. You install it on a clean Ubuntu 26.04 server with one command. You then manage the server from a web panel: PHP versions, sites, HTTPS certificates, security settings, monitoring and logs.
+Zimam (زِمَام, Arabic for "reins") is for solo developers who run their own VPS. You install it on a clean Ubuntu 26.04 server with one command. You then manage the server from a web panel: PHP versions, sites, Git deploys, databases and cache, HTTPS certificates, security settings, monitoring and logs.
 
 It has two parts:
 
@@ -42,7 +42,7 @@ It has two parts:
 - Each site runs on its own PHP version. You can switch a site's version with no failed requests.
 
 **Sites**
-- Static sites and generic PHP sites, each with a primary domain.
+- Static sites, generic PHP sites and Laravel sites, each with a primary domain.
 - Each site runs as its own Linux user (`s_<name>`) with its own PHP-FPM pool, so one site can't read another's files.
 - Let's Encrypt certificates over HTTP-01, with automatic renewal and an HTTP-to-HTTPS redirect.
 - Per-site security settings:
@@ -55,6 +55,15 @@ It has two parts:
   - keeping PHP inside the site's folder.
 
   A broken config never goes live: Zimam tests every change and rolls it back if the test fails.
+
+**Git deploys and Laravel sites**
+- Connect a GitHub repository (`owner/repo`) and a branch. Each site gets its own deploy key, which you add on GitHub with write access off. The key can be rotated.
+- The site is served from the repository's `public/` folder. A deploy without one is refused, and the live release stays.
+- Zero-downtime releases. Each deploy fetches the branch, unpacks the commit into a new release folder, runs `composer install` and your deploy script as the site's user, then switches the site's `current` link to it in one step.
+- Zimam keeps the last 5 releases by default (1 to 20). You can roll back to any kept release.
+- Deploy from the panel, on push through a GitHub webhook (signed with HMAC-SHA256 and filtered by branch), or by calling the site's secret deploy URL. A newer deploy replaces older ones still waiting.
+- Laravel sites share one `.env` and one `storage/` folder across releases, and start with a ready-made deploy script. Their Laravel log shows in the log viewer.
+- An Environment tab edits the site's `.env`, behind a password confirmation. Changing the deploy script also asks for the password.
 
 **Monitoring and checks**
 - Live CPU, memory, swap, disk, load and network figures, and a sample every minute kept for 7 days.
@@ -149,9 +158,9 @@ Found a security issue? Please report it privately through [GitHub's security ad
 
 ## Not yet
 
-These are planned but not in v0.1.0:
+These are planned but not in v0.3.0:
 
-- Git deploys and Laravel-aware sites, queue workers and cron.
+- Queue workers, the Laravel scheduler and cron jobs.
 - Node.
 - Backups.
 - Notifications (warnings show on screen only).
@@ -168,7 +177,7 @@ These are planned but not in v0.1.0:
                                    │
                                    │ JSON over /run/zimam/agent.sock
                                    ▼
-                     zimam-agent (Go, root) ──▶ Nginx, PHP-FPM, Certbot, UFW, apt
+                     zimam-agent (Go, root) ──▶ Nginx, PHP-FPM, Certbot, UFW, apt, MySQL, Valkey
                                    │
                                    └──▶ site-user helper (runs as s_<name>)
 ```
