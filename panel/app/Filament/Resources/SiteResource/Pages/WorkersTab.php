@@ -317,7 +317,9 @@ class WorkersTab extends Component implements HasActions, HasSchemas, HasTable
 
     /**
      * Submits $list as the site's whole list. Once the agent has it, the
-     * rows become $list, each marked applying.
+     * rows become $list, each marked applying, and a worker left out is
+     * marked removing: its row goes only when the job succeeds, so a failed
+     * removal leaves the still-running worker on the tab to remove again.
      *
      * @param  Collection<int, SiteWorker>  $list
      */
@@ -329,7 +331,7 @@ class WorkersTab extends Component implements HasActions, HasSchemas, HasTable
         }
         // Rows keep their ids, so an open row action still finds its worker.
         DB::transaction(function () use ($list): void {
-            $this->site->workers()->whereNotIn('worker_id', $list->pluck('worker_id'))->delete();
+            $this->site->workers()->whereNotIn('worker_id', $list->pluck('worker_id'))->update(['status' => SiteWorker::REMOVING]);
             foreach ($list as $worker) {
                 $this->site->workers()->updateOrCreate(
                     ['worker_id' => $worker->worker_id],
@@ -396,7 +398,7 @@ class WorkersTab extends Component implements HasActions, HasSchemas, HasTable
     public function memoryWarning(): ?string
     {
         $total = MetricsReading::current()?->data['memory']['total_bytes'] ?? null;
-        $ceiling = $this->stored()->sum(fn (SiteWorker $w): int => $w->memoryCeilingMb()) * 1024 ** 2;
+        $ceiling = $this->stored()->where('status', '!=', SiteWorker::REMOVING)->sum(fn (SiteWorker $w): int => $w->memoryCeilingMb()) * 1024 ** 2;
         if (! is_int($total) || $total <= 0 || $ceiling <= $total) {
             return null;
         }

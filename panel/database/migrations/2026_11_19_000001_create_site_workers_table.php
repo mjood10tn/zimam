@@ -31,7 +31,7 @@ return new class extends Migration
             $table->unsignedInteger('backoff')->nullable();
             $table->unsignedSmallInteger('memory_mb');
             $table->text('command')->nullable();
-            // applying, active or failed.
+            // applying, removing, active or failed.
             $table->string('status');
             $table->timestamps();
             $table->unique(['site_id', 'worker_id']);

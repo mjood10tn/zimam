@@ -108,7 +108,39 @@ final class WorkersTabTest extends DatabasesTestCase
         $this->assertSame(4, $lists[0][1]['processes']);
         $this->assertArrayNotHasKey('queues', $lists[0][1]);
         $this->assertSame(['queue'], array_column($lists[1], 'id'));
+        // The row stays, marked removing, until the agent has removed it.
+        $this->assertSame(SiteWorker::REMOVING, $mail->refresh()->status);
+        $this->tab($site)->assertSee(__('zimam.workers.status.removing'));
+
+        $this->trackToTheEnd(AgentJob::query()->latest('id')->first());
+
         $this->assertSame(['queue'], $site->workers()->pluck('worker_id')->all());
+    }
+
+    /** A removal that fails leaves the worker, which may still run, on the tab to remove again. */
+    public function testFailedDeleteKeepsWorkerRemovable(): void
+    {
+        $site = $this->site();
+        $mail = $this->worker($site, 'mail');
+        $this->agent->scriptJob('site.workers', ['running', 'failed'], errorCode: 'internal', message: 'systemctl stop failed');
+
+        $this->tab($site)->callTableAction('delete', $mail, ['current_password' => self::PASSWORD]);
+        $this->trackToTheEnd(AgentJob::sole());
+
+        $this->assertSame(SiteWorker::FAILED, $mail->refresh()->status);
+        $this->assertSame('systemctl stop failed', $site->refresh()->last_error);
+        $this->tab($site)
+            ->assertSee(__('zimam.workers.status.failed'))
+            ->assertActionVisible('restartAll')
+            ->assertTableActionEnabled('delete', $mail);
+
+        $this->agent->scriptJob('site.workers', ['running', 'succeeded']);
+        $this->tab($site)->callTableAction('delete', $mail, ['current_password' => self::PASSWORD])->assertHasNoTableActionErrors();
+        $this->trackToTheEnd(AgentJob::query()->latest('id')->first());
+
+        $this->assertSame([[], []], array_column($this->submitted('site.workers'), 'workers'));
+        $this->assertSame(0, $site->workers()->count());
+        $this->assertNull($site->refresh()->last_error);
     }
 
     public function testCustomCommandRefusesNewline(): void
