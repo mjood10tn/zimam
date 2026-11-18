@@ -56,6 +56,8 @@ final class CronScheduleTest extends TestCase
             '*/60 * * * *', '$(x) * * * *', '* * * * 1-', "1 2 3 4 5\x00",
             // TestCronScheduleNeverRendersPercent
             '0 3 * * 1%touch /x',
+            // U+017F folds to s in Go's EqualFold; the agent refuses these too.
+            "0 3 * * \u{17F}un", "0 3 * * \u{17F}at", "0 0 1 \u{17F}ep *",
         ];
         $table = [];
         foreach ($accepts as $in => $normal) {
