@@ -156,7 +156,7 @@ func TestScriptsWrittenThroughHelperAsSiteUser(t *testing.T) {
 		{ID: "queue", Kind: contract.WorkerLaravelQueue, Processes: 1, Connection: "redis", Queues: []contract.QueueName{"high"}},
 		{ID: "ws", Kind: contract.WorkerCustom, Processes: 1, Command: "node ws.js | cat"},
 	}
-	if _, err := WriteWorkerScripts(context.Background(), h, acct, state("8.4"), workers); err != nil {
+	if err := WriteWorkerScripts(context.Background(), h, acct, state("8.4"), workers); err != nil {
 		t.Fatal(err)
 	}
 	cron := contract.SiteCronParams{Name: "shop", Scheduler: true, Jobs: contract.CronJobList{
@@ -208,16 +208,16 @@ func TestStaleScriptsRemoved(t *testing.T) {
 		}
 		return l
 	}
-	if _, err := WriteWorkerScripts(ctx, h, acct, state(""), w("a", "b")); err != nil {
+	if err := WriteWorkerScripts(ctx, h, acct, state(""), w("a", "b")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := WriteWorkerScripts(ctx, h, acct, state(""), w("b")); err != nil {
+	if err := WriteWorkerScripts(ctx, h, acct, state(""), w("b")); err != nil {
 		t.Fatal(err)
 	}
 	if got := h.names(t, ".zimam/workers"); !slices.Equal(got, []string{"b.sh"}) {
 		t.Errorf("workers: %v", got)
 	}
-	if _, err := WriteWorkerScripts(ctx, h, acct, state(""), nil); err != nil {
+	if err := WriteWorkerScripts(ctx, h, acct, state(""), nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := h.names(t, ".zimam/workers"); len(got) != 0 {
@@ -273,8 +273,7 @@ func TestSiteEnvUsesSitePHPVersion(t *testing.T) {
 func TestEveryWriteStartsWithSiteEnv(t *testing.T) {
 	for name, run := range map[string]func(h *homeHelper) error{
 		"workers": func(h *homeHelper) error {
-			_, err := WriteWorkerScripts(context.Background(), h, acct, state("8.4"), nil)
-			return err
+			return WriteWorkerScripts(context.Background(), h, acct, state("8.4"), nil)
 		},
 		"cron": func(h *homeHelper) error {
 			return WriteCronScripts(context.Background(), h, acct, state("8.4"), contract.SiteCronParams{Name: "shop", Jobs: contract.CronJobList{}})
@@ -298,7 +297,7 @@ func TestScriptDirRefusesSymlink(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(h.home, ".zimam")); err != nil {
 		t.Fatal(err)
 	}
-	_, err := WriteWorkerScripts(context.Background(), h, acct, state("8.4"), []contract.WorkerSpec{{ID: "a", Kind: contract.WorkerCustom, Processes: 1, Command: "x"}})
+	err := WriteWorkerScripts(context.Background(), h, acct, state("8.4"), []contract.WorkerSpec{{ID: "a", Kind: contract.WorkerCustom, Processes: 1, Command: "x"}})
 	if err == nil {
 		t.Fatal("wrote through a .zimam symlink")
 	}

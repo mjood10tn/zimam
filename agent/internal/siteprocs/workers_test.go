@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -24,10 +25,16 @@ type unitRunner struct {
 	calls     [][]string
 	props     map[string]map[string]string
 	badVerify bool
+	started   string // every process's ExecMainStartTimestamp, unless props says
+	failOnce  string // the next systemctl call starting with these arguments fails
 }
 
 func (r *unitRunner) Run(_ context.Context, c sysexec.Cmd) (sysexec.Result, error) {
 	r.calls = append(r.calls, append([]string{c.Path}, c.Args...))
+	if args := strings.Join(c.Args, " "); c.Path == systemctl && r.failOnce != "" && strings.HasPrefix(args, r.failOnce) {
+		r.failOnce = ""
+		return sysexec.Result{}, &sysexec.ExitError{Path: c.Path, Code: 1}
+	}
 	switch {
 	case c.Path == systemdAnalyze && r.badVerify:
 		return sysexec.Result{Stderr: []byte("Unknown key 'Bogus'")}, &sysexec.ExitError{Path: c.Path, Code: 1}
@@ -35,12 +42,12 @@ func (r *unitRunner) Run(_ context.Context, c sysexec.Cmd) (sysexec.Result, erro
 		units := c.Args[slices.Index(c.Args, "--")+1:]
 		var b strings.Builder
 		for _, u := range units {
-			p := map[string]string{"ActiveState": "active", "SubState": "running", "NRestarts": "0", "Result": "success", "ExecMainStatus": "0", "StateChangeTimestamp": "@1763460000"}
+			p := map[string]string{"ActiveState": "active", "SubState": "running", "NRestarts": "0", "Result": "success", "ExecMainStatus": "0", "StateChangeTimestamp": "@1763460000", "ExecMainStartTimestamp": r.started}
 			for k, v := range r.props[u] {
 				p[k] = v
 			}
 			b.WriteString("Id=" + u + "\n")
-			for _, k := range []string{"ActiveState", "SubState", "NRestarts", "StateChangeTimestamp", "Result", "ExecMainStatus"} {
+			for _, k := range []string{"ActiveState", "SubState", "NRestarts", "StateChangeTimestamp", "Result", "ExecMainStatus", "ExecMainStartTimestamp"} {
 				b.WriteString(k + "=" + p[k] + "\n")
 			}
 			b.WriteString("\n")
@@ -111,6 +118,27 @@ func (f *fixture) unit(t *testing.T, name string) string {
 
 func has(calls []string, want string) bool { return slices.Contains(calls, want) }
 
+// settle is time passing after a run: every unit file and script is a
+// minute and a half old, and every process started a minute ago, after
+// them. A later run that rewrites one makes it newer than its process.
+func (f *fixture) settle(t *testing.T) {
+	t.Helper()
+	old := time.Now().Add(-90 * time.Second)
+	for _, dir := range []string{f.d.Paths.SystemdUnitDir(), filepath.Join(f.h.home, ".zimam/workers")} {
+		es, _ := os.ReadDir(dir)
+		for _, e := range es {
+			if err := os.Chtimes(filepath.Join(dir, e.Name()), old, old); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	f.run.started = "@" + strconv.FormatInt(time.Now().Add(-time.Minute).Unix(), 10)
+}
+
+func surplusOf(id contract.WorkerID, from int) string {
+	return "disable --now --no-block " + strings.Join(systemd.WorkerInstances("shop", id, from, 10), " ")
+}
+
 func TestReconcileStartsNewStopsRemoved(t *testing.T) {
 	f := newFixture(t)
 	if err := f.reconcile(t, contract.WorkerSpec{ID: "old", Kind: contract.WorkerCustom, Processes: 1, Command: "sleep 9"}); err != nil {
@@ -121,12 +149,11 @@ func TestReconcileStartsNewStopsRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := f.run.systemctl()
-	stopOld := "disable --now --no-block " + strings.Join(systemd.WorkerInstances("shop", "old", 1, 10), " ")
 	want := []string{
-		stopOld,
+		surplusOf("old", 1),
 		"daemon-reload",
 		"enable zimam-site-shop.target zimam-worker-shop_q@1.service zimam-worker-shop_q@2.service",
-		"start zimam-site-shop.target zimam-worker-shop_q@1.service zimam-worker-shop_q@2.service",
+		"start --no-block zimam-site-shop.target zimam-worker-shop_q@1.service zimam-worker-shop_q@2.service",
 	}
 	if !slices.Equal(calls, want) {
 		t.Errorf("systemctl calls:\n%s\nwant:\n%s", strings.Join(calls, "\n"), strings.Join(want, "\n"))
@@ -152,19 +179,28 @@ func TestReconcileStartsNewStopsRemoved(t *testing.T) {
 	}
 }
 
+func restartsIn(calls []string) []string {
+	var out []string
+	for _, c := range calls {
+		if strings.HasPrefix(c, "restart") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 func TestUnchangedWorkerNotRestarted(t *testing.T) {
 	f := newFixture(t)
 	if err := f.reconcile(t, queue(2, 512)); err != nil {
 		t.Fatal(err)
 	}
+	f.settle(t)
 	f.run.reset()
 	if err := f.reconcile(t, queue(2, 512)); err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range f.run.systemctl() {
-		if strings.HasPrefix(c, "restart") || c == "daemon-reload" {
-			t.Errorf("an unchanged worker got %q", c)
-		}
+	if r := restartsIn(f.run.systemctl()); len(r) != 0 {
+		t.Errorf("an unchanged worker got %q", r)
 	}
 	for _, c := range f.run.calls {
 		if c[0] == systemdAnalyze {
@@ -187,6 +223,7 @@ func TestChangedCustomCommandRestarts(t *testing.T) {
 	if err := f.reconcile(t, w); err != nil {
 		t.Fatal(err)
 	}
+	f.settle(t)
 	f.run.reset()
 	w.Command = "php artisan horizon --quiet"
 	if err := f.reconcile(t, w); err != nil {
@@ -194,6 +231,33 @@ func TestChangedCustomCommandRestarts(t *testing.T) {
 	}
 	if calls := f.run.systemctl(); !has(calls, "restart --no-block zimam-worker-shop_h@1.service") {
 		t.Errorf("a changed script wasn't restarted: %q", calls)
+	}
+}
+
+// A run that rewrote a unit or a script and failed before reloading and
+// restarting is finished by the retry, which finds nothing left to write.
+func TestRetryAfterFailureReloadsAndRestarts(t *testing.T) {
+	for name, c := range map[string]struct{ before, after contract.WorkerSpec }{
+		"unit":   {queue(1, 512), queue(1, 1024)},
+		"script": {contract.WorkerSpec{ID: "q", Kind: contract.WorkerCustom, Processes: 1, Command: "a"}, contract.WorkerSpec{ID: "q", Kind: contract.WorkerCustom, Processes: 1, Command: "b"}},
+	} {
+		f := newFixture(t)
+		if err := f.reconcile(t, c.before); err != nil {
+			t.Fatal(err)
+		}
+		f.settle(t)
+		f.run.failOnce = "daemon-reload"
+		if err := f.reconcile(t, c.after); err == nil {
+			t.Fatalf("%s: the failed reload passed", name)
+		}
+		f.run.reset()
+		if err := f.reconcile(t, c.after); err != nil {
+			t.Fatal(err)
+		}
+		calls := f.run.systemctl()
+		if !has(calls, "daemon-reload") || !has(calls, "restart --no-block zimam-worker-shop_q@1.service") {
+			t.Errorf("%s: the retry ran %q; want a reload and the restart", name, calls)
+		}
 	}
 }
 
@@ -207,16 +271,38 @@ func TestProcessesCountChangesInstances(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := f.run.systemctl()
-	if !has(calls, "disable --now --no-block zimam-worker-shop_q@2.service zimam-worker-shop_q@3.service") ||
-		!has(calls, "start zimam-site-shop.target zimam-worker-shop_q@1.service") {
+	if !has(calls, surplusOf("q", 2)) || !has(calls, "start --no-block zimam-site-shop.target zimam-worker-shop_q@1.service") {
 		t.Errorf("shrinking: %q", calls)
 	}
 	f.run.reset()
 	if err := f.reconcile(t, queue(3, 512)); err != nil {
 		t.Fatal(err)
 	}
-	if calls := f.run.systemctl(); !has(calls, "start zimam-site-shop.target zimam-worker-shop_q@1.service zimam-worker-shop_q@2.service zimam-worker-shop_q@3.service") {
+	if calls := f.run.systemctl(); !has(calls, surplusOf("q", 4)) || !has(calls, "start --no-block zimam-site-shop.target zimam-worker-shop_q@1.service zimam-worker-shop_q@2.service zimam-worker-shop_q@3.service") {
 		t.Errorf("growing: %q", calls)
+	}
+}
+
+// A run that started more processes and failed before recording them: the
+// retry with the old count still stops them, though the state never said.
+func TestRetryStopsUnrecordedInstances(t *testing.T) {
+	f := newFixture(t)
+	if err := f.reconcile(t, queue(2, 512)); err != nil {
+		t.Fatal(err)
+	}
+	f.run.failOnce = "start --no-block"
+	if err := f.reconcile(t, queue(5, 512)); err == nil {
+		t.Fatal("the failed start passed")
+	}
+	if st, _ := sites.Load(f.d.Paths, "shop"); st.Workers[0].Processes != 2 {
+		t.Fatalf("state = %+v, want the old count", st.Workers)
+	}
+	f.run.reset()
+	if err := f.reconcile(t, queue(2, 512)); err != nil {
+		t.Fatal(err)
+	}
+	if calls := f.run.systemctl(); !has(calls, surplusOf("q", 3)) {
+		t.Errorf("calls %q; want @3..@10 stopped", calls)
 	}
 }
 
@@ -234,7 +320,8 @@ func TestBadUnitRestoresPrevious(t *testing.T) {
 	if after := f.unit(t, "zimam-worker-shop_q@.service"); after != before {
 		t.Errorf("the unit wasn't restored:\n%s", after)
 	}
-	if calls := f.run.systemctl(); len(calls) != 0 {
+	// Only the surplus stop, which comes before the files, ran.
+	if calls := f.run.systemctl(); !slices.Equal(calls, []string{surplusOf("q", 2)}) {
 		t.Errorf("systemctl ran after a failed test: %q", calls)
 	}
 	st, err := sites.Load(f.d.Paths, "shop")

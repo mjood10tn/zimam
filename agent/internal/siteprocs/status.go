@@ -67,8 +67,8 @@ func failing(b map[string]string) bool {
 
 // since turns systemd's "@<seconds>" into RFC 3339, or "" when there is none.
 func since(v string) string {
-	n, err := strconv.ParseInt(strings.TrimPrefix(v, "@"), 10, 64)
-	if err != nil || n <= 0 {
+	n := unixSeconds(v)
+	if n == 0 {
 		return ""
 	}
 	return time.Unix(n, 0).UTC().Format(time.RFC3339)
@@ -156,4 +156,13 @@ func Metrics(ctx context.Context, d sysexec.Deps) ([]contract.WorkerMetric, erro
 		}
 	}
 	return out, nil
+}
+
+// unixSeconds reads systemd's "@<seconds>", or 0 when there is none.
+func unixSeconds(v string) int64 {
+	n, err := strconv.ParseInt(strings.TrimPrefix(v, "@"), 10, 64)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }
