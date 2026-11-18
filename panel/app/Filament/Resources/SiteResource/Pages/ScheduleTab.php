@@ -2,14 +2,10 @@
 
 namespace App\Filament\Resources\SiteResource\Pages;
 
-use App\Actions\SubmitAgentCommand;
-use App\Agent\AgentCommand;
-use App\Agent\AgentHealth;
 use App\Agent\Commands\SiteCron;
-use App\Agent\Exceptions\AgentException;
-use App\Agent\Exceptions\AgentValidationFailed;
 use App\Agent\ServerStatus;
 use App\Filament\Actions\ConfirmsPassword;
+use App\Filament\Concerns\SubmitsSiteJobs;
 use App\Models\Site;
 use App\Models\SiteCronJob;
 use App\Support\CronSchedule;
@@ -23,14 +19,12 @@ use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
-use Filament\Support\Exceptions\Halt;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
 
@@ -40,13 +34,14 @@ use Livewire\Component;
  * text in the server's zone (ruling R7). Every change submits the scheduler
  * flag and the site's whole list as one site.cron job; the rows are stored as
  * submitted, marked applying, and CronOutcomes marks them active or failed.
- * It copies the Workers tab's submit and removal handling.
+ * It shares the Workers tab's submit and removal handling (SubmitsSiteJobs).
  */
 class ScheduleTab extends Component implements HasActions, HasSchemas, HasTable
 {
     use InteractsWithActions;
     use InteractsWithSchemas;
     use InteractsWithTable;
+    use SubmitsSiteJobs;
 
     /** How many upcoming runs a job shows. */
     private const PREVIEW_RUNS = 5;
@@ -134,12 +129,6 @@ class ScheduleTab extends Component implements HasActions, HasSchemas, HasTable
         );
     }
 
-    /** Disabled while the agent is down or the site can't take a job, with why; $blocker adds a reason. */
-    private function guarded(Action $action, ?Closure $blocker = null): Action
-    {
-        return AgentHealth::guard($action, fn (Action $action): ?string => $this->site->jobBlocker() ?? ($blocker === null ? null : $action->evaluate($blocker)));
-    }
-
     /** @return list<\Filament\Schemas\Components\Component> */
     private function jobFields(?SiteCronJob $editing): array
     {
@@ -225,51 +214,8 @@ class ScheduleTab extends Component implements HasActions, HasSchemas, HasTable
         if (! $this->submit($command, __('zimam.schedule.refused'))) {
             return;
         }
-        // Rows keep their ids, so an open row action still finds its job.
-        DB::transaction(function () use ($list): void {
-            $this->site->cronJobs()->whereNotIn('job_id', $list->pluck('job_id'))->update(['status' => SiteCronJob::REMOVING]);
-            foreach ($list as $job) {
-                $this->site->cronJobs()->updateOrCreate(
-                    ['job_id' => $job->job_id],
-                    [...$job->only($job->getFillable()), 'status' => SiteCronJob::APPLYING],
-                );
-            }
-        });
+        $this->storeSubmittedList('cronJobs', 'job_id', $list, SiteCronJob::APPLYING, SiteCronJob::REMOVING);
         Notification::make()->title($title ?? __('zimam.schedule.submitted', ['name' => $this->site->name]))->body(__('zimam.php.submitted_body'))->success()->send();
-    }
-
-    /** Submits a job of the site's; false after saying why it wasn't taken. */
-    private function submit(AgentCommand $command, string $refused): bool
-    {
-        if (! app(AgentHealth::class)->isReachable()) {
-            Notification::make()->title(__('zimam.agent.paused'))->warning()->send();
-
-            return false;
-        }
-        if (($blocker = $this->site->jobBlocker()) !== null) {
-            Notification::make()->title($blocker)->warning()->send();
-
-            return false;
-        }
-        try {
-            app(SubmitAgentCommand::class)->run($command, $this->site);
-        } catch (Halt) {
-            return false;
-        } catch (AgentValidationFailed $e) {
-            $fields = [];
-            foreach ($e->fields() as $field => $message) {
-                $fields[] = "{$field}: {$message}";
-            }
-            Notification::make()->title($refused)->body(implode("\n", $fields))->danger()->send();
-
-            return false;
-        } catch (AgentException $e) {
-            Notification::make()->title($refused)->body($e->getMessage())->danger()->send();
-
-            return false;
-        }
-
-        return true;
     }
 
     /** The zone cron runs in, read once per request; UTC until the agent has said. */

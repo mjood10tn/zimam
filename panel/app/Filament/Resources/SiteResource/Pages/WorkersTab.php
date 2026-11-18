@@ -2,17 +2,15 @@
 
 namespace App\Filament\Resources\SiteResource\Pages;
 
-use App\Actions\SubmitAgentCommand;
 use App\Agent\AgentClient;
-use App\Agent\AgentCommand;
 use App\Agent\AgentHealth;
 use App\Agent\Commands\SiteWorkers;
 use App\Agent\Commands\SiteWorkersRestart;
 use App\Agent\Commands\SiteWorkersStatus;
 use App\Agent\Exceptions\AgentException;
-use App\Agent\Exceptions\AgentValidationFailed;
 use App\Agent\MetricsReading;
 use App\Filament\Actions\ConfirmsPassword;
+use App\Filament\Concerns\SubmitsSiteJobs;
 use App\Models\Site;
 use App\Models\SiteCredential;
 use App\Models\SiteWorker;
@@ -28,14 +26,12 @@ use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
-use Filament\Support\Exceptions\Halt;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
 
@@ -52,6 +48,7 @@ class WorkersTab extends Component implements HasActions, HasSchemas, HasTable
     use InteractsWithActions;
     use InteractsWithSchemas;
     use InteractsWithTable;
+    use SubmitsSiteJobs;
 
     #[Locked]
     public Site $site;
@@ -152,12 +149,6 @@ class WorkersTab extends Component implements HasActions, HasSchemas, HasTable
                 ->modalSubmitActionLabel(__('zimam.workers.restart.all'))
                 ->action(fn () => $this->restart(null)),
         );
-    }
-
-    /** Disabled while the agent is down or the site can't take a job, with why; $blocker adds a reason. */
-    private function guarded(Action $action, ?Closure $blocker = null): Action
-    {
-        return AgentHealth::guard($action, fn (Action $action): ?string => $this->site->jobBlocker() ?? ($blocker === null ? null : $action->evaluate($blocker)));
     }
 
     /**
@@ -329,16 +320,7 @@ class WorkersTab extends Component implements HasActions, HasSchemas, HasTable
         if (! $this->submit($command, __('zimam.workers.refused'))) {
             return;
         }
-        // Rows keep their ids, so an open row action still finds its worker.
-        DB::transaction(function () use ($list): void {
-            $this->site->workers()->whereNotIn('worker_id', $list->pluck('worker_id'))->update(['status' => SiteWorker::REMOVING]);
-            foreach ($list as $worker) {
-                $this->site->workers()->updateOrCreate(
-                    ['worker_id' => $worker->worker_id],
-                    [...$worker->only($worker->getFillable()), 'status' => SiteWorker::APPLYING],
-                );
-            }
-        });
+        $this->storeSubmittedList('workers', 'worker_id', $list, SiteWorker::APPLYING, SiteWorker::REMOVING);
         Notification::make()->title(__('zimam.workers.submitted', ['name' => $this->site->name]))->body(__('zimam.php.submitted_body'))->success()->send();
         if (($warning = $this->memoryWarning()) !== null) {
             Notification::make()->title($warning)->warning()->send();
@@ -354,40 +336,6 @@ class WorkersTab extends Component implements HasActions, HasSchemas, HasTable
                 ->success()
                 ->send();
         }
-    }
-
-    /** Submits a job of the site's; false after saying why it wasn't taken. */
-    private function submit(AgentCommand $command, string $refused): bool
-    {
-        if (! app(AgentHealth::class)->isReachable()) {
-            Notification::make()->title(__('zimam.agent.paused'))->warning()->send();
-
-            return false;
-        }
-        if (($blocker = $this->site->jobBlocker()) !== null) {
-            Notification::make()->title($blocker)->warning()->send();
-
-            return false;
-        }
-        try {
-            app(SubmitAgentCommand::class)->run($command, $this->site);
-        } catch (Halt) {
-            return false;
-        } catch (AgentValidationFailed $e) {
-            $fields = [];
-            foreach ($e->fields() as $field => $message) {
-                $fields[] = "{$field}: {$message}";
-            }
-            Notification::make()->title($refused)->body(implode("\n", $fields))->danger()->send();
-
-            return false;
-        } catch (AgentException $e) {
-            Notification::make()->title($refused)->body($e->getMessage())->danger()->send();
-
-            return false;
-        }
-
-        return true;
     }
 
     /**
