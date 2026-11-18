@@ -461,6 +461,7 @@ return [
         'processes_value' => '{1} 1 process, :memory MiB|[2,*] :count processes, :memory MiB each',
         'status' => [
             'applying' => 'Applying…',
+            'removing' => 'Removing…',
             'failed' => 'Not applied',
         ],
         'process' => [

@@ -26,6 +26,9 @@ class SiteWorker extends Model
     /** Saved and sent; the outcome marks it active or failed. */
     public const APPLYING = 'applying';
 
+    /** Left out of the submitted list: the row goes once the job succeeds. */
+    public const REMOVING = 'removing';
+
     public const ACTIVE = 'active';
 
     public const FAILED = 'failed';
