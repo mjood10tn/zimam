@@ -17,15 +17,15 @@ import (
 )
 
 const (
-	aptGet          = "/usr/bin/apt-get"
+	AptGet          = "/usr/bin/apt-get"
 	maxKeyringBytes = 1 << 20
 )
 
-// aptLockWait makes apt-get wait for a dpkg lock that another job or
+// AptLockWait makes apt-get wait for a dpkg lock that another job or
 // unattended-upgrades holds, instead of failing at once.
-var aptLockWait = []string{"-o", "DPkg::Lock::Timeout=300"}
+var AptLockWait = []string{"-o", "DPkg::Lock::Timeout=300"}
 
-var aptEnv = []string{"DEBIAN_FRONTEND=noninteractive"}
+var AptEnv = []string{"DEBIAN_FRONTEND=noninteractive"}
 
 // EnsureRepo sets up the sury repository (§8.2). It downloads
 // <php_repo_url>apt.gpg and checks its fingerprint before writing anything,
@@ -48,7 +48,7 @@ func EnsureRepo(ctx context.Context, d sysexec.Deps) error {
 	}
 	keyURL := repo.JoinPath("apt.gpg").String()
 	d.Logf("Downloading %s", keyURL)
-	raw, err := download(ctx, d.HTTPClient(), keyURL)
+	raw, err := Download(ctx, d.HTTPClient(), keyURL)
 	if err != nil {
 		return err
 	}
@@ -56,7 +56,7 @@ func EnsureRepo(ctx context.Context, d sysexec.Deps) error {
 	if err != nil {
 		return fmt.Errorf("%s: %w", keyURL, err)
 	}
-	keyring, err := binaryKeyring(raw)
+	keyring, err := BinaryKeyring(raw)
 	if err != nil {
 		return fmt.Errorf("%s: %w", keyURL, err)
 	}
@@ -84,12 +84,12 @@ func EnsureRepo(ctx context.Context, d sysexec.Deps) error {
 	}
 	d.Logf("Writing the sury keyring, source and pin, then running apt-get update")
 	return configtx.Apply(ctx, changes, func(ctx context.Context) error {
-		return configtx.RunTest(ctx, d.Run, sysexec.Cmd{Path: aptGet, Args: append(slices.Clone(aptLockWait), "update"), Env: aptEnv})
+		return configtx.RunTest(ctx, d.Run, sysexec.Cmd{Path: AptGet, Args: append(slices.Clone(AptLockWait), "update"), Env: AptEnv})
 	})
 }
 
-// download fetches a small file, such as a keyring, over HTTPS.
-func download(ctx context.Context, c *http.Client, u string) ([]byte, error) {
+// Download fetches a small file, such as a keyring, over HTTPS.
+func Download(ctx context.Context, c *http.Client, u string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
@@ -122,10 +122,10 @@ func InstallPackages(ctx context.Context, d sysexec.Deps, pkgs ...string) error 
 		return nil
 	}
 	d.Logf("Installing %s", strings.Join(pkgs, ", "))
-	if _, err := d.Run.Run(ctx, sysexec.Cmd{Path: aptGet, Args: append(slices.Clone(aptLockWait), "update"), Env: aptEnv}); err != nil {
+	if _, err := d.Run.Run(ctx, sysexec.Cmd{Path: AptGet, Args: append(slices.Clone(AptLockWait), "update"), Env: AptEnv}); err != nil {
 		return err
 	}
-	args := append(slices.Clone(aptLockWait), "-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold",
+	args := append(slices.Clone(AptLockWait), "-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold",
 		"install", "-y", "--no-install-recommends")
-	return aptGetRepairing(ctx, d, append(args, pkgs...))
+	return AptGetRepairing(ctx, d, append(args, pkgs...))
 }

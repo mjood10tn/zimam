@@ -26,9 +26,9 @@ func Install(ctx context.Context, d sysexec.Deps, v contract.PHPVersion) error {
 	d.Logf("Installing the PHP %s packages", v)
 	// Never stop at a dpkg question about a changed config file: there is
 	// nobody to answer it.
-	args := append(slices.Clone(aptLockWait), "-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold",
+	args := append(slices.Clone(AptLockWait), "-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold",
 		"install", "-y", "--no-install-recommends")
-	if err := aptGetRepairing(ctx, d, append(args, Packages(v)...)); err != nil {
+	if err := AptGetRepairing(ctx, d, append(args, Packages(v)...)); err != nil {
 		return err
 	}
 	ini, err := templates.Render("php/99-zimam.ini", nil)
