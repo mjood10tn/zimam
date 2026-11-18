@@ -283,7 +283,10 @@ worker)
 	case $what in
 	start)
 		rm -f "$dir/worker-$site.pid"
-		in_c bash -c "rm -f /var/tmp/zimam-e2e-worker-$site.log; cd /home/$user/site/current && setsid nohup runuser -u $user -- $php artisan queue:work >/var/tmp/zimam-e2e-worker-$site.log 2>&1 </dev/null & echo \$! >/var/tmp/zimam-e2e-worker-$site.pid"
+		# setsid -f forks the worker and returns: a background `&` would leave
+		# a subshell holding the command's stdout, and over SSH (a VPS run)
+		# the command would then never end. The pid comes from pgrep below.
+		in_c bash -c "rm -f /var/tmp/zimam-e2e-worker-$site.log; cd /home/$user/site/current && setsid -f runuser -u $user -- $php artisan queue:work >/var/tmp/zimam-e2e-worker-$site.log 2>&1 </dev/null"
 		sleep 2
 		in_c bash -c "pgrep -u $user -f 'artisan queue:work' >/var/tmp/zimam-e2e-worker-$site.pid" || fail "the worker of $site didn't start: $(in_c cat "/var/tmp/zimam-e2e-worker-$site.log")"
 		in_c cat "/var/tmp/zimam-e2e-worker-$site.pid" >"$dir/worker-$site.pid"
