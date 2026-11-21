@@ -231,6 +231,9 @@ func TestStaleScriptsRemoved(t *testing.T) {
 	if err := WriteCronScripts(ctx, h, acct, state(""), all); err != nil {
 		t.Fatal(err)
 	}
+	if err := PruneCronScripts(ctx, h, acct, all); err != nil {
+		t.Fatal(err)
+	}
 	if got := h.names(t, ".zimam/cron"); !slices.Equal(got, []string{"a.sh", "b.sh", "scheduler.sh"}) {
 		t.Errorf("cron after all: %v (a disabled job has no script)", got)
 	}
@@ -240,6 +243,9 @@ func TestStaleScriptsRemoved(t *testing.T) {
 	}
 	some := contract.SiteCronParams{Name: "shop", Jobs: contract.CronJobList{job("a", true)}}
 	if err := WriteCronScripts(ctx, h, acct, state(""), some); err != nil {
+		t.Fatal(err)
+	}
+	if err := PruneCronScripts(ctx, h, acct, some); err != nil {
 		t.Fatal(err)
 	}
 	if got := h.names(t, ".zimam/cron"); !slices.Equal(got, []string{"a.sh", "b.lock"}) {

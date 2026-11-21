@@ -3,11 +3,13 @@ package siteprocs
 import (
 	"context"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"zimam/agent/contract"
+	"zimam/agent/internal/helper"
 )
 
 func (f *fixture) cronFile() string { return f.d.Paths.CronDFile("shop") }
@@ -192,5 +194,42 @@ func TestCheckCronFileRefuses(t *testing.T) {
 		if err := checkCronFile("shop", []byte(content), ids); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// removeSpy calls before ahead of every RemoveTree.
+type removeSpy struct {
+	*homeHelper
+	before func(name string)
+}
+
+func (r removeSpy) RemoveTree(ctx context.Context, a helper.Account, name string) error {
+	r.before(name)
+	return r.homeHelper.RemoveTree(ctx, a, name)
+}
+
+// A removed job's script goes only once the cron file no longer names it, so
+// cron never runs a line whose script was deleted.
+func TestRemovedJobScriptPrunedAfterCronFile(t *testing.T) {
+	f := newFixture(t)
+	if err := f.cron(t, contract.SiteCronParams{Jobs: contract.CronJobList{job("a", "* * * * *", true), job("b", "* * * * *", true)}}); err != nil {
+		t.Fatal(err)
+	}
+	pruned := false
+	h := removeSpy{f.h, func(name string) {
+		if path.Base(name) != "b.sh" {
+			return
+		}
+		pruned = true
+		if strings.Contains(f.cronContent(t), "b.sh") {
+			t.Error("b.sh was deleted while the cron file still ran it")
+		}
+	}}
+	p := contract.SiteCronParams{Name: "shop", Jobs: contract.CronJobList{job("a", "* * * * *", true)}}
+	if _, err := ReconcileCron(context.Background(), f.d, h, acct, f.st, p); err != nil {
+		t.Fatal(err)
+	}
+	if !pruned {
+		t.Error("b.sh wasn't removed")
 	}
 }
