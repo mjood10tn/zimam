@@ -217,7 +217,7 @@ done
 in_c systemctl is-enabled --quiet "zimam-site-$site.target" || die "FAIL zimam-site-$site.target isn't enabled"
 script_mode=$(in_c stat -c '%U %a' "$home/.zimam/workers/$worker.sh")
 [[ $script_mode == "$user 700" ]] || die "FAIL the worker's script is $script_mode"
-in_c grep -qx "exec 'php' 'artisan' 'queue:work' 'default' '--memory=512'" "$home/.zimam/workers/$worker.sh" ||
+in_c grep -qx "exec 'php' 'artisan' 'queue:work' 'default' '--memory=460'" "$home/.zimam/workers/$worker.sh" ||
 	die "FAIL the worker's script runs: $(in_c tail -n 1 "$home/.zimam/workers/$worker.sh")"
 [[ $(state_workers) == 1 ]] || die "FAIL the site's state lists $(state_workers) workers"
 pass "worker $worker: 2 processes active as $user ($(pids)), its unit and target in $units, its script $user 0700 runs queue:work"

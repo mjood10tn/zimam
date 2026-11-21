@@ -174,5 +174,7 @@ func workerScript(w contract.WorkerSpec) templates.WorkerScript {
 			argv = append(argv, "--"+o.flag+"="+strconv.Itoa(*o.v))
 		}
 	}
-	return templates.WorkerScript{Argv: append(argv, "--memory="+strconv.Itoa(int(w.Memory())))}
+	// 90% of the unit's MemoryMax, so queue:work stops itself between jobs
+	// before the OOM killer can stop it in the middle of one.
+	return templates.WorkerScript{Argv: append(argv, "--memory="+strconv.Itoa(int(w.Memory())*9/10))}
 }
