@@ -55,7 +55,7 @@ func renderUnit(site contract.SiteName, w contract.WorkerSpec) ([]byte, error) {
 //  7. record the workers, without their commands, in the state (R04-D16).
 //
 // Nothing here trusts the state or this run's own diff alone: removals and
-// surplus come from disk and the  bound, the reload always runs, and a
+// surplus come from disk and the @10 bound, the reload always runs, and a
 // restart is decided by file times against each process's start. So a run
 // that failed half way is finished by running it again.
 func Reconcile(ctx context.Context, d sysexec.Deps, h Helper, a helper.Account, st sites.State, workers []contract.WorkerSpec) (sites.State, error) {
