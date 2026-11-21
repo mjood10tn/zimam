@@ -89,17 +89,31 @@ func WriteWorkerScripts(ctx context.Context, h Helper, a helper.Account, st site
 	for _, w := range workers {
 		scripts[string(w.ID)] = workerScript(w)
 	}
-	return writeScripts(ctx, h, a, workersDir, "site/worker.sh", scripts)
+	if err := writeScripts(ctx, h, a, workersDir, "site/worker.sh", scripts); err != nil {
+		return err
+	}
+	return pruneScripts(ctx, h, a, workersDir, scripts)
 }
 
 // WriteCronScripts writes the script of every enabled cron job, and the
-// scheduler's when it's on, into ~/.zimam/cron (0700), and deletes the other
-// scripts there (site.cron, R04-D5). A .lock file stays: it holds nothing, and
-// a job that comes back reuses it.
+// scheduler's when it's on, into ~/.zimam/cron (0700) (site.cron, R04-D5).
+// PruneCronScripts deletes the others once the cron file no longer runs them.
 func WriteCronScripts(ctx context.Context, h Helper, a helper.Account, st sites.State, cron contract.SiteCronParams) error {
 	if err := WriteSiteEnv(ctx, h, a, st); err != nil {
 		return err
 	}
+	return writeScripts(ctx, h, a, cronDir, "site/cron.sh", cronScripts(cron))
+}
+
+// PruneCronScripts deletes every script in ~/.zimam/cron but those
+// WriteCronScripts writes for cron. A .lock file stays: it holds nothing, and
+// a job that comes back reuses it.
+func PruneCronScripts(ctx context.Context, h Helper, a helper.Account, cron contract.SiteCronParams) error {
+	return pruneScripts(ctx, h, a, cronDir, cronScripts(cron))
+}
+
+// cronScripts is the data of every script cron runs, by id.
+func cronScripts(cron contract.SiteCronParams) map[string]templates.CronScript {
 	scripts := map[string]templates.CronScript{}
 	for _, j := range cron.Jobs {
 		if j.Enabled {
@@ -109,12 +123,11 @@ func WriteCronScripts(ctx context.Context, h Helper, a helper.Account, st sites.
 	if cron.Scheduler {
 		scripts[SchedulerID] = templates.CronScript{ID: SchedulerID, Command: "php artisan schedule:run"}
 	}
-	return writeScripts(ctx, h, a, cronDir, "site/cron.sh", scripts)
+	return scripts
 }
 
-// writeScripts makes dir (0700), writes each script as <id>.sh (0700) and
-// removes every other .sh file in dir; the helper's remove deletes a link
-// itself, never its target. A script already there with the same content is
+// writeScripts makes dir (0700) and writes each script as <id>.sh (0700),
+// leaving the other files there. A script already there with the same content is
 // left alone, its modification time with it. The helper reads it back
 // as the site user, so root still opens nothing in the home, and a read that
 // fails (a link, say) only means the script is written again.
@@ -135,6 +148,12 @@ func writeScripts[D any](ctx context.Context, h Helper, a helper.Account, dir, t
 			return err
 		}
 	}
+	return nil
+}
+
+// pruneScripts removes every .sh file in dir but those of scripts; the
+// helper's remove deletes a link itself, never its target.
+func pruneScripts[D any](ctx context.Context, h Helper, a helper.Account, dir string, scripts map[string]D) error {
 	l, err := h.List(ctx, a, dir)
 	if err != nil {
 		return err

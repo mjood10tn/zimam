@@ -41,9 +41,10 @@ var renderCron = func(site contract.SiteName, scheduler bool, jobs []contract.Cr
 }
 
 // ReconcileCron is site.cron (R04-D5), under the site's lock. It writes the
-// scripts first, then /etc/cron.d/zimam-<site>, so the new scripts exist
-// before the file names them (stale ones are pruned first); the file goes through configtx and an in-agent check
-// (cron has no test of its own), and a file that fails it is rolled back.
+// new scripts, then /etc/cron.d/zimam-<site>, then deletes the stale
+// scripts, so cron never runs a line whose script is missing. The file goes
+// through configtx and an in-agent check (cron has no test of its own), and
+// a file that fails it is rolled back, its stale scripts kept for it.
 // With nothing to run, the file is removed first and the scripts after. Cron
 // reads a new or changed file within a minute (spike), so nothing is
 // reloaded. The jobs, without their commands, are then recorded in the state
@@ -71,6 +72,9 @@ func ReconcileCron(ctx context.Context, d sysexec.Deps, h Helper, a helper.Accou
 			return st, err
 		}
 		if err := WriteCronScripts(ctx, h, a, st, p); err != nil {
+			return st, err
+		}
+		if err := PruneCronScripts(ctx, h, a, p); err != nil {
 			return st, err
 		}
 		return recordCron(d, st, p)
@@ -107,6 +111,9 @@ func ReconcileCron(ctx context.Context, d sysexec.Deps, h Helper, a helper.Accou
 		if err != nil {
 			return st, err
 		}
+	}
+	if err := PruneCronScripts(ctx, h, a, p); err != nil {
+		return st, err
 	}
 	return recordCron(d, st, p)
 }
