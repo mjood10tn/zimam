@@ -138,13 +138,13 @@ func ptr(n int) *int { return &n }
 func TestQueueWorkArgv(t *testing.T) {
 	full := contract.WorkerSpec{ID: "q", Kind: contract.WorkerLaravelQueue, Processes: 2, MemoryMB: 256, Connection: "redis",
 		Queues: []contract.QueueName{"high", "default"}, Tries: ptr(3), Timeout: ptr(0), Sleep: ptr(3), MaxTime: ptr(3600), Backoff: ptr(5)}
-	want := []string{"php", "artisan", "queue:work", "redis", "--queue=high,default", "--tries=3", "--timeout=0", "--sleep=3", "--max-time=3600", "--backoff=5", "--memory=256"}
+	want := []string{"php", "artisan", "queue:work", "redis", "--queue=high,default", "--tries=3", "--timeout=0", "--sleep=3", "--max-time=3600", "--backoff=5", "--memory=230"}
 	if got := workerScript(full).Argv; !slices.Equal(got, want) {
 		t.Errorf("argv = %q, want %q", got, want)
 	}
 	// Nothing set: only the defaults the agent applies.
 	bare := contract.WorkerSpec{ID: "q", Kind: contract.WorkerLaravelQueue, Processes: 1}
-	want = []string{"php", "artisan", "queue:work", "default", "--memory=512"}
+	want = []string{"php", "artisan", "queue:work", "default", "--memory=460"}
 	if got := workerScript(bare).Argv; !slices.Equal(got, want) {
 		t.Errorf("argv = %q, want %q", got, want)
 	}
@@ -186,7 +186,7 @@ func TestScriptsWrittenThroughHelperAsSiteUser(t *testing.T) {
 	if m := h.mode(t, ".zimam/site.env.sh"); m != 0o600 {
 		t.Errorf("site.env.sh mode %o, want 600", m)
 	}
-	if got := h.read(t, ".zimam/workers/queue.sh"); !strings.Contains(got, "exec 'php' 'artisan' 'queue:work' 'redis' '--queue=high' '--memory=512'\n") {
+	if got := h.read(t, ".zimam/workers/queue.sh"); !strings.Contains(got, "exec 'php' 'artisan' 'queue:work' 'redis' '--queue=high' '--memory=460'\n") {
 		t.Errorf("queue.sh:\n%s", got)
 	}
 	// The owner's command is a line of its own, with no exec added.
