@@ -234,7 +234,11 @@ final class ScheduleTabTest extends DatabasesTestCase
         $this->tab($site)->assertSee('UTC');
     }
 
-    /** A server on a legacy zone alias keeps its zone, not a UTC preview. */
+    /**
+     * A server on a legacy zone alias keeps its zone, not a UTC preview, when
+     * this PHP knows the alias; PHP built on a system tzdata without
+     * tzdata-legacy may not, and then the preview falls back to UTC.
+     */
     public function testLegacyZoneAliasKept(): void
     {
         $site = $this->site();
@@ -243,7 +247,28 @@ final class ScheduleTabTest extends DatabasesTestCase
         foreach (['US/Pacific', 'Asia/Calcutta', 'Etc/UTC'] as $zone) {
             $this->agent->changeServer(fn (array $s): array => [...$s, 'timezone' => $zone]);
             Cache::flush();
-            $this->tab($site)->assertSee($zone);
+            $this->tab($site)->assertSee(self::knownZone($zone) ? $zone : 'UTC');
+        }
+    }
+
+    public function testUnknownZoneFallsBackToUtc(): void
+    {
+        $site = $this->site();
+        $this->job($site, 'report');
+        $this->agent->changeServer(fn (array $s): array => [...$s, 'timezone' => 'Mars/Olympus_Mons']);
+        Cache::flush();
+
+        $this->tab($site)->assertSee('UTC')->assertDontSee('Mars/Olympus_Mons');
+    }
+
+    private static function knownZone(string $zone): bool
+    {
+        try {
+            new \DateTimeZone($zone);
+
+            return true;
+        } catch (\Exception) {
+            return false;
         }
     }
 
