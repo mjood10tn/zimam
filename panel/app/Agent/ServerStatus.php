@@ -115,8 +115,21 @@ final class ServerStatus
     public function timezone(): string
     {
         $zone = $this->data['timezone'] ?? 'UTC';
+        if (! is_string($zone) || $zone === '') {
+            return 'UTC';
+        }
 
-        return is_string($zone) && in_array($zone, DateTimeZone::listIdentifiers(DateTimeZone::ALL_WITH_BC), true) ? $zone : 'UTC';
+        // Ask PHP's own zone database rather than listIdentifiers(): builds that
+        // use the system tzdata (Ubuntu splits the old aliases into tzdata-legacy)
+        // list fewer names than they accept, and an alias such as US/Pacific must
+        // keep its zone wherever this PHP knows it.
+        try {
+            new DateTimeZone($zone);
+        } catch (\Exception) {
+            return 'UTC';
+        }
+
+        return $zone;
     }
 
     /** When the next answer is due, for the bulletin's "Next" time. */
