@@ -1,0 +1,37 @@
+# Written by the Zimam agent from its own state (R05-D2). Do not edit: every
+# backup.destination job rewrites it. It holds every destination's secrets.
+{{- range .Remotes}}
+
+[{{safe .ID}}-raw]
+{{- if .S3}}
+type = s3
+provider = Other
+env_auth = false
+access_key_id = {{rcloneValue .S3.AccessKeyID}}
+secret_access_key = {{rcloneValue .S3.SecretAccessKey}}
+endpoint = {{safe .S3.Endpoint}}
+region = {{safe .S3.Region}}
+no_check_bucket = true
+{{- else}}
+type = sftp
+host = {{safe .SFTP.Host}}
+port = {{.SFTP.Port}}
+user = {{safe .SFTP.User}}
+key_file = {{safe .KeyFile}}
+known_hosts_file = {{safe .KnownHostsFile}}
+{{- if .HostKeyAlgorithms}}
+host_key_algorithms = {{hostKeyAlgorithms .HostKeyAlgorithms}}
+{{- end}}
+shell_type = none
+md5sum_command = none
+sha1sum_command = none
+{{- end}}
+
+[{{safe .ID}}]
+type = crypt
+remote = {{safe .ID}}-raw:{{if .Target}}{{safe .Target}}{{end}}
+filename_encryption = standard
+directory_name_encryption = true
+password = {{rcloneValue .Password}}
+password2 = {{rcloneValue .Password2}}
+{{- end}}

@@ -138,6 +138,28 @@ if [ -f "$src/etc/mysql/mysql.conf.d/zz-zimam.cnf" ]; then
 	fi
 fi
 
+# rclone.conf (R05-D2): rclone parses it and finds every remote, and each
+# crypt key is in rclone's obscured form. Nothing connects: the container has
+# no network.
+if [ -f "$src/etc/zimam/backup/rclone.conf" ]; then
+	echo "== rclone config show"
+	conf=/etc/zimam/backup/rclone.conf
+	out=$(rclone --config "$conf" config show 2>&1) || {
+		printf '%s\n' "$out"
+		fail "rclone config show failed"
+	}
+	if grep -E 'ERROR|NOTICE|CRITICAL' <<<"$out"; then
+		fail "rclone reported a problem with rclone.conf"
+	fi
+	want=$(grep -cE '^\[[^]]+\]$' "$conf")
+	got=$(rclone --config "$conf" listremotes | wc -l)
+	[ "$got" -eq "$want" ] || fail "rclone lists $got remotes, the file has $want sections"
+	for v in $(sed -n 's/^password2\{0,1\} = //p' "$conf"); do
+		rclone reveal "$v" >/dev/null 2>&1 || fail "a crypt key isn't in rclone's obscured form"
+	done
+	echo "rclone reads all $got remotes"
+fi
+
 # Valkey has no option that only checks a config, so its files are tested the
 # way the agent tests them: a server started from them as user valkey, with
 # no port, which exits at once on a bad file. It must also refuse an

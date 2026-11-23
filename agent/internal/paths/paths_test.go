@@ -135,6 +135,13 @@ var production = map[string]string{
 	"ComposerLock":          "/run/zimam/locks/composer.lock",
 	"ComposerDir":           "/usr/local/lib/zimam/composer",
 	"ComposerPhar":          "/usr/local/lib/zimam/composer/composer-site:shop.phar", // the version argument is "site:shop" too
+	"RcloneDir":             "/usr/local/lib/zimam/rclone",
+	"RcloneBinary":          "/usr/local/lib/zimam/rclone/rclone-site:shop",
+	"RcloneLock":            "/run/zimam/locks/rclone.lock",
+	"BackupConfigDir":       "/etc/zimam/backup",
+	"RcloneConf":            "/etc/zimam/backup/rclone.conf",
+	"BackupSFTPKey":         "/etc/zimam/backup/offsite.key",
+	"BackupKnownHosts":      "/etc/zimam/backup/offsite.known_hosts",
 	"GitBinary":             "/usr/bin/git",
 	"UnzipBinary":           "/usr/bin/unzip",
 	"FPMReloadDir":          "/run/zimam/fpm-reload",
@@ -148,10 +155,11 @@ const testJob = "01JBX7Q2M5YQ8T3N6V0R4K9W1E"
 func callAll(t *testing.T, p Paths) map[string]string {
 	t.Helper()
 	args := map[reflect.Type]reflect.Value{
-		reflect.TypeFor[contract.SiteName]():   reflect.ValueOf(contract.SiteName("shop")),
-		reflect.TypeFor[contract.PHPVersion](): reflect.ValueOf(contract.PHPVersion("8.4")),
-		reflect.TypeFor[contract.JobID]():      reflect.ValueOf(contract.JobID(testJob)),
-		reflect.TypeFor[string]():              reflect.ValueOf("site:shop"),
+		reflect.TypeFor[contract.SiteName]():      reflect.ValueOf(contract.SiteName("shop")),
+		reflect.TypeFor[contract.PHPVersion]():    reflect.ValueOf(contract.PHPVersion("8.4")),
+		reflect.TypeFor[contract.JobID]():         reflect.ValueOf(contract.JobID(testJob)),
+		reflect.TypeFor[contract.DestinationID](): reflect.ValueOf(contract.DestinationID("offsite")),
+		reflect.TypeFor[string]():                 reflect.ValueOf("site:shop"),
 	}
 	v := reflect.ValueOf(p)
 	got := map[string]string{}
