@@ -2,7 +2,7 @@
 # Validation probes (design §14.4), sent as zimam for milestone 2's
 # commands (bad site names, domains and PHP versions), milestone 3's
 # site.security, every field of v0.2.0's six commands, and v0.4.0's worker,
-# cron and Node.js commands: each answers validation_failed before anything
+# cron and Node.js commands, and v0.5.0's backup commands: each answers validation_failed before anything
 # runs, and leaves exactly one error:validation_failed audit entry.
 # run-all.sh runs them between its two file snapshots.
 # shellcheck source=lib.sh
@@ -227,4 +227,28 @@ for m in '"22"' '"26; rm -rf /"' '"../26"'; do
 	send_field "node.install of the major $m" node.install "{\"major\":$m}" major
 done
 send_field "node.install of the major 26, a number" node.install '{"major":26}' params
+# v0.5.0's backup commands (R05-D2, R05-D6): a destination's endpoint must
+# be https:// and a host name alone, its prefix and path plain segments; a
+# backup id is a UTC time, never a path.
+k43=$(printf 'k%.0s' {1..43})
+s43=$(printf 's%.0s' {1..43})
+s3() {
+	echo "{\"id\":\"vprobe\",\"type\":\"s3\",\"s3\":{\"endpoint\":\"$1\",\"region\":\"us-east-1\",\"bucket\":\"b-1\",\"prefix\":\"$2\",\"access_key_id\":\"a\",\"secret_access_key\":\"s\"},\"encryption_password\":\"$k43\",\"encryption_salt\":\"$s43\"}"
+}
+for endpoint in 'http://s3.example.com' 'https://s3.example.com/path' 'https://user@s3.example.com' 'https://169.254.169.254' 'https://S3.example.com'; do
+	send_field "backup.destination with the endpoint $endpoint" backup.destination "$(s3 "$endpoint" one)" s3.endpoint
+done
+for prefix in '..' 'a/../b' '/abs' 'a//b' 'a/b/' 'A'; do
+	send_field "backup.destination with the prefix $prefix" backup.destination "$(s3 https://s3.example.com "$prefix")" s3.prefix
+done
+send_field "backup.destination over SFTP into ../x" backup.destination \
+	"{\"id\":\"vprobe\",\"type\":\"sftp\",\"sftp\":{\"host\":\"backup.example.com\",\"port\":22,\"user\":\"zimam\",\"path\":\"../x\"},\"encryption_password\":\"$k43\",\"encryption_salt\":\"$s43\"}" sftp.path
+send_field "backup.destination with a key in MD5 form" backup.destination \
+	"{\"id\":\"vprobe\",\"type\":\"sftp\",\"sftp\":{\"host\":\"backup.example.com\",\"port\":22,\"user\":\"zimam\",\"host_key_fingerprint\":\"MD5:00:11\"},\"encryption_password\":\"$k43\",\"encryption_salt\":\"$s43\"}" sftp.host_key_fingerprint
+for backup in '../../x' '20261123T020000Z/../../x' '20261123T020000' ''; do
+	send_field "backup.restore of the backup '$backup'" backup.restore "{\"plan\":\"nightly\",\"backup\":\"$backup\",\"part\":\"files-php84\",\"site\":\"php84\"}" backup
+done
+send_field "backup.restore of the part files-../php84" backup.restore '{"plan":"nightly","backup":"20261123T020000Z","part":"files-../php84","site":"php84"}' part
+send_field "backup.plan with the schedule daily 25:00" backup.plan '{"id":"vprobe","destination":"s3","sites":["php84"],"schedule":"daily 25:00","retention":{"keep_last":1}}' schedule
+send_field "backup.run of the plan ../x" backup.run '{"plan":"../x"}' plan
 exit "$failed"

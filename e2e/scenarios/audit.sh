@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Done-when 11 (design §2, §5.8): the audit re-check. First every one of
-# the 37 commands (§5.3's 18, v0.2.0's six, v0.3.0's seven and v0.4.0's six)
+# the 47 commands (§5.3's 18, v0.2.0's six, v0.3.0's seven, v0.4.0's six and v0.5.0's ten)
 # runs at least once: the scenarios and probes before this sent all but
 # php.uninstall, which runs here on PHP 8.3 (installed for it and removed
-# again), and the ten routine reads run here once each, as zimam, and must add no entry, while
+# again), and backup.destination.delete of v05-backups.sh's SFTP
+# destination (on a VPS, where the backup scenario doesn't run, the ten
+# backup commands aren't asked for), and the ten routine reads run here once each, as zimam, and must add no entry, while
 # site.env.read, which returns a secret, adds exactly one with its result
 # redacted (R02-D10). Then certbot renews every certificate
 # against Pebble, so `hook cert-deployed` runs once per lineage. Then the
@@ -28,6 +30,11 @@ job() {
 	echo "$id"
 }
 job php.install '{"version":"8.3"}' >/dev/null
+# v0.5.0: the SFTP destination v05-backups.sh left goes here, after the
+# probes' snapshots, so backup.destination.delete has run too (LXD only).
+if [[ $E2E_TARGET == lxd ]]; then
+	job backup.destination.delete '{"id":"sftp"}' >/dev/null
+fi
 uninstall=$(job php.uninstall '{"version":"8.3"}')
 installed=$(request system.status '{}' | python3 -I -c 'import json, sys; print(" ".join(p["version"] for p in json.load(sys.stdin)["data"]["php"]["installed"]))')
 if [[ " $installed " != *" 8.3 "* ]]; then
@@ -134,7 +141,7 @@ fi
 
 # Read through cat, so this user owns the copy: lxc runs as root here.
 in_c cat /var/log/zimam/audit.log >"$E2E_WORK/audit.log"
-python3 -I - "$E2E_WORK/audit.log" "$marker" "$E2E_WORK/v03" <<'PY' || failed=1
+python3 -I - "$E2E_WORK/audit.log" "$marker" "$E2E_WORK/v03" "$E2E_TARGET" <<'PY' || failed=1
 import json, os, sys
 
 raw = open(sys.argv[1]).read()
@@ -152,7 +159,7 @@ def count(**want):
     return sum(all(e.get(k) == v for k, v in want.items()) for e in entries)
 
 
-# The 37 commands, §5.3's 18, v0.2.0's six, v0.3.0's seven and v0.4.0's six: the jobs are
+# The 47 commands, §5.3's 18, v0.2.0's six, v0.3.0's seven, v0.4.0's six and v0.5.0's ten: the jobs are
 # audited at submission and outcome, job.cancel when it acts, the routine
 # reads never, unless refused, and site.env.read, which returns a secret,
 # every time.
@@ -160,11 +167,17 @@ jobs = ["php.install", "php.uninstall", "php.default", "site.provision", "site.p
         "site.destroy", "cert.issue", "security.check", "logs.policy",
         "site.repo", "site.deploy", "site.rollback", "site.env.write",
         "mysql.install", "valkey.install", "db.create", "db.drop", "db.user", "cache.user",
-        "site.workers", "site.workers.restart", "site.cron", "node.install", "node.uninstall"]
+        "site.workers", "site.workers.restart", "site.cron", "node.install", "node.uninstall",
+        "backup.destination", "backup.destination.test", "backup.plan", "backup.plan.delete", "backup.run",
+        "backup.restore", "backup.destination.delete"]
 reads = ["agent.version", "system.status", "system.metrics", "job.status", "job.follow", "logs.list", "logs.read",
-         "site.releases", "db.list", "site.workers.status"]
-audited_reads = ["site.env.read"]
-assert len(jobs) + 1 + len(reads) + len(audited_reads) == 37
+         "site.releases", "db.list", "site.workers.status", "backup.list", "backup.runs"]
+audited_reads = ["site.env.read", "backup.destination.keys"]
+assert len(jobs) + 1 + len(reads) + len(audited_reads) == 47
+backups = sys.argv[4] == "lxd"
+if not backups:
+    jobs = [c for c in jobs if not c.startswith("backup.")]
+    audited_reads = [c for c in audited_reads if not c.startswith("backup.")]
 for command in jobs:
     for outcome in ("accepted", "ok"):
         n = count(command=command, outcome=outcome)
@@ -246,6 +259,19 @@ idle = [e for e in runs if e["actor"] != "cli:root" or not any(
                                              "deleted_archives", "pruned_jobs", "reloaded_php",
                                              "rotation_timeouts"))]
 check(runs and not idle, f"maintenance audited as cli:root only when it changed something ({len(runs)} runs, {len(idle)} not)")
+if backups:
+    n = count(actor="cli:root", command="backup run", outcome="ok")
+    check(n >= 1, f"a plan's timer run audited as cli:root ({n})")
+# v0.5.0's secrets: the destination's credentials and keys, in params and
+# in backup.destination.keys' result, show as "[redacted]".
+backup_secrets = [v for e in entries if e["command"] in ("backup.destination", "backup.destination.keys")
+                  for part in ("params", "result") for k, v in ((e.get(part) or {}) | ((e.get(part) or {}).get("s3") or {})).items()
+                  if k in ("encryption_password", "encryption_salt", "access_key_id", "secret_access_key")]
+check(len(backup_secrets) >= (6 if backups else 0) and all(v == "[redacted]" for v in backup_secrets),
+      f"every backup credential and key shows as \"[redacted]\" ({len(backup_secrets)})")
+if backups:
+    n = count(command="backup.destination.keys", outcome="ok")
+    check(n >= 1, f"backup.destination.keys audited when it answered ({n})")
 n = sum(bool((e.get("params") or {}).get("deleted_archives")) for e in runs)
 check(n >= 1, f"maintenance's deletion of the backdated archive audited ({n})")
 
