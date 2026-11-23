@@ -76,6 +76,11 @@ var goldenCases = map[string][]goldenFile{
 	"panel-https":   panel(true),
 	// Zimam's own units (§7.1, §11.3).
 	"units": units(),
+	// rclone.conf (R05-D2): one S3 destination, one SFTP destination with a
+	// pinned key, and both together with an SFTP one not yet tested.
+	"rclone-s3":   rcloneConf(func() []RcloneRemote { return []RcloneRemote{goldenS3Remote()} }),
+	"rclone-sftp": rcloneConf(func() []RcloneRemote { return []RcloneRemote{goldenSFTPRemote("ssh-ed25519")} }),
+	"rclone-two":  rcloneConf(func() []RcloneRemote { return []RcloneRemote{goldenSFTPRemote(""), goldenS3Remote()} }),
 	// A site's worker units (R04-D2) with their target: a laravel-queue
 	// worker with a timeout, and a custom one on the defaults. A unit is a
 	// template whatever the worker's processes (1 to 10 are its instances
@@ -192,6 +197,33 @@ func panel(https bool) []goldenFile {
 		files = append(files, goldenFile{path: "/etc/nginx/zimam/tls.conf", tmpl: "nginx/tls.conf"})
 	}
 	return files
+}
+
+// Obscured with rclone's algorithm and fixed IVs (rclone reveal gives a
+// 43-character password and salt).
+const (
+	goldenPassword  = "AAECAwQFBgcICQoLDA0OD2bwC0FivG3pv1h4ESmQrlFDlkErv-2ZtNBJi_8WF1laVPB4fQ0SJn3PlGE"
+	goldenPassword2 = "EBESExQVFhcYGRobHB0eHyT-9Ct3fOadi0vAAWiuK4y_bYY8MgzuizUdJOEG7fjMNzkniqzt2HMybvY"
+)
+
+func goldenS3Remote() RcloneRemote {
+	return RcloneRemote{ID: "offsite", Target: "zimam-backups/prod",
+		S3: &contract.S3Settings{Endpoint: "https://s3.eu-central-1.amazonaws.com", Region: "eu-central-1", Bucket: "zimam-backups", Prefix: "prod",
+			AccessKeyID: "AKIAIOSFODNN7EXAMPLE", SecretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
+		Password: goldenPassword, Password2: goldenPassword2}
+}
+
+func goldenSFTPRemote(algorithms string) RcloneRemote {
+	return RcloneRemote{ID: "box", Target: "zimam",
+		SFTP:    &contract.SFTPSettings{Host: "u123.your-storagebox.de", Port: 23, User: "u123", Path: "zimam"},
+		KeyFile: paths.Paths{}.BackupSFTPKey("box"), KnownHostsFile: paths.Paths{}.BackupKnownHosts("box"), HostKeyAlgorithms: algorithms,
+		Password: goldenPassword, Password2: goldenPassword2}
+}
+
+// rcloneConf builds its remotes afresh for each render: the tests change
+// the strings in place.
+func rcloneConf(remotes func() []RcloneRemote) []goldenFile {
+	return []goldenFile{{path: paths.Paths{}.RcloneConf(), tmpl: "backup/rclone.conf", data: func() any { return RcloneConf{Remotes: remotes()} }}}
 }
 
 func units() []goldenFile {
@@ -379,8 +411,8 @@ type renderedString struct {
 func renderedStrings(t testing.TB) []renderedString {
 	// A string a template checks again before writing it, such as a
 	// bcrypt hash in htpasswd, or a cron schedule, takes the sentinel in its
-	// own shape.
-	sentinels := []string{"zimamsentinel", "$2y$12$zimamsentinel" + strings.Repeat("a", 40), "0 0 1 1 *"}
+	// own shape, as is an rclone host key algorithm, one of a fixed list.
+	sentinels := []string{"zimamsentinel", "$2y$12$zimamsentinel" + strings.Repeat("a", 40), "0 0 1 1 *", "rsa-sha2-512 rsa-sha2-256"}
 	var found []renderedString
 	for name, files := range goldenCases {
 		for _, gf := range files {

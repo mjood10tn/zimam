@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"text/template"
 
@@ -14,14 +15,16 @@ import (
 )
 
 var funcs = template.FuncMap{
-	"safe":         safe,
-	"prefix":       prefix,
-	"htpasswdLine": htpasswdLine,
-	"laravelKey":   laravelKey,
-	"sha256hex":    sha256hex,
-	"shquote":      shquote,
-	"cronSchedule": cronSchedule,
-	"siteName":     siteName,
+	"safe":              safe,
+	"rcloneValue":       rcloneValue,
+	"hostKeyAlgorithms": hostKeyAlgorithms,
+	"prefix":            prefix,
+	"htpasswdLine":      htpasswdLine,
+	"laravelKey":        laravelKey,
+	"sha256hex":         sha256hex,
+	"shquote":           shquote,
+	"cronSchedule":      cronSchedule,
+	"siteName":          siteName,
 }
 
 // safeRe is all a string may contain on its way into a config file. Without
@@ -42,6 +45,43 @@ func safe(v any) (string, error) {
 		return "", fmt.Errorf("safe: %q may only hold letters, digits and ._:/@-", s)
 	}
 	return s, nil
+}
+
+// rcloneValueRe is safeRe plus "+" and "=", which S3 secret keys and
+// rclone's obscured values hold; rclone.conf splits a line at its first "=",
+// so a later one stays in the value.
+var rcloneValueRe = regexp.MustCompile(`^[A-Za-z0-9._:/@+=-]+$`)
+
+// rcloneValue renders a string-kind value into rclone.conf (R05-D2) only if
+// it matches rcloneValueRe: it can't end the line or start a section.
+func rcloneValue(v any) (string, error) {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.String {
+		return "", fmt.Errorf("rcloneValue: %T is not a string", v)
+	}
+	if s := rv.String(); rcloneValueRe.MatchString(s) {
+		return s, nil
+	}
+	return "", fmt.Errorf("rcloneValue: %q may only hold letters, digits and ._:/@+=-", rv.String())
+}
+
+// HostKeyAlgorithms are the values an SFTP remote's host_key_algorithms may
+// take: the algorithm of its one pinned host key. Without it, a server that
+// offers another key type first fails with "key mismatch" (R05-D2, Task 1
+// spike).
+var HostKeyAlgorithms = []string{
+	"ssh-ed25519",
+	"ecdsa-sha2-nistp256",
+	"ecdsa-sha2-nistp384",
+	"ecdsa-sha2-nistp521",
+	"rsa-sha2-512 rsa-sha2-256",
+}
+
+func hostKeyAlgorithms(s string) (string, error) {
+	if slices.Contains(HostKeyAlgorithms, s) {
+		return s, nil
+	}
+	return "", fmt.Errorf("hostKeyAlgorithms: %q is not a known value", s)
 }
 
 // prefix renders an IP entry as contract.ParseIPEntry returns it: valid,

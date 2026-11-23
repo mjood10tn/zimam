@@ -167,3 +167,22 @@ type CronLine struct {
 type NodeRepo struct {
 	Major contract.NodeMajor // the one NodeSource major APT follows
 }
+
+// RcloneConf fills backup/rclone.conf (R05-D2): every backup destination,
+// sorted by id.
+type RcloneConf struct{ Remotes []RcloneRemote }
+
+// RcloneRemote is one destination: a raw s3 or sftp remote "<ID>-raw" and a
+// crypt remote "<ID>" over Target on it. Password and Password2 are already
+// in rclone's obscured form, which is base64url.
+type RcloneRemote struct {
+	ID                contract.DestinationID
+	S3                *contract.S3Settings   // or SFTP
+	SFTP              *contract.SFTPSettings // its fingerprint isn't rendered: the pin is the known_hosts file
+	KeyFile           string                 // SFTP
+	KnownHostsFile    string                 // SFTP
+	HostKeyAlgorithms string                 // SFTP, from rclone.HostKeyAlgorithms; empty until a key is pinned
+	Target            string                 // bucket[/prefix] or the SFTP path
+	Password          string
+	Password2         string
+}

@@ -6,17 +6,10 @@ package composer
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"errors"
 	"fmt"
-	"hash"
-	"io"
-	"io/fs"
-	"net/http"
 	"os"
-	"path/filepath"
 
+	"zimam/agent/internal/fetch"
 	"zimam/agent/internal/sysexec"
 )
 
@@ -25,40 +18,6 @@ const maxPharBytes = 32 << 20
 
 // tempPattern names a download in progress, in the Composer directory.
 const tempPattern = ".composer-*"
-
-// httpsOnly is c with redirects allowed only to https URLs; c's own
-// redirect policy still applies on top.
-func httpsOnly(c *http.Client) *http.Client {
-	copied := *c
-	next := c.CheckRedirect
-	copied.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if req.URL.Scheme != "https" {
-			return fmt.Errorf("refusing a redirect to %s: not https", req.URL.Redacted())
-		}
-		if next != nil {
-			return next(req, via)
-		}
-		if len(via) >= 10 {
-			return errors.New("stopped after 10 redirects")
-		}
-		return nil
-	}
-	return &copied
-}
-
-// removeStaleTemps deletes downloads that a killed run left in dir.
-func removeStaleTemps(dir string) error {
-	stale, err := filepath.Glob(filepath.Join(dir, tempPattern))
-	if err != nil {
-		return err
-	}
-	for _, name := range stale {
-		if err := os.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return err
-		}
-	}
-	return nil
-}
 
 // Ensure returns the path of the pinned phar, downloading it first when it
 // is missing or its hash doesn't match the pin.
@@ -74,11 +33,11 @@ func ensure(ctx context.Context, d sysexec.Deps, p release) (string, error) {
 		return "", err
 	}
 	defer unlock()
-	if err := removeStaleTemps(d.Paths.ComposerDir()); err != nil {
+	if err := fetch.RemoveStaleTemps(d.Paths.ComposerDir(), tempPattern); err != nil {
 		return "", err
 	}
 	path := d.Paths.ComposerPhar(p.version)
-	switch ok, err := matches(path, p.sha256); {
+	switch ok, err := fetch.Matches(path, p.sha256, maxPharBytes); {
 	case err != nil:
 		return "", err
 	case ok:
@@ -97,7 +56,7 @@ func ensure(ctx context.Context, d sysexec.Deps, p release) (string, error) {
 		return "", err
 	}
 	defer os.Remove(tmp.Name()) // fails harmlessly once renamed
-	sum, err := download(ctx, httpsOnly(d.HTTPClient()), p.url, tmp)
+	sum, err := fetch.Download(ctx, fetch.HTTPSOnly(d.HTTPClient()), p.url, tmp, maxPharBytes)
 	if err == nil {
 		err = tmp.Sync()
 	}
@@ -118,56 +77,3 @@ func ensure(ctx context.Context, d sysexec.Deps, p release) (string, error) {
 	}
 	return path, nil
 }
-
-// matches reports whether path is a regular file with the SHA-256 want. A
-// missing file is false without an error.
-func matches(path, want string) (bool, error) {
-	f, err := os.Open(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil {
-		return false, err
-	}
-	if !fi.Mode().IsRegular() {
-		return false, fmt.Errorf("%s is not a regular file", path)
-	}
-	h := sha256.New()
-	if _, err := io.Copy(h, io.LimitReader(f, maxPharBytes+1)); err != nil {
-		return false, err
-	}
-	return hexSum(h) == want, nil
-}
-
-// download writes u's body to w, at most maxPharBytes, and returns its
-// SHA-256.
-func download(ctx context.Context, c *http.Client, u string, w io.Writer) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return "", err
-	}
-	resp, err := c.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("downloading %s: %s", u, resp.Status)
-	}
-	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(w, h), io.LimitReader(resp.Body, maxPharBytes+1))
-	if err != nil {
-		return "", fmt.Errorf("downloading %s: %w", u, err)
-	}
-	if n > maxPharBytes {
-		return "", fmt.Errorf("%s is larger than %d bytes", u, maxPharBytes)
-	}
-	return hexSum(h), nil
-}
-
-func hexSum(h hash.Hash) string { return hex.EncodeToString(h.Sum(nil)) }

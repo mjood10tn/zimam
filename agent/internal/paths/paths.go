@@ -155,6 +155,27 @@ func (p Paths) ComposerPhar(version string) string {
 	return p.at("usr/local/lib/zimam/composer", "composer-"+version+".phar")
 }
 
+// RcloneDir holds the pinned rclone (R05-D1, root 0755), and RcloneBinary
+// is one version's binary in it (root 0755). The version comes from the
+// agent's own pin, never from the panel. RcloneLock keeps two downloads
+// apart.
+func (p Paths) RcloneDir() string { return p.at("usr/local/lib/zimam/rclone") }
+func (p Paths) RcloneBinary(version string) string {
+	return p.at("usr/local/lib/zimam/rclone", "rclone-"+version)
+}
+func (p Paths) RcloneLock() string { return p.at("run/zimam/locks/rclone.lock") }
+
+// BackupConfigDir holds rclone.conf and the SFTP keys (R05-D2, root 0700).
+// Only root reads them: they hold every destination's secrets.
+func (p Paths) BackupConfigDir() string { return p.at("etc/zimam/backup") }
+func (p Paths) RcloneConf() string      { return p.at("etc/zimam/backup/rclone.conf") }
+func (p Paths) BackupSFTPKey(id contract.DestinationID) string {
+	return p.at("etc/zimam/backup", string(id)+".key")
+}
+func (p Paths) BackupKnownHosts(id contract.DestinationID) string {
+	return p.at("etc/zimam/backup", string(id)+".known_hosts")
+}
+
 // Crontab and Atq exist while cron and at are installed; site.destroy
 // clears a deleted user's jobs only then.
 func (p Paths) Crontab() string { return p.at("usr/bin/crontab") }
