@@ -2,6 +2,7 @@
 
 namespace App\Agent;
 
+use App\Actions\Notify;
 use App\Models\AgentJob;
 use Closure;
 use Illuminate\Support\Facades\DB;
@@ -29,6 +30,7 @@ final class JobOutcomes
             $job->markFinished($status);
             $this->handle($job, $status);
         });
+        app(Notify::class)->job($job);
     }
 
     /**
@@ -50,6 +52,7 @@ final class JobOutcomes
                 'message' => $message,
             ]));
         });
+        app(Notify::class)->job($job);
     }
 
     /**

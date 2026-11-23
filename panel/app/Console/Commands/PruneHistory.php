@@ -4,6 +4,8 @@ namespace App\Console\Commands;
 
 use App\Models\AgentAction;
 use App\Models\AgentJob;
+use App\Models\BackupRun;
+use App\Models\NotificationState;
 use App\Models\WebhookDelivery;
 use App\Settings\PanelSettings;
 use Illuminate\Console\Command;
@@ -30,6 +32,13 @@ final class PruneHistory extends Command
         $actionsBefore = now()->subDays($settings->auditRetentionDays());
         $actions = AgentAction::query()->where('created_at', '<', $actionsBefore)->delete();
         $deliveries = WebhookDelivery::query()->where('received_at', '<', now()->subHours(WebhookDelivery::KEEP_HOURS))->delete();
+        // Finished backup runs as the agent prunes their records (R05-D9); an
+        // event's debounce row once it can't repeat: cleared, or one that
+        // only notifies once (R05-D12).
+        BackupRun::query()->where('status', '!=', BackupRun::RUNNING)->where('started_at', '<', $before)->delete();
+        NotificationState::query()->where('last_sent_at', '<', $before)
+            ->where(fn ($q) => $q->whereNotNull('cleared_at')->orWhere(fn ($q) => $q->where('event_key', 'not like', 'warning:%')->where('event_key', 'not like', 'agent:%')))
+            ->delete();
 
         $this->line("Deleted {$jobs} jobs from before {$before->toDateTimeString()}, {$actions} agent actions from before {$actionsBefore->toDateTimeString()} and {$deliveries} webhook deliveries.");
 

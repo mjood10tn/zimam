@@ -12,8 +12,9 @@ use Carbon\CarbonImmutable;
  * available, and any monitored service that isn't active. A failed service
  * is critical; one merely stopped or starting is a warning. A site's worker
  * in a crash loop warns, and one systemd gave up on is critical (R04-D8);
- * those carry the key worker-crashloop:<site>:<worker id> (R04-D17), which
- * v0.5's notification dedupes on.
+ * those carry the key worker-crashloop:<site>:<worker id> (R04-D17). Every
+ * warning has a key that stays the same while it lasts (disk:<mount>,
+ * memory, service:<unit>), which the notifications debounce on (R05-D12).
  */
 final class MetricWarnings
 {
@@ -28,7 +29,7 @@ final class MetricWarnings
 
     /**
      * @param  array<string, mixed>  $metrics  system.metrics's data
-     * @return list<array{severity: 'critical'|'warning', title: string, detail: string, at: string, key?: string}>
+     * @return list<array{severity: 'critical'|'warning', title: string, detail: string, at: string, key: string}>
      */
     public static function from(array $metrics, CarbonImmutable $at): array
     {
@@ -42,6 +43,7 @@ final class MetricWarnings
                     'title' => __('zimam.monitoring.warnings.disk.title', ['mount' => $disk['mount'], 'percent' => (int) floor($percent)]),
                     'detail' => __('zimam.monitoring.warnings.disk.detail'),
                     'at' => $checked,
+                    'key' => "disk:{$disk['mount']}",
                 ];
             }
         }
@@ -52,6 +54,7 @@ final class MetricWarnings
                 'title' => __('zimam.monitoring.warnings.memory.title', ['percent' => (int) floor($memory)]),
                 'detail' => __('zimam.monitoring.warnings.memory.detail'),
                 'at' => $checked,
+                'key' => 'memory',
             ];
         }
         foreach ($metrics['services'] as $service) {
@@ -64,6 +67,7 @@ final class MetricWarnings
                 'title' => __('zimam.monitoring.warnings.service.title', ['unit' => $service['unit'], 'state' => $service['active_state']]),
                 'detail' => __('zimam.monitoring.warnings.service.detail', ['unit' => $service['unit']]),
                 'at' => $checked,
+                'key' => "service:{$service['unit']}",
             ];
         }
         $history = null;

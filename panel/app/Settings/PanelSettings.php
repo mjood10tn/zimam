@@ -3,6 +3,8 @@
 namespace App\Settings;
 
 use App\Models\Setting;
+use Illuminate\Support\Facades\Crypt;
+use SensitiveParameter;
 
 /**
  * The panel's settings (§7.3 Settings, §7.6), with the defaults of §4 and
@@ -75,6 +77,32 @@ class PanelSettings
         }
         $this->set('display_timezone', $zone);
         $this->zone = null;
+    }
+
+    /**
+     * The SMTP server notifications go through (R05-D11): host, port,
+     * security (starttls or tls), username, password and from. Empty until
+     * the owner sets it. The password is stored encrypted.
+     *
+     * @return array<string, mixed>
+     */
+    public function smtp(): array
+    {
+        $smtp = (array) $this->get('smtp', []);
+        if (($smtp['password'] ?? '') !== '') {
+            $smtp['password'] = Crypt::decryptString($smtp['password']);
+        }
+
+        return $smtp;
+    }
+
+    /** @param array<string, mixed> $smtp */
+    public function setSmtp(#[SensitiveParameter] array $smtp): void
+    {
+        if (($smtp['password'] ?? '') !== '') {
+            $smtp['password'] = Crypt::encryptString($smtp['password']);
+        }
+        $this->set('smtp', $smtp);
     }
 
     private function get(string $key, mixed $default): mixed
