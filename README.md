@@ -18,7 +18,7 @@
 ---
 
 > [!WARNING]
-> **Zimam is early software.** v0.3.0 is the current release. It covers install, sites, PHP versions, certificates, monitoring, security settings and logs, Git deploys and Laravel sites, and MySQL and Valkey. Many features a production panel needs are still missing (see [Not yet](#not-yet)). Releases are signed with a development key. Try it on a fresh server you can throw away, not on one that matters.
+> **Zimam is early software.** v0.5.0 is the current release. It covers install, sites, PHP versions, certificates, monitoring, security settings and logs, Git deploys and Laravel sites, MySQL and Valkey, queue workers, the scheduler and cron jobs, Node.js, encrypted backups and notifications. Many features a production panel needs are still missing (see [Not yet](#not-yet)). Releases are signed with a development key. Try it on a fresh server you can throw away, not on one that matters.
 
 ## What is Zimam?
 
@@ -86,6 +86,24 @@ It has two parts:
 - The panel generates each password, shows it once and never stores it. To get a new one, rotate the password on the site's Database or Cache tab. **Write to .env** on the same tab sets the site's `DB_*` or `REDIS_*` keys and keeps every other line of its `.env`. For Valkey it writes `REDIS_CLIENT=phpredis`, `REDIS_HOST=127.0.0.1`, `REDIS_PORT=6379`, `REDIS_USERNAME`, `REDIS_PASSWORD` and `REDIS_PREFIX=s_<site>:`. It leaves `CACHE_STORE`, `QUEUE_CONNECTION` and `SESSION_DRIVER` as they are, and a site with a cached config reads the new values from its next deploy.
 - Deleting a site removes its MySQL and Valkey users and the Valkey keys under its prefix. Its databases are dropped only if you tick the box, and a site that still has databases isn't deleted without it.
 - There is no uninstall for MySQL or Valkey in this release.
+
+**Workers, scheduler, cron and Node.js**
+- Queue workers per site: a Laravel queue worker (connection, queues, processes, memory, tries, timeout, sleep, backoff) or your own command such as `php artisan horizon`. Each runs as the site's user in a hardened systemd unit with a memory limit, restarts after a deploy, a rollback, a `.env` save or a PHP switch, and shows as failed when it keeps crashing.
+- The Laravel scheduler as one switch per site, and your own cron jobs with their next five runs shown in the server's time zone. A job still running when the next is due is skipped. Output goes to the site's `logs/cron.log`.
+- Node.js 24 or 26 from NodeSource, installed, updated, switched and removed from the panel, so deploy scripts can run `npm ci && npm run build`.
+
+**Backups**
+- Back up sites' files (the shared folder and the live release), MySQL databases and, if you want, the panel's own database, to S3-compatible storage (AWS, Backblaze B2, Cloudflare R2, Wasabi, MinIO and others) or an SFTP server.
+- Everything is encrypted on the server by rclone before it leaves. The panel generates the encryption keys, shows them once, and sends them only after you type back the end of the password; it never stores them. You can show them again with your password, and the read is audited.
+- Plans run hourly, daily or weekly from a systemd timer, even while the panel is down, or on demand. Each keeps the last N backups plus daily, weekly and monthly ones.
+- A backup counts only when every step succeeded: the database dump is checked to its last line, every program's exit status is checked, and a manifest is written last. A failed run leaves nothing behind.
+- Restore a database into a new database, or over an existing one with your password; restore a site's files into `~/restores/<backup>/` in its home, never over the live site. Each part's checksum is verified before anything is written.
+- SFTP servers get a key pair made on the server, and their host key is pinned on the first test (or the fingerprint you give).
+
+**Notifications**
+- Email (through your SMTP server), Telegram, Slack and Discord. Each channel picks its events: monitoring warnings, crash-looping workers, an unreachable agent, failed jobs, deploys, backups, certificate problems and failed security checks.
+- Warnings notify when they start, once a day while they last and when they clear; other events notify once. Each channel has a test button and shows its last error.
+- Slack, Discord and Telegram messages go only to those services' own addresses. Tokens, webhook URLs and the SMTP password are encrypted in the panel's database.
 
 **Releases**
 - Signed releases: the installer checks the manifest's Ed25519 signature and every file's SHA-256 before it runs anything it downloaded.
@@ -158,12 +176,9 @@ Found a security issue? Please report it privately through [GitHub's security ad
 
 ## Not yet
 
-These are planned but not in v0.3.0:
+These are planned but not in v0.5.0:
 
-- Queue workers, the Laravel scheduler and cron jobs.
-- Node.
-- Backups.
-- Notifications (warnings show on screen only).
+- Restoring the panel's own database from a backup, and backups to Google Drive or Dropbox.
 - Editing firewall and SSH settings, and fail2ban.
 - One-click upgrades of Zimam itself.
 - Cloudflare mode.
@@ -177,7 +192,7 @@ These are planned but not in v0.3.0:
                                    │
                                    │ JSON over /run/zimam/agent.sock
                                    ▼
-                     zimam-agent (Go, root) ──▶ Nginx, PHP-FPM, Certbot, UFW, apt, MySQL, Valkey
+                     zimam-agent (Go, root) ──▶ Nginx, PHP-FPM, Certbot, UFW, apt, MySQL, Valkey, systemd, rclone
                                    │
                                    └──▶ site-user helper (runs as s_<name>)
 ```
