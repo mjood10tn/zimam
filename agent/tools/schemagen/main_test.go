@@ -288,9 +288,12 @@ func TestSecretFieldsMarked(t *testing.T) {
 	// in its params, and keys.*.secret in its result; site.security:
 	// password_protection.users.*.password_hash; site.env.read: content in
 	// its result; site.env.write: content in its params; db.user and
-	// cache.user: password in their params.
-	if checked != 10 {
-		t.Errorf("checked %d secret fields, want 10", checked)
+	// cache.user: password in their params; backup.destination:
+	// encryption_password, encryption_salt, s3.access_key_id and
+	// s3.secret_access_key in its params; backup.destination.keys:
+	// encryption_password and encryption_salt in its result.
+	if checked != 16 {
+		t.Errorf("checked %d secret fields, want 16", checked)
 	}
 }
 

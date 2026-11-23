@@ -61,6 +61,17 @@ var designCommands = []struct {
 	{"site.cron", KindJob, "site:<name>", true, true},
 	{"node.install", KindJob, "server", true, true},
 	{"node.uninstall", KindJob, "server", true, true},
+	// v0.5.0 backup commands (R05 plan, "New agent commands").
+	{"backup.destination", KindJob, "server", true, true},
+	{"backup.destination.delete", KindJob, "server", true, true},
+	{"backup.destination.test", KindJob, "server", true, true},
+	{"backup.destination.keys", KindRead, "", true, true},
+	{"backup.plan", KindJob, "server", true, true},
+	{"backup.plan.delete", KindJob, "server", true, true},
+	{"backup.run", KindJob, "backup:<plan>", true, true},
+	{"backup.list", KindRead, "", false, true},
+	{"backup.runs", KindRead, "", false, true},
+	{"backup.restore", KindJob, "site:<name>", true, true},
 }
 
 // subjectPattern turns a §5.3 subject such as "site:<name>" or
@@ -74,8 +85,8 @@ func subjectPattern(s string) *regexp.Regexp {
 }
 
 func TestDescriptorsMatchDesign(t *testing.T) {
-	if len(designCommands) != 37 {
-		t.Fatalf("the table has %d rows, want all 18 of §5.3, v0.2.0's 6, v0.3.0's 7 and v0.4.0's 6", len(designCommands))
+	if len(designCommands) != 47 {
+		t.Fatalf("the table has %d rows, want all 18 of §5.3, v0.2.0's 6, v0.3.0's 7, v0.4.0's 6 and v0.5.0's 10", len(designCommands))
 	}
 	rows := map[string]int{}
 	for i, row := range designCommands {

@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "database": {
+      "not": {
+        "enum": [
+          "mysql",
+          "sys",
+          "information_schema",
+          "performance_schema",
+          "zimam"
+        ]
+      },
+      "pattern": "^[a-z][a-z0-9_]{0,63}$",
+      "type": "string"
+    },
+    "folder": {
+      "type": "string"
+    },
+    "part": {
+      "not": {
+        "enum": [
+          "db-mysql",
+          "db-sys",
+          "db-information_schema",
+          "db-performance_schema",
+          "db-zimam",
+          "files-zimam",
+          "files-panel",
+          "files-default",
+          "files-acme"
+        ]
+      },
+      "pattern": "^(panel|db-[a-z][a-z0-9_]{0,63}|files-[a-z][a-z0-9-]{0,22}[a-z0-9])$",
+      "type": "string"
+    },
+    "site": {
+      "not": {
+        "enum": [
+          "zimam",
+          "panel",
+          "default",
+          "acme"
+        ]
+      },
+      "pattern": "^[a-z][a-z0-9-]{0,22}[a-z0-9]$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "part",
+    "site"
+  ],
+  "title": "backup.restore result",
+  "type": "object"
+}

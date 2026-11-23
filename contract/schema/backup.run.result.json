@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "backup": {
+      "pattern": "^[0-9]{8}T[0-9]{6}Z$",
+      "type": "string"
+    },
+    "parts": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "part": {
+            "not": {
+              "enum": [
+                "db-mysql",
+                "db-sys",
+                "db-information_schema",
+                "db-performance_schema",
+                "db-zimam",
+                "files-zimam",
+                "files-panel",
+                "files-default",
+                "files-acme"
+              ]
+            },
+            "pattern": "^(panel|db-[a-z][a-z0-9_]{0,63}|files-[a-z][a-z0-9-]{0,22}[a-z0-9])$",
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "bytes",
+          "part",
+          "sha256"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "plan": {
+      "pattern": "^[a-z][a-z0-9-]{0,22}[a-z0-9]$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "backup",
+    "parts",
+    "plan"
+  ],
+  "title": "backup.run result",
+  "type": "object"
+}
