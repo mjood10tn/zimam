@@ -38,6 +38,14 @@ var limits = map[string]Limits{
 	"site.cron":            {MemoryMax: "128M", RuntimeMaxSec: 120},
 	"node.install":         {MemoryMax: "1G", RuntimeMaxSec: 900},
 	"node.uninstall":       {MemoryMax: "512M", RuntimeMaxSec: 600},
+	// v0.5.0 backup commands (the plan's "New agent commands" table; OQ5).
+	"backup.destination":        {MemoryMax: "256M", RuntimeMaxSec: 300},
+	"backup.destination.delete": {MemoryMax: "128M", RuntimeMaxSec: 120},
+	"backup.destination.test":   {MemoryMax: "256M", RuntimeMaxSec: 300},
+	"backup.plan":               {MemoryMax: "128M", RuntimeMaxSec: 120},
+	"backup.plan.delete":        {MemoryMax: "128M", RuntimeMaxSec: 120},
+	"backup.run":                {MemoryMax: "1G", RuntimeMaxSec: 21600},
+	"backup.restore":            {MemoryMax: "1G", RuntimeMaxSec: 21600},
 }
 
 // LimitsFor returns a job command's limits. Every job command has them; a

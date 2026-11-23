@@ -191,3 +191,48 @@ func FuzzOwnerCommand(f *testing.F) {
 		checkSchemaShape(t, OwnerCommand(s), ok)
 	})
 }
+
+// rcloneSafe is every character an accepted S3 field may carry into a value
+// of rclone.conf (R05-D2): no space, quote, #, ; or line break.
+var rcloneSafe = regexp.MustCompile(`^[A-Za-z0-9.:/_+=-]*$`)
+
+func FuzzS3Settings(f *testing.F) {
+	f.Add("https://s3.example.com", "backups", "zimam", "AKIA", "secret/key+=")
+	f.Add("https://s3.example.com\n[x]", "a..b", "../x", "a b", "a\nb")
+	f.Add("http://s3.example.com:9000/x", "192.168.1.1", "/abs", "k#x", "k;x")
+	f.Fuzz(func(t *testing.T, endpoint, bucket, prefix, key, secret string) {
+		s := S3Settings{Endpoint: S3Endpoint(endpoint), Region: "us-east-1", Bucket: S3Bucket(bucket), Prefix: BackupPath(prefix),
+			AccessKeyID: S3Credential(key), SecretAccessKey: S3Credential(secret)}
+		if s.Validate() != nil {
+			return
+		}
+		for _, v := range []string{endpoint, bucket, prefix, key, secret} {
+			if !rcloneSafe.MatchString(v) {
+				t.Errorf("accepted %q", v)
+			}
+		}
+		if strings.Contains(prefix, "..") || strings.HasPrefix(prefix, "/") || strings.Contains(bucket, "..") {
+			t.Errorf("accepted bucket %q, prefix %q", bucket, prefix)
+		}
+		checkSchemaShape(t, S3Endpoint(endpoint), true)
+		checkSchemaAgrees(t, S3Bucket(bucket), true)
+		checkSchemaAgrees(t, BackupPath(prefix), true)
+	})
+}
+
+func FuzzBackupSchedule(f *testing.F) {
+	for _, s := range []string{"hourly", "daily 03:30", "weekly mon 03:30", "daily 25:00", "daily 03:30\n", "weekly Mon 03:30", "daily 3:30"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		v := BackupSchedule(s)
+		ok := v.Validate() == nil
+		if ok && !regexp.MustCompile(`^[a-z0-9: ]+$`).MatchString(s) {
+			t.Errorf("accepted %q", s)
+		}
+		if ok && !regexp.MustCompile(`^[A-Za-z0-9:* -]+$`).MatchString(v.OnCalendar()) {
+			t.Errorf("%q renders OnCalendar=%q", s, v.OnCalendar())
+		}
+		checkSchemaAgrees(t, v, ok)
+	})
+}

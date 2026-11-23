@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "encryption_password": {
+      "pattern": "^[A-Za-z0-9_-]{43}$",
+      "type": "string",
+      "x-zimam-secret": true
+    },
+    "encryption_salt": {
+      "pattern": "^[A-Za-z0-9_-]{43}$",
+      "type": "string",
+      "x-zimam-secret": true
+    },
+    "id": {
+      "pattern": "^[a-z][a-z0-9-]{0,22}[a-z0-9]$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "encryption_password",
+    "encryption_salt",
+    "id"
+  ],
+  "title": "backup.destination.keys result",
+  "type": "object"
+}
