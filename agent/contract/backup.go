@@ -372,15 +372,21 @@ func (s *SFTPSettings) check(f FieldErrors, prefix string) {
 
 // BackupDestinationParams is backup.destination's params: a new destination
 // or new settings for an existing one. Exactly the settings of its type are
-// given. The keys are the panel's, shown to the owner once (R05-D3).
+// given. The keys are the panel's, shown to the owner once (R05-D3): a new
+// destination needs both, and an existing one keeps its own, since its
+// backups can't be read without them. The panel never stores them, so it
+// leaves them out of an edit; the handler refuses keys that differ.
 type BackupDestinationParams struct {
 	ID                 DestinationID    `json:"id"`
 	Type               DestinationType  `json:"type"`
 	S3                 *S3Settings      `json:"s3,omitempty"`
 	SFTP               *SFTPSettings    `json:"sftp,omitempty"`
-	EncryptionPassword EncryptionSecret `json:"encryption_password" secret:"true"`
-	EncryptionSalt     EncryptionSecret `json:"encryption_salt" secret:"true"`
+	EncryptionPassword EncryptionSecret `json:"encryption_password,omitempty" secret:"true"`
+	EncryptionSalt     EncryptionSecret `json:"encryption_salt,omitempty" secret:"true"`
 }
+
+// HasKeys reports whether the params carry the crypt keys.
+func (p *BackupDestinationParams) HasKeys() bool { return p.EncryptionPassword != "" }
 
 func (p *BackupDestinationParams) Validate() error {
 	f := FieldErrors{}
@@ -404,8 +410,10 @@ func (p *BackupDestinationParams) Validate() error {
 		}
 		p.SFTP.check(f, "sftp.")
 	}
-	f.Check("encryption_password", p.EncryptionPassword)
-	f.Check("encryption_salt", p.EncryptionSalt)
+	if p.EncryptionPassword != "" || p.EncryptionSalt != "" {
+		f.Check("encryption_password", p.EncryptionPassword)
+		f.Check("encryption_salt", p.EncryptionSalt)
+	}
 	if p.EncryptionSalt != "" && p.EncryptionSalt == p.EncryptionPassword {
 		f["encryption_salt"] = "must differ from the password"
 	}

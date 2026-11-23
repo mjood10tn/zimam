@@ -254,7 +254,7 @@ func TestRunAlwaysPassesConfig(t *testing.T) {
 	fake := sysexec.NewFakeRunner(sysexec.Script{Path: d.Paths.RcloneBinary("9.9.9"),
 		Args: []string{"--config", d.Paths.RcloneConf(), "--low-level-retries", "3", "lsf", "offsite:"}})
 	d.Run = fake
-	if _, err := run(context.Background(), d, r, "lsf", "offsite:"); err != nil {
+	if _, err := run(context.Background(), d, r, nil, "lsf", "offsite:"); err != nil {
 		t.Fatal(err)
 	}
 	if calls := fake.Calls(); len(calls) != 1 {
@@ -269,7 +269,7 @@ func TestRunEnvironmentIsEmpty(t *testing.T) {
 	r := fakeBinary(t, d)
 	fake := sysexec.NewFakeRunner(sysexec.Script{Path: d.Paths.RcloneBinary("9.9.9")})
 	d.Run = fake
-	run(context.Background(), d, r, "version")
+	run(context.Background(), d, r, nil, "version")
 	for _, c := range fake.Calls() {
 		if len(c.Env) != 0 || c.Dir != "" {
 			t.Errorf("env %v dir %q", c.Env, c.Dir)

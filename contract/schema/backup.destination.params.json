@@ -117,8 +117,6 @@
     }
   },
   "required": [
-    "encryption_password",
-    "encryption_salt",
     "id",
     "type"
   ],
