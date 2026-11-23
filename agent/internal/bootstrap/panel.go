@@ -140,7 +140,7 @@ func (r *run) releaseApply(ctx context.Context) error {
 		}
 	}
 	r.Deps.Logf("Migrating the panel's database")
-	if _, err := artisan(ctx, r.deps(), r.Deps.Paths.PanelReleasesDir()+"/"+r.o.Version+"/artisan", "migrate", "--force"); err != nil {
+	if _, err := Artisan(ctx, r.deps(), r.Deps.Paths.PanelReleasesDir()+"/"+r.o.Version+"/artisan", "migrate", "--force"); err != nil {
 		return err
 	}
 	return h.SymlinkSwap(ctx, a, "panel/current", "releases/"+r.o.Version)
@@ -303,11 +303,11 @@ func (r *run) download(ctx context.Context, m *release.Manifest, name string) (s
 	return final, os.Rename(tmp.Name(), final)
 }
 
-// artisan runs a panel command as zimam (§4): runuser, the panel's PHP,
+// Artisan runs a panel command as zimam (§4): runuser, the panel's PHP,
 // and the runner's environment plus HOME. It runs in /, so root never
 // enters zimam's home, and in its own session, so it has no controlling
 // terminal to open root's /dev/tty through.
-func artisan(ctx context.Context, d sysexec.Deps, script string, args ...string) (sysexec.Result, error) {
+func Artisan(ctx context.Context, d sysexec.Deps, script string, args ...string) (sysexec.Result, error) {
 	argv := append([]string{"-u", "zimam", "--", "/usr/bin/php" + string(d.Config.PanelPHP), script}, args...)
 	return d.Run.Run(ctx, sysexec.Cmd{Path: runuser, Args: argv, Env: []string{"HOME=" + zimamHome}, Dir: "/", Setsid: true})
 }
@@ -322,7 +322,7 @@ func SetupLink(ctx context.Context, d sysexec.Deps, clearAllowlist bool) (output
 	if clearAllowlist {
 		args = append(args, "--clear-ip-allowlist")
 	}
-	res, err := artisan(ctx, d, d.Paths.PanelCurrent()+"/artisan", args...)
+	res, err := Artisan(ctx, d, d.Paths.PanelCurrent()+"/artisan", args...)
 	if err != nil {
 		return nil, "", err
 	}

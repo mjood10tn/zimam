@@ -32,7 +32,11 @@ type Cmd struct {
 	Args  []string
 	Env   []string // added to PATH=/usr/sbin:/usr/bin:/sbin:/bin and LANG=C.UTF-8
 	Stdin io.Reader
-	Dir   string
+	// Stdout, when set, receives the program's stdout as it is written,
+	// uncapped, and Result.Stdout stays empty: for a stream too large to
+	// hold, a database dump (R05-D5).
+	Stdout io.Writer
+	Dir    string
 	// KillGroup starts the program in its own process group and, when ctx
 	// ends, kills the whole group, not only the program: logrotate's gzip
 	// child would otherwise outlive it.
@@ -152,6 +156,9 @@ func (ExecRunner) Run(ctx context.Context, c Cmd) (Result, error) {
 	cmd.WaitDelay = 5 * time.Second // don't hang on pipes a killed child's children still hold
 	stdout, stderr := &headBuffer{max: maxStdout}, &tailBuffer{max: maxStderr}
 	cmd.Stdout = stdout
+	if c.Stdout != nil {
+		cmd.Stdout = c.Stdout
+	}
 	cmd.Stderr = stderr
 	err := cmd.Run()
 	res := Result{Stdout: stdout.buf.Bytes(), Stderr: stderr.buf}
