@@ -153,6 +153,26 @@ type fakeHelper struct {
 	archived [][]string
 	removed  []string
 	order    *[]string // shared with a runner, to check the order of steps
+
+	mkdirs      []string
+	extracted   []byte
+	extractDest string
+	extractAs   string
+	extractErr  error
+}
+
+func (f *fakeHelper) Mkdir(_ context.Context, _ helper.Account, name string, _ fs.FileMode) error {
+	f.mkdirs = append(f.mkdirs, name)
+	return nil
+}
+
+func (f *fakeHelper) ExtractTar(_ context.Context, a helper.Account, dest string, tarball io.Reader, _ helper.ExtractLimits) error {
+	b, err := io.ReadAll(tarball)
+	if err != nil {
+		return err
+	}
+	f.extracted, f.extractDest, f.extractAs = b, dest, a.Name
+	return f.extractErr
 }
 
 func (f *fakeHelper) ArchiveTree(_ context.Context, a helper.Account, w io.Writer, paths ...string) error {

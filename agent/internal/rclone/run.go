@@ -22,17 +22,28 @@ func RunInput(ctx context.Context, d sysexec.Deps, stdin io.Reader, args ...stri
 	if err != nil {
 		return sysexec.Result{}, err
 	}
-	return run(ctx, d, r, stdin, args...)
+	return run(ctx, d, r, stdin, nil, args...)
 }
 
-func run(ctx context.Context, d sysexec.Deps, r release, stdin io.Reader, args ...string) (sysexec.Result, error) {
+// RunOutput is Run with stdout streamed to w, uncapped, for cat.
+func RunOutput(ctx context.Context, d sysexec.Deps, w io.Writer, args ...string) error {
+	r, err := pinned(runtime.GOARCH)
+	if err != nil {
+		return err
+	}
+	_, err = run(ctx, d, r, nil, w, args...)
+	return err
+}
+
+func run(ctx context.Context, d sysexec.Deps, r release, stdin io.Reader, stdout io.Writer, args ...string) (sysexec.Result, error) {
 	bin, err := ensure(ctx, d, r)
 	if err != nil {
 		return sysexec.Result{}, err
 	}
 	return d.Run.Run(ctx, sysexec.Cmd{
-		Path:  bin,
-		Args:  append([]string{"--config", d.Paths.RcloneConf(), "--low-level-retries", "3"}, args...),
-		Stdin: stdin,
+		Path:   bin,
+		Args:   append([]string{"--config", d.Paths.RcloneConf(), "--low-level-retries", "3"}, args...),
+		Stdin:  stdin,
+		Stdout: stdout,
 	})
 }

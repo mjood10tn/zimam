@@ -787,10 +787,18 @@ func (p *BackupRestoreParams) Validate() error {
 }
 
 // BackupRestoreResult is what a restore wrote: the database, or the folder
-// in the site's home the files went into.
+// in the site's home the files went into. SkippedLinks are the archive's
+// symlinks a files restore left out because they point outside the
+// restore folder, or through another link (R05 Task 8), at most
+// MaxSkippedLinks of them.
 type BackupRestoreResult struct {
-	Site     SiteName     `json:"site"`
-	Part     BackupPart   `json:"part"`
-	Database DatabaseName `json:"database,omitempty"`
-	Folder   string       `json:"folder,omitempty"`
+	Site         SiteName     `json:"site"`
+	Part         BackupPart   `json:"part"`
+	Database     DatabaseName `json:"database,omitempty"`
+	Folder       string       `json:"folder,omitempty"`
+	SkippedLinks []string     `json:"skipped_links,omitempty"`
 }
+
+// MaxSkippedLinks bounds BackupRestoreResult.SkippedLinks; the job log
+// names every one.
+const MaxSkippedLinks = 100
