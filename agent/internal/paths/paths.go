@@ -176,6 +176,14 @@ func (p Paths) BackupKnownHosts(id contract.DestinationID) string {
 	return p.at("etc/zimam/backup", string(id)+".known_hosts")
 }
 
+// BackupStateDir holds the backup state (root 0700): the destinations'
+// non-secret fields and the plans (R05-D2, R05-D9).
+func (p Paths) BackupStateDir() string { return p.at("var/lib/zimam/backups") }
+func (p Paths) BackupDestinationsState() string {
+	return p.at("var/lib/zimam/backups/destinations.json")
+}
+func (p Paths) BackupPlansState() string { return p.at("var/lib/zimam/backups/plans.json") }
+
 // Crontab and Atq exist while cron and at are installed; site.destroy
 // clears a deleted user's jobs only then.
 func (p Paths) Crontab() string { return p.at("usr/bin/crontab") }

@@ -156,7 +156,10 @@ func sftpDest() BackupDestinationParams {
 func TestBackupDestinationParams(t *testing.T) {
 	withFP := sftpDest()
 	withFP.SFTP.HostKeyFingerprint = "SHA256:3qlt+g58jaxbjKRA7vJ1IWAMa/bu1tj0P9oalXbtTyw"
-	for _, p := range []BackupDestinationParams{s3Dest(), sftpDest(), withFP} {
+	// An edit leaves the keys out: the panel never stores them (R05-D3).
+	edit := s3Dest()
+	edit.EncryptionPassword, edit.EncryptionSalt = "", ""
+	for _, p := range []BackupDestinationParams{s3Dest(), sftpDest(), withFP, edit} {
 		if err := p.Validate(); err != nil {
 			t.Errorf("%+v: %v", p, err)
 		}
@@ -188,6 +191,7 @@ func TestBackupDestinationParams(t *testing.T) {
 		}),
 		"short password":   mod(s3Dest, func(p *BackupDestinationParams) { p.EncryptionPassword = "abc" }),
 		"no salt":          mod(s3Dest, func(p *BackupDestinationParams) { p.EncryptionSalt = "" }),
+		"no password":      mod(s3Dest, func(p *BackupDestinationParams) { p.EncryptionPassword = "" }),
 		"salt is password": mod(s3Dest, func(p *BackupDestinationParams) { p.EncryptionSalt = p.EncryptionPassword }),
 	} {
 		if err := p.Validate(); err == nil {
