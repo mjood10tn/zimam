@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Filament\Resources\SiteResource\Pages\BackupsTab;
 use App\Filament\Resources\SiteResource\Pages\CacheTab;
 use App\Filament\Resources\SiteResource\Pages\CreateSite;
 use App\Filament\Resources\SiteResource\Pages\DatabaseTab;
@@ -172,6 +173,9 @@ class SiteResource extends Resource
                 ]),
                 Tab::make(__('zimam.sites.tabs.cache'))->schema([
                     Livewire::make(CacheTab::class, fn (Site $record): array => ['site' => $record])->key('site-cache')->lazy(),
+                ]),
+                Tab::make(__('zimam.sites.tabs.backups'))->schema([
+                    Livewire::make(BackupsTab::class, fn (Site $record): array => ['site' => $record])->key('site-backups')->lazy(),
                 ]),
                 Tab::make(__('zimam.sites.tabs.logs'))->schema([
                     Livewire::make(SiteLogs::class, fn (Site $record): array => ['site' => $record])->key('site-logs'),

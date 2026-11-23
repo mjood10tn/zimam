@@ -17,4 +17,8 @@ return [
     // zimam-agent group (design §5.1).
     'job_logs' => env('ZIMAM_JOB_LOGS', '/var/log/zimam/jobs'),
 
+    // Backup run logs, /var/log/zimam/backups/<plan>/<id>.log, read the
+    // same way (R05-D9).
+    'backup_logs' => env('ZIMAM_BACKUP_LOGS', '/var/log/zimam/backups'),
+
 ];
