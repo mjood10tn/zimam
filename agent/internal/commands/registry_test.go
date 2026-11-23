@@ -8,8 +8,8 @@ import (
 )
 
 func TestNewAddsJobCommands(t *testing.T) {
-	if h := New(sysexec.Deps{}, nil); len(h) != 10 || h["backup.destination.keys"] == nil || h["site.workers.status"] == nil || h["agent.version"] == nil || h["system.status"] == nil || h["system.metrics"] == nil || h["logs.list"] == nil || h["logs.read"] == nil || h["site.releases"] == nil || h["site.env.read"] == nil || h["db.list"] == nil {
-		t.Errorf("New(d, nil) has %d handlers, want only the reads: agent.version, system.status, system.metrics, logs.list, logs.read, site.releases, site.env.read, db.list, site.workers.status and backup.destination.keys", len(h))
+	if h := New(sysexec.Deps{}, nil); len(h) != 11 || h["backup.destination.keys"] == nil || h["backup.runs"] == nil || h["site.workers.status"] == nil || h["agent.version"] == nil || h["system.status"] == nil || h["system.metrics"] == nil || h["logs.list"] == nil || h["logs.read"] == nil || h["site.releases"] == nil || h["site.env.read"] == nil || h["db.list"] == nil {
+		t.Errorf("New(d, nil) has %d handlers, want only the reads: agent.version, system.status, system.metrics, logs.list, logs.read, site.releases, site.env.read, db.list, site.workers.status, backup.destination.keys and backup.runs", len(h))
 	}
 	m := &jobs.Manager{Handlers: map[string]jobs.Handler{"php.default": nil}}
 	h := New(sysexec.Deps{}, m)

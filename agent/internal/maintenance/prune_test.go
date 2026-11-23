@@ -99,3 +99,39 @@ func TestMaintenanceAuditOnChange(t *testing.T) {
 		t.Errorf("entry %v", entries[0])
 	}
 }
+
+// Backup run records and logs older than the retention period go; a run
+// still running stays, however old (R05-D9).
+func TestPruneBackupRuns(t *testing.T) {
+	p := paths.Paths{Root: t.TempDir()}
+	cfg := testConfig(t, p)
+	cfg.LogRetentionDays = 3
+	d := sysexec.Deps{Paths: p, Config: cfg, Logf: t.Logf, Now: func() time.Time { return time.Date(2026, 11, 23, 3, 30, 0, 0, time.UTC) }}
+	run := func(id, status string) {
+		os.MkdirAll(p.BackupRunsDir("nightly"), 0o700)
+		os.WriteFile(p.BackupRunRecord("nightly", contract.BackupID(id)), []byte(`{"status":"`+status+`"}`), 0o600)
+		os.MkdirAll(filepath.Dir(p.BackupLog("nightly", contract.BackupID(id))), 0o750)
+		os.WriteFile(p.BackupLog("nightly", contract.BackupID(id)), []byte("[t] line\n"), 0o640)
+	}
+	run("20261119T033000Z", "succeeded") // 4 days old
+	run("20261121T033000Z", "failed")    // 2 days old
+	run("20261101T033000Z", "running")
+	os.WriteFile(p.BackupLog("nightly", "20261110T033000Z"), nil, 0o640) // its record is gone
+	os.WriteFile(filepath.Join(p.BackupRunsDir("nightly"), "notes.json"), nil, 0o600)
+	if err := pruneBackupRuns(d); err != nil {
+		t.Fatal(err)
+	}
+	for id, kept := range map[contract.BackupID]bool{"20261119T033000Z": false, "20261121T033000Z": true, "20261101T033000Z": true} {
+		for _, f := range []string{p.BackupRunRecord("nightly", id), p.BackupLog("nightly", id)} {
+			if _, err := os.Stat(f); (err == nil) != kept {
+				t.Errorf("%s: kept %v, want %v", f, err == nil, kept)
+			}
+		}
+	}
+	if _, err := os.Stat(p.BackupLog("nightly", "20261110T033000Z")); err == nil {
+		t.Error("an old log without its record stayed")
+	}
+	if _, err := os.Stat(filepath.Join(p.BackupRunsDir("nightly"), "notes.json")); err != nil {
+		t.Error("a file that isn't a record went")
+	}
+}

@@ -91,3 +91,73 @@ func finished(statePath string) bool {
 	}
 	return false
 }
+
+// pruneBackupRuns deletes the run records and logs of backups older than
+// the log retention period (R05-D9), by the time their id names. A record
+// still running stays, however old; a log whose record is gone goes by its
+// own id. The backups themselves are retention's (R05-D8).
+func pruneBackupRuns(d sysexec.Deps) error {
+	before := d.Now().Add(-time.Duration(d.Config.LogRetentionDays) * 24 * time.Hour)
+	old := func(name, suffix string) (contract.BackupID, bool) {
+		id, ok := strings.CutSuffix(name, suffix)
+		t, err := time.Parse("20060102T150405Z", id)
+		return contract.BackupID(id), ok && err == nil && contract.BackupID(id).Validate() == nil && t.Before(before)
+	}
+	n := 0
+	var errs []error
+	for _, plan := range planDirs(d.Paths.BackupStateDir(), &errs) {
+		records, err := os.ReadDir(d.Paths.BackupRunsDir(plan))
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			errs = append(errs, err)
+		}
+		for _, de := range records {
+			id, ok := old(de.Name(), ".json")
+			if !ok || !de.Type().IsRegular() || !finished(d.Paths.BackupRunRecord(plan, id)) {
+				continue
+			}
+			if err := os.Remove(d.Paths.BackupRunRecord(plan, id)); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			n++
+		}
+	}
+	for _, plan := range planDirs(d.Paths.BackupLogsDir(), &errs) {
+		logs, err := os.ReadDir(filepath.Dir(d.Paths.BackupLog(plan, "x")))
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		for _, de := range logs {
+			id, ok := old(de.Name(), ".log")
+			if !ok || !de.Type().IsRegular() {
+				continue
+			}
+			if _, err := os.Lstat(d.Paths.BackupRunRecord(plan, id)); !errors.Is(err, fs.ErrNotExist) {
+				continue // its record is kept, so its log is too
+			}
+			if err := os.Remove(d.Paths.BackupLog(plan, id)); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	if n > 0 {
+		d.Logf("Pruned %d backup run records older than %d days", n, d.Config.LogRetentionDays)
+	}
+	return errors.Join(errs...)
+}
+
+// planDirs are the folders in dir named like backup plans.
+func planDirs(dir string, errs *[]error) []contract.PlanID {
+	entries, err := os.ReadDir(dir)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		*errs = append(*errs, err)
+	}
+	var out []contract.PlanID
+	for _, de := range entries {
+		if de.IsDir() && contract.PlanID(de.Name()).Validate() == nil {
+			out = append(out, contract.PlanID(de.Name()))
+		}
+	}
+	return out
+}

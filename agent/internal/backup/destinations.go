@@ -82,13 +82,16 @@ func loadJSON(path string, v any) error {
 }
 
 // saveJSON writes v to path atomically, root 0600, in the backup state
-// directory (root 0700).
+// directory or a folder under it (root 0700).
 func saveJSON(p paths.Paths, path string, v any) error {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(p.BackupStateDir(), 0o700); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".backup-state-*")

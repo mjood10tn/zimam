@@ -130,3 +130,23 @@ func TestCronScheduleRendersOnlyNormalForm(t *testing.T) {
 		t.Error("a site name with a dot rendered: cron would ignore the file")
 	}
 }
+
+// A backup unit renders only a valid schedule and plan: a stored value that
+// isn't one never reaches OnCalendar= or ExecStart= (R05-D7).
+func TestBackupUnitRendersOnlyValidValues(t *testing.T) {
+	for _, u := range []BackupUnit{
+		{Plan: "nightly", Schedule: "daily 25:00"},
+		{Plan: "nightly", Schedule: "hourly\nExecStart=/bin/sh"},
+		{Plan: "night ly", Schedule: "hourly"},
+		{Plan: "nightly\nUser=root", Schedule: "hourly"},
+	} {
+		if out, err := Render("systemd/zimam-backup.timer", u); err == nil {
+			t.Errorf("%+v rendered the timer:\n%s", u, out)
+		}
+		if u.Plan.Validate() != nil {
+			if out, err := Render("systemd/zimam-backup.service", u); err == nil {
+				t.Errorf("%+v rendered the service:\n%s", u, out)
+			}
+		}
+	}
+}

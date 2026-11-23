@@ -25,6 +25,8 @@ var funcs = template.FuncMap{
 	"shquote":           shquote,
 	"cronSchedule":      cronSchedule,
 	"siteName":          siteName,
+	"planID":            planID,
+	"onCalendar":        onCalendar,
 }
 
 // safeRe is all a string may contain on its way into a config file. Without
@@ -163,4 +165,22 @@ func siteName(v any) (string, error) {
 		return "", fmt.Errorf("siteName: %q %v", rv.String(), err)
 	}
 	return rv.String(), nil
+}
+
+// planID renders a backup plan's id only if it is one: it names the units,
+// and ExecStart= hands it to the agent.
+func planID(v contract.PlanID) (string, error) {
+	if err := v.Validate(); err != nil {
+		return "", fmt.Errorf("planID: %q %v", v, err)
+	}
+	return string(v), nil
+}
+
+// onCalendar renders a valid backup schedule as OnCalendar= takes it
+// (R05-D7); anything else is refused.
+func onCalendar(s contract.BackupSchedule) (string, error) {
+	if err := s.Validate(); err != nil {
+		return "", fmt.Errorf("onCalendar: %q %v", s, err)
+	}
+	return s.OnCalendar(), nil
 }

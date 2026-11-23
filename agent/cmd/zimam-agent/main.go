@@ -26,6 +26,7 @@ var subcommands = map[string]subcommand{
 	"panel setup-link":   panelSetupLink,
 	"hook cert-deployed": hookCertDeployed,
 	"maintenance":        runMaintenance,
+	"backup run":         backupRun,
 	"job run":            jobRun,
 	"as-user":            runAsUser,
 	"version":            version,

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"zimam/agent/contract"
+	"zimam/agent/internal/backup"
 	"zimam/agent/internal/helper"
 	"zimam/agent/internal/jobs"
 	"zimam/agent/internal/mysql"
@@ -160,6 +161,10 @@ func destroySite(ctx context.Context, j *jobs.Context, p contract.Params) (any, 
 		if _, err := mysql.Exec(ctx, d, mysql.DropUser(params.Name)); err != nil {
 			d.Logf("Could not check the MySQL user of site %s, which the site's state doesn't list: %v", params.Name, err)
 		}
+	}
+	// The site leaves every backup plan; its backups stay (R05-D13).
+	if err := backup.ForgetSite(d.Paths, params.Name); err != nil {
+		return nil, fmt.Errorf("removing site %s from the backup plans: %w", params.Name, err)
 	}
 	return sites.Destroy(ctx, d, j.Helper, helper.LookupAccount, params.Name)
 }
