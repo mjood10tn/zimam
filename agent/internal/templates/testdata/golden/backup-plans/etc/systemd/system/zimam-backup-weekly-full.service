@@ -1,0 +1,12 @@
+# Managed by Zimam. Changes here are overwritten.
+[Unit]
+Description=Zimam backup plan weekly-full
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/zimam-agent backup run weekly-full
+# The run's limits (OQ5); the pipeline streams, so memory stays flat.
+MemoryMax=1G
+TimeoutStartSec=6h
+Nice=10
+IOSchedulingClass=idle

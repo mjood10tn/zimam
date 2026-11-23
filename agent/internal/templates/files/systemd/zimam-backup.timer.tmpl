@@ -1,0 +1,12 @@
+# Managed by Zimam. Changes here are overwritten.
+[Unit]
+Description=Run Zimam backup plan {{planID .Plan}} on its schedule
+
+[Timer]
+OnCalendar={{onCalendar .Schedule}}
+# A run missed while the server was off happens when it comes back.
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

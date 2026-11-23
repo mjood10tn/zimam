@@ -287,6 +287,15 @@ if [ "${#units[@]}" -gt 0 ]; then
 	if [ -n "$out" ]; then
 		fail "systemd-analyze verify reported problems"
 	fi
+	# verify accepts a timer whose OnCalendar= never elapses; calendar parses
+	# each schedule and fails on one it can't (R05-D7).
+	for u in "${units[@]}"; do
+		case "$u" in *.timer) ;; *) continue ;; esac
+		while IFS= read -r spec; do
+			echo "== systemd-analyze calendar '$spec' ($(basename "$u"))"
+			systemd-analyze calendar "$spec" || fail "$(basename "$u"): systemd-analyze calendar refused '$spec'"
+		done < <(sed -n 's/^OnCalendar=//p' "$u")
+	done
 fi
 
 echo "configcheck: passed"

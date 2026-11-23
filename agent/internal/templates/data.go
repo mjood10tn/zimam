@@ -143,6 +143,13 @@ type WorkerUnit struct {
 	TimeoutStopSec int // the worker's timeout plus 30
 }
 
+// BackupUnit fills systemd/zimam-backup.service and .timer, one plan's units
+// (R05-D7).
+type BackupUnit struct {
+	Plan     contract.PlanID
+	Schedule contract.BackupSchedule
+}
+
 // SiteTarget fills systemd/zimam-site.target, which groups a site's workers.
 type SiteTarget struct{ Site contract.SiteName }
 

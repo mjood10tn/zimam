@@ -81,6 +81,12 @@ var goldenCases = map[string][]goldenFile{
 	"rclone-s3":   rcloneConf(func() []RcloneRemote { return []RcloneRemote{goldenS3Remote()} }),
 	"rclone-sftp": rcloneConf(func() []RcloneRemote { return []RcloneRemote{goldenSFTPRemote("ssh-ed25519")} }),
 	"rclone-two":  rcloneConf(func() []RcloneRemote { return []RcloneRemote{goldenSFTPRemote(""), goldenS3Remote()} }),
+	// A backup plan's service and timer (R05-D7), one plan per schedule shape.
+	"backup-plans": backupUnits(
+		BackupUnit{Plan: "nightly", Schedule: "daily 03:30"},
+		BackupUnit{Plan: "weekly-full", Schedule: "weekly sun 23:05"},
+		BackupUnit{Plan: "db-hourly", Schedule: "hourly"},
+	),
 	// A site's worker units (R04-D2) with their target: a laravel-queue
 	// worker with a timeout, and a custom one on the defaults. A unit is a
 	// template whatever the worker's processes (1 to 10 are its instances
@@ -231,6 +237,17 @@ func units() []goldenFile {
 	var files []goldenFile
 	for _, name := range []string{"zimam-panel-queue.service", "zimam-panel-scheduler.service", "zimam-panel-scheduler.timer", "zimam-maintenance.service", "zimam-maintenance.timer"} {
 		files = append(files, goldenFile{path: p.SystemdUnit(name), tmpl: "systemd/" + name, data: func() any { return PanelUnits{PanelPHP: "8.4"} }})
+	}
+	return files
+}
+
+func backupUnits(units ...BackupUnit) []goldenFile {
+	var p paths.Paths
+	var files []goldenFile
+	for _, u := range units {
+		for _, kind := range []string{"service", "timer"} {
+			files = append(files, goldenFile{path: p.SystemdUnit("zimam-backup-" + string(u.Plan) + "." + kind), tmpl: "systemd/zimam-backup." + kind, data: func() any { return u }})
+		}
 	}
 	return files
 }
@@ -411,8 +428,9 @@ type renderedString struct {
 func renderedStrings(t testing.TB) []renderedString {
 	// A string a template checks again before writing it, such as a
 	// bcrypt hash in htpasswd, or a cron schedule, takes the sentinel in its
-	// own shape, as is an rclone host key algorithm, one of a fixed list.
-	sentinels := []string{"zimamsentinel", "$2y$12$zimamsentinel" + strings.Repeat("a", 40), "0 0 1 1 *", "rsa-sha2-512 rsa-sha2-256"}
+	// own shape, as is an rclone host key algorithm, one of a fixed list,
+	// and a backup schedule, whose "hourly" renders as it is.
+	sentinels := []string{"zimamsentinel", "$2y$12$zimamsentinel" + strings.Repeat("a", 40), "0 0 1 1 *", "rsa-sha2-512 rsa-sha2-256", "hourly"}
 	var found []renderedString
 	for name, files := range goldenCases {
 		for _, gf := range files {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"zimam/agent/contract"
+	"zimam/agent/internal/backup"
 	"zimam/agent/internal/jobs"
 	"zimam/agent/internal/mysql"
 	"zimam/agent/internal/sites"
@@ -75,6 +76,10 @@ func dropDatabase(ctx context.Context, d sysexec.Deps, st sites.State, db contra
 		return st, fmt.Errorf("%w.%s", err, revokedNotDropped(db))
 	}
 	d.Logf("Dropped database %s", db)
+	// A plan that still named it would fail at every run (R05-D13).
+	if err := backup.ForgetDatabase(d.Paths, db); err != nil {
+		return st, fmt.Errorf("the database %s is dropped, but removing it from the backup plans failed; run the command again: %w", db, err)
+	}
 	st.Databases = withoutDatabase(st.Databases, db)
 	if err := sites.Save(d.Paths, st); err != nil {
 		return st, fmt.Errorf("the database %s is dropped, but site %s's state could not be saved; run the command again: %w", db, st.Name, err)

@@ -150,6 +150,9 @@ func Run(ctx context.Context, d sysexec.Deps, j Jobs, homes Homes, w interface{ 
 	if err != nil {
 		errs = append(errs, fmt.Errorf("pruning old jobs: %w", err))
 	}
+	if err := pruneBackupRuns(d); err != nil {
+		errs = append(errs, fmt.Errorf("pruning old backup run records: %w", err))
+	}
 	sctx, cancel = step(runCtx, limits.keyring)
 	c.KeyringRefreshed, err = refreshKeyring(sctx, d)
 	cancel()

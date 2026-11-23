@@ -48,6 +48,7 @@ type Context struct {
 	Paths  paths.Paths
 	Run    sysexec.Runner
 	Helper *helper.Client
+	LogGID int // the group of logs a job writes besides its own (zimam-agent), -1 to leave it
 }
 
 // Deps is the job's view of the system, for the packages that take one.
@@ -157,7 +158,7 @@ func (m *Manager) call(ctx context.Context, id contract.JobID, sp spec, logf fun
 		}
 	}()
 	run := packageGuard{Runner: m.Run, lock: m.Paths.JobCancelLock(id)}
-	return h(ctx, &Context{ID: id, Logf: logf, Config: m.Config, Paths: m.Paths, Run: run, Helper: m.Helper}, p)
+	return h(ctx, &Context{ID: id, Logf: logf, Config: m.Config, Paths: m.Paths, Run: run, Helper: m.Helper, LogGID: m.LogGID}, p)
 }
 
 // record writes a run's final state and audits it.

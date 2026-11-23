@@ -1,0 +1,12 @@
+# Managed by Zimam. Changes here are overwritten.
+[Unit]
+Description=Run Zimam backup plan db-hourly on its schedule
+
+[Timer]
+OnCalendar=hourly
+# A run missed while the server was off happens when it comes back.
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

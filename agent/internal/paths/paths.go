@@ -184,6 +184,37 @@ func (p Paths) BackupDestinationsState() string {
 }
 func (p Paths) BackupPlansState() string { return p.at("var/lib/zimam/backups/plans.json") }
 
+// BackupPlansLock keeps writers of plans.json apart: backup.plan under the
+// server subject, and site.destroy or db.drop under a site's (R05-D13).
+func (p Paths) BackupPlansLock() string { return p.at("run/zimam/locks/backup-plans.lock") }
+
+// BackupLock is held by a plan's run, so a timer run and a panel run of one
+// plan never overlap (R05 Task 7).
+func (p Paths) BackupLock(plan contract.PlanID) string {
+	return p.at("run/zimam/locks", "backup-"+string(plan)+".lock")
+}
+
+// BackupRunsDir holds a plan's run records (R05-D9, root 0600 each).
+func (p Paths) BackupRunsDir(plan contract.PlanID) string {
+	return p.at("var/lib/zimam/backups", string(plan), "runs")
+}
+func (p Paths) BackupRunRecord(plan contract.PlanID, id contract.BackupID) string {
+	return p.at("var/lib/zimam/backups", string(plan), "runs", string(id)+".json")
+}
+
+// BackupLogsDir holds the run logs, per plan (R05-D9, root:zimam-agent 0640
+// each, like job logs).
+func (p Paths) BackupLogsDir() string { return p.at("var/log/zimam/backups") }
+func (p Paths) BackupLog(plan contract.PlanID, id contract.BackupID) string {
+	return p.at("var/log/zimam/backups", string(plan), string(id)+".log")
+}
+
+// TimerStamp is where systemd keeps a Persistent= timer's last run; a
+// removed plan's goes with it (Task 1).
+func (p Paths) TimerStamp(timer string) string {
+	return p.at("var/lib/systemd/timers", "stamp-"+timer)
+}
+
 // Crontab and Atq exist while cron and at are installed; site.destroy
 // clears a deleted user's jobs only then.
 func (p Paths) Crontab() string { return p.at("usr/bin/crontab") }

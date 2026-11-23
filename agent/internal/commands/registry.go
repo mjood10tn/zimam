@@ -42,6 +42,7 @@ func New(d sysexec.Deps, m *jobs.Manager) Handlers {
 		"db.list":                 dbList(d),
 		"site.workers.status":     siteWorkersStatus(d),
 		"backup.destination.keys": backupDestinationKeys(d),
+		"backup.runs":             backupRuns(d),
 	}
 	if m == nil {
 		return h

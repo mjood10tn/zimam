@@ -145,6 +145,13 @@ var production = map[string]string{
 	"BackupStateDir":          "/var/lib/zimam/backups",
 	"BackupDestinationsState": "/var/lib/zimam/backups/destinations.json",
 	"BackupPlansState":        "/var/lib/zimam/backups/plans.json",
+	"BackupPlansLock":         "/run/zimam/locks/backup-plans.lock",
+	"BackupLock":              "/run/zimam/locks/backup-nightly.lock",
+	"BackupRunsDir":           "/var/lib/zimam/backups/nightly/runs",
+	"BackupRunRecord":         "/var/lib/zimam/backups/nightly/runs/20261123T033000Z.json",
+	"BackupLogsDir":           "/var/log/zimam/backups",
+	"BackupLog":               "/var/log/zimam/backups/nightly/20261123T033000Z.log",
+	"TimerStamp":              "/var/lib/systemd/timers/stamp-site:shop",
 	"GitBinary":               "/usr/bin/git",
 	"UnzipBinary":             "/usr/bin/unzip",
 	"FPMReloadDir":            "/run/zimam/fpm-reload",
@@ -162,6 +169,8 @@ func callAll(t *testing.T, p Paths) map[string]string {
 		reflect.TypeFor[contract.PHPVersion]():    reflect.ValueOf(contract.PHPVersion("8.4")),
 		reflect.TypeFor[contract.JobID]():         reflect.ValueOf(contract.JobID(testJob)),
 		reflect.TypeFor[contract.DestinationID](): reflect.ValueOf(contract.DestinationID("offsite")),
+		reflect.TypeFor[contract.PlanID]():        reflect.ValueOf(contract.PlanID("nightly")),
+		reflect.TypeFor[contract.BackupID]():      reflect.ValueOf(contract.BackupID("20261123T033000Z")),
 		reflect.TypeFor[string]():                 reflect.ValueOf("site:shop"),
 	}
 	v := reflect.ValueOf(p)
