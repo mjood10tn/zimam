@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Agent\Commands\SiteProvision;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
@@ -81,6 +82,12 @@ class Site extends Model
     public function databases(): HasMany
     {
         return $this->hasMany(Database::class);
+    }
+
+    /** The backup plans that back up the site's files (v0.5.0). */
+    public function backupPlans(): BelongsToMany
+    {
+        return $this->belongsToMany(BackupPlan::class);
     }
 
     /** The site's service users: MySQL's now, Valkey's next. */

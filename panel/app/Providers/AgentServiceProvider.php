@@ -10,6 +10,7 @@ use App\Agent\FakeJobLogReader;
 use App\Agent\FileJobLogReader;
 use App\Agent\JobLogReader;
 use App\Agent\JobOutcomes;
+use App\Agent\Outcomes\BackupOutcomes;
 use App\Agent\Outcomes\CacheOutcomes;
 use App\Agent\Outcomes\CertificateOutcomes;
 use App\Agent\Outcomes\CronOutcomes;
@@ -47,6 +48,7 @@ class AgentServiceProvider extends ServiceProvider
             WorkerOutcomes::register($outcomes);
             CronOutcomes::register($outcomes);
             NodeOutcomes::register($outcomes);
+            BackupOutcomes::register($outcomes);
 
             return $outcomes;
         });

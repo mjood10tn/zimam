@@ -102,6 +102,15 @@ final class FakeAgentClient implements AgentClient
     /** How many deploys took the branch's head: each gets its own commit. */
     private int $heads = 0;
 
+    /** @var array<string, array{type: string, password: string, salt: string, fingerprint: ?string}> each backup destination, as succeeded backup.destination jobs left it */
+    private array $destinations = [];
+
+    /** @var array<string, array<string, mixed>> each backup plan's params, as succeeded backup.plan jobs left them */
+    private array $plans = [];
+
+    /** @var list<array<string, mixed>> the run records, oldest first, as backup.runs answers them */
+    private array $backupRuns = [];
+
     public function __construct()
     {
         $this->systemStatus = self::serverStatus(demo: false);
@@ -216,6 +225,55 @@ final class FakeAgentClient implements AgentClient
         return array_keys($this->databases);
     }
 
+    /** Puts a backup destination on the fake's server, as a succeeded backup.destination would. */
+    public function backupDestination(string $id, string $type = 's3', ?string $password = null, ?string $salt = null): static
+    {
+        $this->destinations[$id] = ['type' => $type, 'password' => $password ?? str_repeat('p', 43), 'salt' => $salt ?? str_repeat('s', 43), 'fingerprint' => null];
+
+        return $this;
+    }
+
+    /**
+     * Puts a backup plan on the fake's server, as a succeeded backup.plan would.
+     *
+     * @param  array<string, mixed>  $params  backup.plan's params
+     */
+    public function backupPlan(string $id, array $params = []): static
+    {
+        $this->plans[$id] = $params + ['id' => $id, 'destination' => array_key_first($this->destinations) ?? 'offsite', 'schedule' => 'daily 02:00', 'retention' => ['keep_last' => 7]];
+
+        return $this;
+    }
+
+    /**
+     * The backup plans on the fake's server, by id, with their params.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    public function backupPlans(): array
+    {
+        return $this->plans;
+    }
+
+    /**
+     * Adds or replaces (by plan and backup) a run record, as a run from the
+     * plan's timer or the panel writes it (R05-D9).
+     *
+     * @param  array<string, mixed>  $record  BackupRunRecord's fields; plan and backup at least
+     */
+    public function backupRunRecord(array $record): static
+    {
+        $record += ['trigger' => 'timer', 'status' => 'succeeded', 'parts' => [], 'started_at' => self::goTime(CarbonImmutable::createFromFormat('Ymd\THis\Z', $record['backup'], 'UTC'))];
+        if ($record['status'] !== 'running') {
+            $record['finished_at'] ??= $record['started_at'];
+        }
+        $this->backupRuns = array_values(array_filter($this->backupRuns, fn (array $r): bool => [$r['plan'], $r['backup']] !== [$record['plan'], $record['backup']]));
+        $this->backupRuns[] = $record;
+        usort($this->backupRuns, fn (array $a, array $b): int => strcmp($a['backup'], $b['backup']));
+
+        return $this;
+    }
+
     /** Gives a site a .env on the fake's server, as a succeeded site.env.write would. */
     public function env(string $site, string $content): static
     {
@@ -304,6 +362,13 @@ final class FakeAgentClient implements AgentClient
             $command->name() === 'site.env.read' => $this->siteEnvRead($command->params()['name']),
             $command->name() === 'db.list' => $this->dbList($command->params()),
             $command->name() === 'site.workers.status' => $this->siteWorkersStatus($command->params()['name']),
+            $command->name() === 'backup.destination.keys' => $this->backupKeys($command->params()['id']),
+            $command->name() === 'backup.list' => $this->backupList($command->params()['plan']),
+            $command->name() === 'backup.runs' => ['runs' => array_values(array_filter(
+                $this->backupRuns,
+                fn (array $r): bool => (! isset($command->params()['plan']) || $r['plan'] === $command->params()['plan'])
+                    && (! isset($command->params()['since']) || strcmp($r['backup'], $command->params()['since']) > 0),
+            ))],
             $command instanceof JobStatus => $this->advance($command->job),
             $command instanceof JobCancel => $this->cancel($command->job),
             $command instanceof JobFollow => throw new LogicException('job.follow streams: use follow()'),
@@ -390,6 +455,11 @@ final class FakeAgentClient implements AgentClient
 
             return;
         }
+        if (str_starts_with($command->name(), 'backup.')) {
+            $this->precheckBackup($command);
+
+            return;
+        }
         if ($command->name() === 'node.uninstall' && ! ($this->systemStatus['node']['installed'] ?? false)) {
             throw new AgentNotFound("Node.js isn't installed.");
         }
@@ -441,6 +511,13 @@ final class FakeAgentClient implements AgentClient
             'db.create', 'db.drop' => ['site' => $params['site'], 'database' => $params['database']],
             'db.user', 'cache.user' => ['site' => $params['site']],
             'valkey.install' => ['version' => '9.0.4'],
+            'backup.destination' => ['id' => $params['id']] + ($params['type'] === 'sftp' && ! isset($this->destinations[$params['id']]) ? ['public_key' => self::deployKey('backup/'.$params['id'])['public_key'].' zimam-backup-'.$params['id']] : []),
+            'backup.destination.delete' => ['id' => $params['id']],
+            'backup.destination.test' => ['id' => $params['id']] + ($this->destinations[$params['id']]['type'] === 'sftp' ? ['host_key_fingerprint' => $this->destinations[$params['id']]['fingerprint'] ?? self::deployKey('host/'.$params['id'])['fingerprint']] : []),
+            'backup.plan' => ['id' => $params['id']],
+            'backup.plan.delete' => ['id' => $params['plan']],
+            'backup.run' => ['plan' => $params['plan'], 'backup' => CarbonImmutable::now('UTC')->format('Ymd\THis\Z'), 'parts' => $this->backupParts($this->plans[$params['plan']])],
+            'backup.restore' => $this->restoreResult($params),
             'security.check' => self::securityFindings($params),
             'logs.policy' => $params,
             // Let's Encrypt's certificates last 90 days.
@@ -620,8 +697,100 @@ final class FakeAgentClient implements AgentClient
             'node.install' => $this->systemStatus['node'] = ['installed' => true, 'major' => $params['major'], 'version' => $result['version'] ?? $params['major'].'.1.0'] + $this->systemStatus['node'],
             'node.uninstall' => $this->systemStatus['node'] = ['installed' => false, 'available' => $this->systemStatus['node']['available']],
             'cache.user' => $this->cacheUser($params['site']),
+            'backup.destination' => $this->destinations[$params['id']] ??= ['type' => $params['type'], 'password' => $params['encryption_password'], 'salt' => $params['encryption_salt'], 'fingerprint' => $params['sftp']['host_key_fingerprint'] ?? null],
+            'backup.destination.delete' => $this->destinations = array_diff_key($this->destinations, [$params['id'] => true]),
+            'backup.destination.test' => $this->destinations[$params['id']]['fingerprint'] = $result['host_key_fingerprint'] ?? null,
+            'backup.plan' => $this->plans[$params['id']] = $params,
+            'backup.plan.delete' => $this->plans = array_diff_key($this->plans, [$params['plan'] => true]),
+            'backup.run' => $this->backupRunRecord(['plan' => $params['plan'], 'backup' => $result['backup'], 'trigger' => 'panel', 'parts' => $result['parts']]),
+            'backup.restore' => isset($params['database']) && ! ($params['overwrite'] ?? false) ? $this->database($params['site'], $params['database']) : null,
             default => null,
         };
+        // db.drop takes the database out of every plan (R05-D13; site.destroy in forget()).
+        if ($command === 'db.drop') {
+            $this->plans = array_map(fn (array $p): array => array_merge($p, ['databases' => array_values(array_diff($p['databases'] ?? [], [$params['database']]))]), $this->plans);
+        }
+    }
+
+    /**
+     * The agent's checks of a backup.* job against the fake's destinations
+     * and plans: what each needs must exist, a destination a plan uses
+     * stays, and a new destination brings its keys (R05-D3).
+     */
+    private function precheckBackup(AgentCommand $command): void
+    {
+        $params = $command->params();
+        $id = $params['id'] ?? null;
+        match ($command->name()) {
+            'backup.destination' => match (true) {
+                ! isset($this->destinations[$id]) && ! isset($params['encryption_password']) => throw new AgentValidationFailed('Invalid parameters', ['encryption_password' => 'is required for a new destination']),
+                isset($this->destinations[$id], $params['encryption_password']) && $params['encryption_password'] !== $this->destinations[$id]['password'] => throw new AgentConflict("Destination {$id} keeps its own encryption keys."),
+                default => null,
+            },
+            'backup.destination.delete', 'backup.destination.test' => match (true) {
+                ! isset($this->destinations[$id]) => throw new AgentNotFound("No backup destination {$id}."),
+                $command->name() === 'backup.destination.delete' && in_array($id, array_column($this->plans, 'destination'), true) => throw new AgentConflict("Plans still use destination {$id}."),
+                default => null,
+            },
+            'backup.plan' => isset($this->destinations[$params['destination']]) ? null : throw new AgentNotFound("No backup destination {$params['destination']}."),
+            'backup.plan.delete', 'backup.run', 'backup.restore' => isset($this->plans[$params['plan']]) ? null : throw new AgentNotFound("No backup plan {$params['plan']}."),
+            default => null,
+        };
+    }
+
+    /** @return array{id: string, encryption_password: string, encryption_salt: string} backup.destination.keys' data */
+    private function backupKeys(string $id): array
+    {
+        if (! isset($this->destinations[$id])) {
+            throw new AgentNotFound("No backup destination {$id}.");
+        }
+
+        return ['id' => $id, 'encryption_password' => $this->destinations[$id]['password'], 'encryption_salt' => $this->destinations[$id]['salt']];
+    }
+
+    /** @return array{backups: list<array<string, mixed>>} backup.list's data: the plan's succeeded runs */
+    private function backupList(string $plan): array
+    {
+        if (! isset($this->plans[$plan])) {
+            throw new AgentNotFound("No backup plan {$plan}.");
+        }
+        $backups = [];
+        foreach ($this->backupRuns as $run) {
+            if ($run['plan'] === $plan && $run['status'] === 'succeeded') {
+                $backups[] = ['backup' => $run['backup'], 'started_at' => $run['started_at'], 'finished_at' => $run['finished_at'], 'parts' => $run['parts']];
+            }
+        }
+
+        return ['backups' => $backups];
+    }
+
+    /**
+     * A run's parts: each site's files, each database, the panel last.
+     *
+     * @param  array<string, mixed>  $plan
+     * @return list<array{part: string, bytes: int, sha256: string}>
+     */
+    private function backupParts(array $plan): array
+    {
+        $parts = [...array_map(fn (string $s): string => "files-{$s}", $plan['sites'] ?? []), ...array_map(fn (string $d): string => "db-{$d}", $plan['databases'] ?? [])];
+        if ($plan['panel'] ?? false) {
+            $parts[] = 'panel';
+        }
+
+        return array_map(fn (string $part): array => ['part' => $part, 'bytes' => 4096, 'sha256' => hash('sha256', $part)], $parts);
+    }
+
+    /**
+     * @param  array<string, mixed>  $params
+     * @return array<string, mixed> backup.restore's data
+     */
+    private function restoreResult(array $params): array
+    {
+        $result = ['site' => $params['site'], 'part' => $params['part']];
+
+        return isset($params['database'])
+            ? $result + ['database' => $params['database']]
+            : $result + ['folder' => "/home/s_{$params['site']}/restores/{$params['backup']}"];
     }
 
     /**
@@ -648,6 +817,7 @@ final class FakeAgentClient implements AgentClient
     {
         unset($this->repositories[$name], $this->releases[$name], $this->envs[$name], $this->dbUsers[$name], $this->cacheUsers[$name], $this->workers[$name], $this->crons[$name]);
         $this->databases = array_filter($this->databases, fn (array $database): bool => $database['site'] !== $name);
+        $this->plans = array_map(fn (array $p): array => array_merge($p, ['sites' => array_values(array_diff($p['sites'] ?? [], [$name]))]), $this->plans);
     }
 
     public function status(string $jobId): AgentJobStatus
@@ -1107,7 +1277,8 @@ final class FakeAgentClient implements AgentClient
             $command->name() === 'e2e.sleep' => 'e2e:'.$params['subject'],
             $command->name() === 'security.check' => isset($params['name']) ? 'site:'.$params['name'] : 'server',
             str_starts_with($command->name(), 'site.') || $command->name() === 'cert.issue' => 'site:'.($params['name'] ?? ''),
-            in_array($command->name(), ['db.create', 'db.drop', 'db.user'], true) => 'site:'.($params['site'] ?? ''),
+            in_array($command->name(), ['db.create', 'db.drop', 'db.user', 'backup.restore'], true) => 'site:'.($params['site'] ?? ''),
+            $command->name() === 'backup.run' => 'backup:'.$params['plan'],
             str_starts_with($command->name(), 'php.') && $command->name() !== 'php.default' => 'php:'.($params['version'] ?? ''),
             default => 'server',
         };

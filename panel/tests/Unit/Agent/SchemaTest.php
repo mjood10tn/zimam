@@ -5,6 +5,16 @@ namespace Tests\Unit\Agent;
 use App\Agent\AgentCommand;
 use App\Agent\AgentCommandKind;
 use App\Agent\Commands\AgentVersion;
+use App\Agent\Commands\BackupDestination;
+use App\Agent\Commands\BackupDestinationDelete;
+use App\Agent\Commands\BackupDestinationKeys;
+use App\Agent\Commands\BackupDestinationTest;
+use App\Agent\Commands\BackupList;
+use App\Agent\Commands\BackupPlan;
+use App\Agent\Commands\BackupPlanDelete;
+use App\Agent\Commands\BackupRestore;
+use App\Agent\Commands\BackupRun;
+use App\Agent\Commands\BackupRuns;
 use App\Agent\Commands\CacheUser;
 use App\Agent\Commands\CertIssue;
 use App\Agent\Commands\DbCreate;
@@ -122,6 +132,16 @@ final class SchemaTest extends TestCase
             new SiteCron('shop', true, self::cronJobs()),
             new NodeInstall('26'),
             new NodeUninstall,
+            new BackupDestination('offsite', 's3', self::S3, str_repeat('a', 43), str_repeat('b', 43)),
+            new BackupDestinationDelete('offsite'),
+            new BackupDestinationTest('offsite'),
+            new BackupDestinationKeys('offsite'),
+            new BackupPlan('nightly', 'offsite', ['shop'], ['s_shop_main'], true, 'weekly mon 02:30', ['keep_last' => 7, 'keep_daily' => 7, 'keep_weekly' => 4, 'keep_monthly' => 6]),
+            new BackupPlanDelete('nightly'),
+            new BackupRun('nightly'),
+            new BackupList('nightly'),
+            new BackupRuns('nightly', '20261123T020000Z'),
+            new BackupRestore('nightly', '20261123T020000Z', 'db-s_shop_main', 'shop', 's_shop_main', overwrite: true),
         ];
 
         return array_combine(
@@ -181,6 +201,78 @@ final class SchemaTest extends TestCase
         $metrics = $fake->call(new SystemMetrics)->data;
         $this->assertSame(['horizon', 'queue'], array_column($metrics['workers'], 'worker'));
         $this->assertResult('system.metrics', $metrics, 'fake system.metrics with workers');
+    }
+
+    private const S3 = ['endpoint' => 'https://s3.example.com:9000', 'region' => 'us-east-1', 'bucket' => 'zimam-backups', 'prefix' => 'servers/one', 'access_key_id' => 'AKIAEXAMPLE', 'secret_access_key' => 'c2VjcmV0/key+value='];
+
+    /**
+     * The backup commands with the least they take, and the fake's answers
+     * for all ten: an SFTP destination gets a public key and a pinned host
+     * key, a run lists its parts, a restore names what it wrote.
+     */
+    public function testBackupParamsAndFakeResultsMatchSchemas(): void
+    {
+        $minimal = [
+            new BackupDestination('offsite', 'sftp', ['host' => 'backup.example.com', 'port' => 22, 'user' => 'zimam']),
+            new BackupDestination('offsite', 's3', ['endpoint' => 'https://s3.example.com', 'region' => 'auto', 'bucket' => 'b-1', 'access_key_id' => 'k', 'secret_access_key' => 's']),
+            new BackupPlan('only-panel', 'offsite', [], [], true, 'hourly', ['keep_last' => 1]),
+            new BackupRuns,
+            new BackupRestore('nightly', '20261123T020000Z', 'files-shop', 'shop'),
+        ];
+        foreach ($minimal as $command) {
+            $this->assertValid(self::wire($command->jsonParams()), file_get_contents($this->schemaPath($command->name().'.params')), "minimal {$command->name()}");
+        }
+        $this->assertSame(['id' => 'only-panel', 'destination' => 'offsite', 'panel' => true, 'schedule' => 'hourly', 'retention' => ['keep_last' => 1]], $minimal[2]->params());
+
+        $fake = (new FakeAgentClient)->installMysql()->database('shop', 's_shop_main');
+        $jobs = [
+            new BackupDestination('offsite', 'sftp', ['host' => 'backup.example.com', 'port' => 22, 'user' => 'zimam'], str_repeat('a', 43), str_repeat('b', 43)),
+            new BackupDestinationTest('offsite'),
+            new BackupPlan('nightly', 'offsite', ['shop'], ['s_shop_main'], true, 'daily 02:00', ['keep_last' => 7]),
+            new BackupRun('nightly'),
+        ];
+        $results = [];
+        foreach ($jobs as $command) {
+            $final = $fake->follow($fake->submit($command)->id, 0, function (): void {});
+            $this->assertSame('succeeded', $final->status, $command->name());
+            $this->assertResult($command->name(), $final->result, "fake {$command->name()} result");
+            $results[$command->name()] = $final->result;
+        }
+        $this->assertStringStartsWith('ssh-ed25519 ', $results['backup.destination']['public_key']);
+        $this->assertMatchesRegularExpression('/^SHA256:[A-Za-z0-9+\/]{43}\z/', $results['backup.destination.test']['host_key_fingerprint']);
+        $this->assertSame(['files-shop', 'db-s_shop_main', 'panel'], array_column($results['backup.run']['parts'], 'part'));
+
+        $keys = $fake->call(new BackupDestinationKeys('offsite'))->data;
+        $this->assertResult('backup.destination.keys', $keys, 'fake backup.destination.keys');
+        $this->assertSame(str_repeat('a', 43), $keys['encryption_password']);
+        $this->assertResult('backup.runs', $fake->call(new BackupRuns)->data, 'fake backup.runs');
+        $this->assertSame([], $fake->call(new BackupRuns('nightly', $results['backup.run']['backup']))->data['runs']);
+        $this->assertResult('backup.runs', ['runs' => [['plan' => 'nightly', 'backup' => '20261123T020000Z', 'trigger' => 'timer', 'status' => 'running', 'parts' => [], 'started_at' => '2026-11-23T02:00:00Z', 'finished_at' => null]]], 'a running record');
+        $this->assertResult('backup.list', $fake->call(new BackupList('nightly'))->data, 'fake backup.list');
+
+        $backup = $results['backup.run']['backup'];
+        foreach ([new BackupRestore('nightly', $backup, 'db-s_shop_main', 'shop', 's_shop_new'), new BackupRestore('nightly', $backup, 'files-shop', 'shop')] as $command) {
+            $final = $fake->follow($fake->submit($command)->id, 0, function (): void {});
+            $this->assertResult('backup.restore', $final->result, 'fake backup.restore result');
+        }
+        $this->assertResult('backup.restore', ['site' => 'shop', 'part' => 'files-shop', 'folder' => '/home/s_shop/restores/x', 'skipped_links' => ['site/shared/public/storage']], 'restore with skipped links');
+        $this->assertContains('s_shop_new', $fake->databaseNames());
+
+        foreach ([new BackupPlanDelete('nightly'), new BackupDestinationDelete('offsite')] as $command) {
+            $final = $fake->follow($fake->submit($command)->id, 0, function (): void {});
+            $this->assertResult($command->name(), $final->result, "fake {$command->name()} result");
+        }
+    }
+
+    /** The secret params are redacted in what the panel records. */
+    public function testBackupDestinationRedactsItsSecrets(): void
+    {
+        $params = (new BackupDestination('offsite', 's3', self::S3, str_repeat('a', 43), str_repeat('b', 43)))->redactedParams();
+        $json = json_encode($params);
+        foreach ([self::S3['access_key_id'], self::S3['secret_access_key'], str_repeat('a', 43), str_repeat('b', 43)] as $secret) {
+            $this->assertStringNotContainsString($secret, $json);
+        }
+        $this->assertSame('zimam-backups', $params['s3']['bucket']);
     }
 
     /** A command class missing from commands() would skip every check here. */
