@@ -19,6 +19,9 @@ import (
 // ships Linux builds as zips; scripts/configcheck/Dockerfile pins the same.
 const pinVersion = "1.76.0"
 
+// Version is the pinned release, recorded in each backup's manifest.
+const Version = pinVersion
+
 // pins are the release's SHA-256s per architecture: the zip's, from
 // rclone's PGP-signed SHA256SUMS, and the binary's inside it.
 var pins = map[string]struct{ zip, binary string }{

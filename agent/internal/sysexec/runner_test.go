@@ -94,6 +94,28 @@ func TestRunnerCapsOutput(t *testing.T) {
 	}
 }
 
+// Cmd.Stdout streams past the cap, for dumps; Result.Stdout stays empty.
+func TestRunnerStreamsStdout(t *testing.T) {
+	oldOut := maxStdout
+	maxStdout = 1000
+	t.Cleanup(func() { maxStdout = oldOut })
+	var n countWriter
+	res, err := ExecRunner{}.Run(context.Background(), Cmd{Path: "/usr/bin/head", Args: []string{"-c", "5000000", "/dev/zero"}, Stdout: &n})
+	if err != nil || n != 5000000 || len(res.Stdout) != 0 {
+		t.Errorf("streamed %d bytes, kept %d, err %v; want 5000000, 0, nil", n, len(res.Stdout), err)
+	}
+	var b strings.Builder
+	f := NewFakeRunner(Script{Path: "/usr/bin/mysqldump", Result: Result{Stdout: []byte("dump"), ExitCode: 2}})
+	res, err = f.Run(context.Background(), Cmd{Path: "/usr/bin/mysqldump", Stdout: &b})
+	if b.String() != "dump" || len(res.Stdout) != 0 || err == nil {
+		t.Errorf("fake: streamed %q, kept %q, err %v; want dump, nothing, an exit error", b.String(), res.Stdout, err)
+	}
+}
+
+type countWriter int
+
+func (c *countWriter) Write(p []byte) (int, error) { *c += countWriter(len(p)); return len(p), nil }
+
 func TestRunnerContextCancel(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()

@@ -55,6 +55,18 @@ func (f *FakeRunner) Calls() []Call {
 }
 
 func (f *FakeRunner) Run(ctx context.Context, c Cmd) (Result, error) {
+	res, err := f.answer(c)
+	if c.Stdout != nil {
+		// Written outside the lock: the reader may be another fake call.
+		if _, werr := c.Stdout.Write(res.Stdout); werr != nil && err == nil {
+			err = werr
+		}
+		res.Stdout = nil
+	}
+	return res, err
+}
+
+func (f *FakeRunner) answer(c Cmd) (Result, error) {
 	var stdin []byte
 	if c.Stdin != nil {
 		var err error
