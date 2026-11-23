@@ -43,3 +43,4 @@ A failed browser spec's Playwright trace, in `vps-logs-<arch>`, holds what the p
 - **Outside IPv6.** GitHub's runners have no IPv6, so traffic from outside the server over IPv6 isn't checked. A v6 firewall rule that drops outside traffic would pass.
 - **IPv6 validation.** sslip.io names have only an A record, so Let's Encrypt validates over IPv4.
 - **A real domain** is one variable away: set `E2E_DOMAIN` to a zone whose records point at the server.
+- **Backups and notifications (v0.5.0).** The sinks (`e2e/sinks`: S3, SFTP and SMTP) run only in LXD, so `v05-backups.sh`, the `v05-backups` spec and `probes/backups.sh` skip on a VPS with that reason, and `audit.sh` asks for no backup command. Real S3 and SFTP over the internet are left to the owner's own check before a release.

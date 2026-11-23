@@ -83,6 +83,12 @@ test('v0.4.0: a worker, a cron job and the scheduler from a site\'s tabs, and No
     await expect(page.getByText(`Saving the cron jobs of ${site}`)).toBeVisible();
     await untilTab(page, url, 'Schedule', /weekly[\s\S]*Mon \d{1,2} \w{3} \d{4}, 03:00/, /Not applied/, 5 * minutes);
     await expect(page.getByText('0 3 * * mon', { exact: true })).toBeVisible();
+    // The next runs show from the saved rows while site.cron still runs, and the
+    // site's buttons stay disabled until it ends: reopen the tab until they aren't.
+    await expect(async () => {
+      await openTab(page, url, 'Schedule');
+      await expect(page.getByRole('button', { name: 'Turn on', exact: true })).toBeEnabled({ timeout: 3_000 });
+    }).toPass({ timeout: 2 * minutes });
     await page.getByRole('button', { name: 'Turn on', exact: true }).click();
     await untilTab(page, url, 'Schedule', /Laravel scheduler[\s\S]*\bOn\b[\s\S]*Turn off/, /Not applied/, 5 * minutes);
     await shoot(page, 'schedule-tab', () => openTab(page, url, 'Schedule'));
