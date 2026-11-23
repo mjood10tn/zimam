@@ -61,6 +61,23 @@ func (c *Client) command(ctx context.Context, a Account, op string, args ...stri
 // run runs op as a, with stdin as its input, and decodes the one JSON line
 // it prints into out.
 func (c *Client) run(ctx context.Context, a Account, op string, stdin io.Reader, out any, args ...string) error {
+	stdout := &capped{max: maxStdout}
+	if err := c.start(ctx, a, op, stdin, stdout, args...); err != nil {
+		return err
+	}
+	line, ok := bytes.CutSuffix(stdout.buf.Bytes(), []byte("\n"))
+	if stdout.over || !ok || bytes.IndexByte(line, '\n') >= 0 {
+		return fmt.Errorf("as-user %s as %s: the output is not one JSON line of at most %d bytes", op, a.Name, maxStdout)
+	}
+	if err := contract.DecodeStrict(line, out); err != nil {
+		return fmt.Errorf("as-user %s as %s: decoding the output: %w", op, a.Name, err)
+	}
+	return nil
+}
+
+// start runs op as a with stdin, its stdout going to stdout, and returns
+// an error unless it exited 0.
+func (c *Client) start(ctx context.Context, a Account, op string, stdin io.Reader, stdout io.Writer, args ...string) error {
 	if a.UID == 0 || a.GID == 0 || slices.Contains(a.Groups, 0) {
 		return fmt.Errorf("as-user %s as %s: refusing an account with root's uid, gid or group", op, a.Name)
 	}
@@ -68,7 +85,7 @@ func (c *Client) run(ctx context.Context, a Account, op string, stdin io.Reader,
 	if c.prepare != nil {
 		c.prepare(cmd)
 	}
-	stdout, stderr := &capped{max: maxStdout}, &capped{max: maxStderr}
+	stderr := &capped{max: maxStderr}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
 	cmd.WaitDelay = 5 * time.Second
 	err := cmd.Run()
@@ -81,13 +98,6 @@ func (c *Client) run(ctx context.Context, a Account, op string, stdin io.Reader,
 	}
 	if err != nil {
 		return fmt.Errorf("as-user %s as %s: %w", op, a.Name, err)
-	}
-	line, ok := bytes.CutSuffix(stdout.buf.Bytes(), []byte("\n"))
-	if stdout.over || !ok || bytes.IndexByte(line, '\n') >= 0 {
-		return fmt.Errorf("as-user %s as %s: the output is not one JSON line of at most %d bytes", op, a.Name, maxStdout)
-	}
-	if err := contract.DecodeStrict(line, out); err != nil {
-		return fmt.Errorf("as-user %s as %s: decoding the output: %w", op, a.Name, err)
 	}
 	return nil
 }
@@ -228,4 +238,14 @@ func (c *Client) Search(ctx context.Context, a Account, name string, from int64,
 // lim (§4 bootstrap step 6).
 func (c *Client) ExtractTar(ctx context.Context, a Account, dest string, tarball io.Reader, lim ExtractLimits) error {
 	return c.run(ctx, a, "extract-tar", tarball, &struct{}{}, dest, itoa(lim.MaxBytes), strconv.Itoa(lim.MaxEntries))
+}
+
+// ArchiveTree streams a gzip tarball of the named paths in a's home to w
+// (R05-D4); see archiveTree for what it holds. The archive is complete only
+// when it returns nil: w may have received part of it before an error.
+func (c *Client) ArchiveTree(ctx context.Context, a Account, w io.Writer, paths ...string) error {
+	if len(paths) == 0 {
+		return errors.New("as-user archive-tree: no paths")
+	}
+	return c.start(ctx, a, "archive-tree", nil, w, paths...)
 }

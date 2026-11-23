@@ -194,6 +194,10 @@ func parseMode(s string) (fs.FileMode, error) {
 // as one JSON line ({} for an operation without one), or the error to
 // stderr, and returns the exit code.
 func Serve(root *os.Root, op string, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if op == "archive-tree" {
+		// Its stdout is the archive (R05-D4): no result line follows.
+		return archiveTreeOp(root, args, stdout, stderr)
+	}
 	o, ok := operations[op]
 	if op == "exec" {
 		// exec writes frames to stdout before its result line (exec.go).
@@ -232,4 +236,26 @@ func Serve(root *os.Root, op string, args []string, stdin io.Reader, stdout, std
 		return exitFailed
 	}
 	return exitOK
+}
+
+// archiveTreeOp serves archive-tree: one or more paths, the archive on
+// stdout, and the exit code alone saying whether it is complete.
+func archiveTreeOp(root *os.Root, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintf(stderr, "%s: archive-tree takes one or more paths\n", usage)
+		return exitUsage
+	}
+	err := archiveTree(root, args, stdout)
+	switch {
+	case err == nil:
+		return exitOK
+	case errors.As(err, new(usageError)):
+		fmt.Fprintln(stderr, err)
+		return exitUsage
+	case errors.Is(err, fs.ErrNotExist):
+		fmt.Fprintln(stderr, err)
+		return exitNotExist
+	}
+	fmt.Fprintln(stderr, err)
+	return exitFailed
 }
