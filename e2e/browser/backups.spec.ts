@@ -64,7 +64,8 @@ test('v0.5.0: a backup destination with its keys shown once, tested, its keys sh
   await dialog.getByRole('textbox', { name: /^Last 6 characters/ }).fill(password.slice(-6));
   await dialog.getByRole('button', { name: 'Add destination', exact: true }).click();
   await expect(dialog).toBeHidden();
-  expect(await page.content()).not.toContain(password);
+  // The closed modal's markup goes with the next Livewire morph, not with the dialog itself.
+  await expect.poll(() => page.content(), { timeout: 30_000 }).not.toContain(password);
 
   await untilText(page, /S3-compatible\s+Ready/, /S3-compatible\s+Failed/, 5 * minutes);
   await page.getByRole('row', { name: /panel-s3/ }).getByRole('button', { name: 'Test' }).click();
