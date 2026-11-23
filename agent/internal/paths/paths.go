@@ -209,6 +209,11 @@ func (p Paths) BackupLog(plan contract.PlanID, id contract.BackupID) string {
 	return p.at("var/log/zimam/backups", string(plan), string(id)+".log")
 }
 
+// RestoreSpoolDir holds a backup part while a restore checks its hash
+// against the manifest, before anything is written (R05-D10, root 0700).
+// It is outside BackupStateDir, whose folders are plans.
+func (p Paths) RestoreSpoolDir() string { return p.at("var/lib/zimam/restore-spool") }
+
 // TimerStamp is where systemd keeps a Persistent= timer's last run; a
 // removed plan's goes with it (Task 1).
 func (p Paths) TimerStamp(timer string) string {

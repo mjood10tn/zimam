@@ -114,6 +114,17 @@ func memberName(name string) (string, error) {
 	return path.Clean(name), nil
 }
 
+// LinkRefused says why extract-tar would refuse the symlink member with
+// target, given every symlink member of the archive (links), or nil when
+// it would make it. A files restore drops such links before extracting
+// (R05 Task 8).
+func LinkRefused(member, target string, links map[string]string) error {
+	if err := linkStaysInside(member, target); err != nil {
+		return err
+	}
+	return linkAvoidsLinks(member, target, links)
+}
+
 func linkStaysInside(member, target string) error {
 	if path.IsAbs(target) {
 		return fmt.Errorf("symlink %q points outside the archive", member)

@@ -151,6 +151,7 @@ var production = map[string]string{
 	"BackupRunRecord":         "/var/lib/zimam/backups/nightly/runs/20261123T033000Z.json",
 	"BackupLogsDir":           "/var/log/zimam/backups",
 	"BackupLog":               "/var/log/zimam/backups/nightly/20261123T033000Z.log",
+	"RestoreSpoolDir":         "/var/lib/zimam/restore-spool",
 	"TimerStamp":              "/var/lib/systemd/timers/stamp-site:shop",
 	"GitBinary":               "/usr/bin/git",
 	"UnzipBinary":             "/usr/bin/unzip",
