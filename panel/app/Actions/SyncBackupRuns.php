@@ -6,6 +6,8 @@ use App\Agent\AgentClient;
 use App\Agent\Commands\BackupRuns;
 use App\Models\BackupPlan;
 use App\Models\BackupRun;
+use App\Notifications\PanelEvent;
+use App\Support\Bytes;
 use Carbon\CarbonImmutable;
 
 /**
@@ -13,10 +15,12 @@ use Carbon\CarbonImmutable;
  * gives the records after a backup id; a record still running changes
  * later, so the poll starts just before the oldest run the panel still
  * has as running, else after the newest it has. Records of plans the
- * panel doesn't know are skipped.
+ * panel doesn't know are skipped. Each run that finished notifies once.
  */
 final class SyncBackupRuns
 {
+    public function __construct(private readonly Notify $notify) {}
+
     /**
      * @return list<BackupRun> the runs that finished since the last sync, not yet notified
      */
@@ -51,6 +55,14 @@ final class SyncBackupRuns
             if (! $wasFinished && $run->status !== BackupRun::RUNNING && $run->notified_at === null) {
                 $finished[] = $run;
             }
+        }
+        foreach ($finished as $run) {
+            $this->notify->event("backup:{$run->backup_plan_id}:{$run->backup_id}", new PanelEvent(
+                'backup',
+                __("zimam.notify.events.backup_{$run->status}.title", ['plan' => $run->plan->key]),
+                __("zimam.notify.events.backup_{$run->status}.body", ['backup' => $run->backup_id, 'size' => Bytes::format($run->size_bytes), 'error' => (string) $run->error]),
+            ));
+            $run->update(['notified_at' => now()]);
         }
 
         return $finished;
