@@ -50,7 +50,7 @@ func TestRulesAgainstRealUFW(t *testing.T) {
 		defer os.Remove(p.AgentBinary())
 	}
 	d := sysexec.Deps{Paths: p, Run: sysexec.ExecRunner{}, Logf: t.Logf, Now: time.Now}
-	before, err := Status(d)
+	before, err := Status(context.Background(), d)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestRulesAgainstRealUFW(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := Status(d)
+	s, err := Status(context.Background(), d)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestRulesAgainstRealUFW(t *testing.T) {
 	if err := changes.Revert(context.Background(), d, id); err != nil {
 		t.Fatal(err)
 	}
-	after, err := Status(d)
+	after, err := Status(context.Background(), d)
 	if err != nil {
 		t.Fatal(err)
 	}
