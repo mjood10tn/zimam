@@ -94,11 +94,6 @@ func parseTuples(b []byte, v6 bool) []tuple {
 	return out
 }
 
-// ufwEnabled reads ENABLED= from ufw.conf.
-func ufwEnabled(path string) (bool, error) {
-	return readSetting(path, "ENABLED")
-}
-
 // ipv6Enabled reads IPV6= from /etc/default/ufw; UFW's default is yes.
 func ipv6Enabled(path string) (bool, error) {
 	on, err := readSetting(path, "IPV6")

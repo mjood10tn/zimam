@@ -308,8 +308,8 @@ func TestStatusGroupsRules(t *testing.T) {
 	v4 += tupleLine("allow", "tcp", "8080", "203.0.113.0/24", "zimam:app") + tupleLine("deny", "udp", "53", "198.51.100.7", "zimam:dns") +
 		tupleLine("allow", "tcp", "22", "0.0.0.0/0", "zimam:ssh-22") + tupleLine("allow", "tcp", "9000:9010", "0.0.0.0/0", "zimam:range")
 	v6 += tupleLine("allow", "tcp", "8080", "2001:db8::/32", "zimam:app") + tupleLine("allow", "tcp", "22", "::/0", "zimam:ssh-22")
-	e := newEnv(t, v4, v6)
-	s, err := Status(e.d)
+	e := newEnv(t, v4, v6, ufwActiveScript())
+	s, err := Status(context.Background(), e.d)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,6 +332,17 @@ func TestStatusGroupsRules(t *testing.T) {
 	// A status rule is valid params again, so the panel can round-trip it.
 	if err := (&contract.FirewallRulesParams{Rules: s.Rules}).Validate(); err != nil {
 		t.Errorf("status rules don't validate: %v", err)
+	}
+}
+
+// ufw.conf can say ENABLED=yes while UFW isn't running (an LXD container
+// installed with --skip-firewall): active is what ufw status says.
+func TestStatusActiveIsUFWsOwnAnswer(t *testing.T) {
+	inactive := ufwScript("status")
+	inactive.Result.Stdout = []byte("Status: inactive\n")
+	e := newEnv(t, "", "", inactive)
+	if s, err := Status(context.Background(), e.d); err != nil || s.Active {
+		t.Errorf("Status = active %v, %v; want inactive", s.Active, err)
 	}
 }
 
@@ -417,4 +428,10 @@ func TestLiftingRestrictionAdoptsInstallerWebRules(t *testing.T) {
 	if len(got) != 2 {
 		t.Errorf("webCalls = %q, want the two adoptions", got)
 	}
+}
+
+func ufwActiveScript() sysexec.Script {
+	s := ufwScript("status")
+	s.Result.Stdout = []byte("Status: active\n")
+	return s
 }

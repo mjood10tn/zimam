@@ -1,8 +1,7 @@
 package firewall
 
 import (
-	"errors"
-	"io/fs"
+	"context"
 	"strconv"
 	"strings"
 
@@ -11,14 +10,16 @@ import (
 )
 
 // Status lists UFW's rules from its own files: Zimam's rules grouped back by
-// id, the locked ones apart, and the rest as external.
-func Status(d sysexec.Deps) (contract.FirewallStatusResult, error) {
+// id, the locked ones apart, and the rest as external. Whether UFW is on is
+// ufw status's answer: ufw.conf can say ENABLED=yes while UFW isn't running
+// (an LXD container installed with --skip-firewall).
+func Status(ctx context.Context, d sysexec.Deps) (contract.FirewallStatusResult, error) {
 	res := contract.FirewallStatusResult{Rules: []contract.FirewallRule{}, Locked: []contract.FirewallRule{}, External: []contract.ExternalFirewallRule{}}
-	active, err := ufwEnabled(d.Paths.UFWConf())
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+	out, err := d.Run.Run(ctx, sysexec.Cmd{Path: ufw, Args: []string{"status"}})
+	if err != nil {
 		return res, err
 	}
-	res.Active = active
+	res.Active = strings.Contains(string(out.Stdout), "Status: active")
 	tuples, err := readTuples(d.Paths)
 	if err != nil {
 		return res, err

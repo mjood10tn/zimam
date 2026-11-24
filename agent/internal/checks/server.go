@@ -39,11 +39,11 @@ func Server(ctx context.Context, e Env) ([]contract.Finding, error) {
 // firewallActive lists Zimam's rules and the ones it didn't make, from UFW's
 // own files (firewall.Status), beside the TCP ports something listens on,
 // from /proc/net/tcp and tcp6 (R06-D10).
-func firewallActive(_ context.Context, e Env) contract.Finding {
+func firewallActive(ctx context.Context, e Env) contract.Finding {
 	const check = "firewall_active"
-	s, err := firewall.Status(e.D)
+	s, err := firewall.Status(ctx, e.D)
 	if err != nil {
-		return finding(check, contract.FindingInconclusive, "UFW's rules can't be read: %v", err)
+		return finding(check, contract.FindingInconclusive, "ufw status failed: %v", err)
 	}
 	var zimam, external []string
 	for _, r := range append(slices.Clone(s.Locked), s.Rules...) {

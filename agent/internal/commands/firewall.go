@@ -30,5 +30,5 @@ func firewallRules(ctx context.Context, j *jobs.Context, p contract.Params) (any
 }
 
 func firewallStatus(d sysexec.Deps) Handler {
-	return func(context.Context, contract.Params) (any, error) { return firewall.Status(d) }
+	return func(ctx context.Context, _ contract.Params) (any, error) { return firewall.Status(ctx, d) }
 }
