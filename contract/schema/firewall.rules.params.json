@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "rules": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "allow",
+              "deny",
+              "limit"
+            ],
+            "type": "string"
+          },
+          "from": {
+            "items": {
+              "pattern": "^[0-9A-Fa-f.:]+(/[0-9]{1,3})?$",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "id": {
+            "pattern": "^[a-z][a-z0-9-]{0,22}[a-z0-9]$",
+            "type": "string"
+          },
+          "port_from": {
+            "maximum": 65535,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "port_to": {
+            "maximum": 65535,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "proto": {
+            "enum": [
+              "tcp",
+              "udp"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "from",
+          "id",
+          "port_from",
+          "port_to",
+          "proto"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "rules"
+  ],
+  "title": "firewall.rules params",
+  "type": "object"
+}

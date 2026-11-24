@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "active": {
+      "type": "boolean"
+    },
+    "external": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "ipv6": {
+            "type": "boolean"
+          },
+          "port": {
+            "type": "string"
+          },
+          "proto": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "from",
+          "ipv6",
+          "port",
+          "proto"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "locked": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "allow",
+              "deny",
+              "limit"
+            ],
+            "type": "string"
+          },
+          "from": {
+            "items": {
+              "pattern": "^[0-9A-Fa-f.:]+(/[0-9]{1,3})?$",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "id": {
+            "pattern": "^[a-z][a-z0-9-]{0,22}[a-z0-9]$",
+            "type": "string"
+          },
+          "port_from": {
+            "maximum": 65535,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "port_to": {
+            "maximum": 65535,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "proto": {
+            "enum": [
+              "tcp",
+              "udp"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "from",
+          "id",
+          "port_from",
+          "port_to",
+          "proto"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "rules": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "allow",
+              "deny",
+              "limit"
+            ],
+            "type": "string"
+          },
+          "from": {
+            "items": {
+              "pattern": "^[0-9A-Fa-f.:]+(/[0-9]{1,3})?$",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "id": {
+            "pattern": "^[a-z][a-z0-9-]{0,22}[a-z0-9]$",
+            "type": "string"
+          },
+          "port_from": {
+            "maximum": 65535,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "port_to": {
+            "maximum": 65535,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "proto": {
+            "enum": [
+              "tcp",
+              "udp"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "from",
+          "id",
+          "port_from",
+          "port_to",
+          "proto"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "active",
+    "external",
+    "locked",
+    "rules"
+  ],
+  "title": "firewall.status result",
+  "type": "object"
+}

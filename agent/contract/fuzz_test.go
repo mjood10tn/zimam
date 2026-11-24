@@ -236,3 +236,30 @@ func FuzzBackupSchedule(f *testing.F) {
 		checkSchemaAgrees(t, v, ok)
 	})
 }
+
+// An accepted firewall rule becomes ufw argv: its id, action and proto must be
+// plain words and every source a canonical prefix (R06-D3).
+func FuzzFirewallRule(f *testing.F) {
+	for _, s := range []string{"app", "a b", "zimam:x", "http", "-oX"} {
+		f.Add(s, "allow", "tcp", 8080, 8080, "203.0.113.0/24")
+	}
+	f.Add("app", "deny", "udp", 9010, 9000, "203.0.113.5/24")
+	f.Add("app", "limit", "tcp", 0, 70000, "::ffff:1.2.3.4")
+	f.Fuzz(func(t *testing.T, id, action, proto string, from, to int, src string) {
+		r := FirewallRule{ID: FirewallRuleID(id), Action: FirewallAction(action), Proto: FirewallProto(proto), PortFrom: TCPPort(from), PortTo: TCPPort(to), From: IPList{src}}
+		ok := (&FirewallRulesParams{Rules: []FirewallRule{r}}).Validate() == nil
+		if !ok {
+			return
+		}
+		if !regexp.MustCompile(`^[a-z][a-z0-9-]*$`).MatchString(id) || LockedFirewallRule(r.ID) || !regexp.MustCompile(`^(allow|deny|limit)$`).MatchString(action) || !regexp.MustCompile(`^(tcp|udp)$`).MatchString(proto) {
+			t.Errorf("accepted %+v", r)
+		}
+		if from < 1 || to > 65535 || from > to {
+			t.Errorf("accepted ports %d–%d", from, to)
+		}
+		if p, err := ParseIPEntry(src); err != nil || !renderedIP.MatchString(p.String()) {
+			t.Errorf("accepted source %q", src)
+		}
+		checkSchemaAgrees(t, r.ID, true)
+	})
+}
