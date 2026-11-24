@@ -251,4 +251,23 @@ done
 send_field "backup.restore of the part files-../php84" backup.restore '{"plan":"nightly","backup":"20261123T020000Z","part":"files-../php84","site":"php84"}' part
 send_field "backup.plan with the schedule daily 25:00" backup.plan '{"id":"vprobe","destination":"s3","sites":["php84"],"schedule":"daily 25:00","retention":{"keep_last":1}}' schedule
 send_field "backup.run of the plan ../x" backup.run '{"plan":"../x"}' plan
+# v0.6.0's server security commands: reboot times, update scopes, the
+# agent's own firewall rules, root login over SSH, and sources that aren't
+# canonical (host bits, a zone, an IPv4-mapped IPv6 address). The guarded
+# commands refuse before any change starts.
+for at in '25:00' '03:00; id' '3:00' '+30' 'tomorrow'; do
+	send_field "system.reboot at '$at'" system.reboot "{\"at\":\"$at\"}" at
+done
+send_field "updates.install with the scope dist" updates.install '{"scope":"dist"}' scope
+send_field "updates.auto rebooting without a time" updates.auto '{"enabled":true,"auto_reboot":true}' reboot_time
+rule() { echo "{\"rules\":[{\"id\":\"$1\",\"action\":\"allow\",\"proto\":\"tcp\",\"port_from\":8080,\"port_to\":8080,\"from\":$2}]}"; }
+for id in ssh-22 http https; do
+	send_field "firewall.rules setting the agent's rule $id" firewall.rules "$(rule "$id" '[]')" rules.0.id
+done
+for src in '10.0.0.1/8' 'fe80::1%eth0' '::ffff:192.0.2.1'; do
+	send_field "firewall.rules from $src" firewall.rules "$(rule vprobe "[\"$src\"]")" rules.0.from
+done
+send_field "ssh.settings with root login yes" ssh.settings '{"password_auth":false,"root_login":"yes","ports":[22],"max_auth_tries":6,"login_grace_seconds":120}' root_login
+send_field "cloudflare.mode restricting without the mode" cloudflare.mode '{"enabled":false,"restrict_origin":true}' restrict_origin
+send_field "fail2ban.unban of a prefix" fail2ban.unban '{"jail":"sshd","address":"192.0.2.0/24"}' address
 exit "$failed"
