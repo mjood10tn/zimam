@@ -13,6 +13,7 @@ import (
 	"zimam/agent/internal/config"
 	"zimam/agent/internal/maintenance"
 	"zimam/agent/internal/node"
+	"zimam/agent/internal/osupdates"
 	"zimam/agent/internal/php"
 	"zimam/agent/internal/release"
 	"zimam/agent/internal/services"
@@ -43,17 +44,19 @@ func systemStatus(d sysexec.Deps) Handler {
 			return nil, err
 		}
 		return contract.SystemStatusResult{
-			AgentVersion:   release.Version,
-			Protocols:      slices.Clone(contract.SupportedProtocols),
-			NginxVersion:   nginxVersion(ctx, d),
-			PHP:            php,
-			Services:       svc,
-			Node:           nodeSt,
-			Timezone:       serverTimezone(d),
-			RebootRequired: reboot,
-			Updates:        updateCounts(d),
-			PanelDomain:    cfg.PanelDomain,
-			ACMEDirectory:  cfg.ACMEDirectory,
+			AgentVersion:    release.Version,
+			Protocols:       slices.Clone(contract.SupportedProtocols),
+			NginxVersion:    nginxVersion(ctx, d),
+			PHP:             php,
+			Services:        svc,
+			Node:            nodeSt,
+			Timezone:        serverTimezone(d),
+			RebootRequired:  reboot,
+			Updates:         updateCounts(d),
+			PanelDomain:     cfg.PanelDomain,
+			ACMEDirectory:   cfg.ACMEDirectory,
+			AutoUpdates:     autoUpdates(ctx, d),
+			RebootScheduled: osupdates.ScheduledReboot(d.Paths),
 		}, nil
 	}
 }
@@ -217,4 +220,14 @@ func nodeStatus(ctx context.Context, d sysexec.Deps) *contract.NodeStatus {
 		st.Available = append(st.Available, contract.AvailableNode{Major: r.Major, EndOfLife: r.EndOfLife, Supported: r.SupportedOn(now), Recommended: r.Major == contract.DefaultNodeMajor})
 	}
 	return st
+}
+
+// autoUpdates is apt's automatic update settings (R06-D12, D16), or nil
+// when apt-config can't be read.
+func autoUpdates(ctx context.Context, d sysexec.Deps) *contract.AutoUpdates {
+	a, err := osupdates.ReadAuto(ctx, d)
+	if err != nil {
+		return nil
+	}
+	return &a
 }

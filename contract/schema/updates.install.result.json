@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "reboot_required": {
+      "type": "boolean"
+    },
+    "restarted": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "scope": {
+      "enum": [
+        "security",
+        "all"
+      ],
+      "type": "string"
+    },
+    "security_pending_after": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "upgraded": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "package": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "package",
+          "to"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "reboot_required",
+    "restarted",
+    "scope",
+    "security_pending_after",
+    "upgraded"
+  ],
+  "title": "updates.install result",
+  "type": "object"
+}

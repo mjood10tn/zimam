@@ -90,6 +90,7 @@ type run struct {
 	cfg      config.Agent
 	manifest *release.Manifest
 	link     string
+	fresh    bool // no agent.json when this run started: a new install
 }
 
 // StepNames lists the steps in the order they run, §4's.

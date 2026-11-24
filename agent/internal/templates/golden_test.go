@@ -83,9 +83,16 @@ var goldenCases = map[string][]goldenFile{
 	"cloudflare-realip": {{path: paths.Paths{}.NginxRealIPConf(), tmpl: "nginx/zimam-realip.conf", data: func() any {
 		return CloudflareRealIP{Ranges: []netip.Prefix{netip.MustParsePrefix("173.245.48.0/20"), netip.MustParsePrefix("103.21.244.0/22"), netip.MustParsePrefix("2400:cb00::/32")}}
 	}}},
-	"ssh-ports":   {sshDropIn(SSHSettings{PasswordAuth: true, RootLogin: "no", Ports: []contract.TCPPort{22, 2222, 2200, 65535}, MaxAuthTries: 3, LoginGraceSeconds: 30})},
-	"panel-http":  panel(false),
-	"panel-https": panel(true),
+	// What updates.auto writes (R06-D12, D16), on and off, and what
+	// updates.install writes for needrestart (R06-D13).
+	"apt-21zimam-auto-upgrades-on":      {{path: paths.Paths{}.AptAutoUpgrades(), tmpl: "apt/21zimam-auto-upgrades", data: func() any { return AutoUpgrades{Enabled: true} }}},
+	"apt-21zimam-auto-upgrades-off":     {{path: paths.Paths{}.AptAutoUpgrades(), tmpl: "apt/21zimam-auto-upgrades", data: func() any { return AutoUpgrades{} }}},
+	"apt-52zimam-unattended-reboot-on":  {{path: paths.Paths{}.AptUnattendedReboot(), tmpl: "apt/52zimam-unattended-reboot", data: func() any { return UnattendedReboot{AutoReboot: true, RebootTime: "03:30"} }}},
+	"apt-52zimam-unattended-reboot-off": {{path: paths.Paths{}.AptUnattendedReboot(), tmpl: "apt/52zimam-unattended-reboot", data: func() any { return UnattendedReboot{} }}},
+	"needrestart-50-zimam":              {{path: paths.Paths{}.NeedrestartConf(), tmpl: "needrestart/50-zimam.conf"}},
+	"ssh-ports":                         {sshDropIn(SSHSettings{PasswordAuth: true, RootLogin: "no", Ports: []contract.TCPPort{22, 2222, 2200, 65535}, MaxAuthTries: 3, LoginGraceSeconds: 30})},
+	"panel-http":                        panel(false),
+	"panel-https":                       panel(true),
 	// Zimam's own units (§7.1, §11.3).
 	"units": units(),
 	// rclone.conf (R05-D2): one S3 destination, one SFTP destination with a
@@ -441,8 +448,8 @@ func renderedStrings(t testing.TB) []renderedString {
 	// A string a template checks again before writing it, such as a
 	// bcrypt hash in htpasswd, or a cron schedule, takes the sentinel in its
 	// own shape, as is an rclone host key algorithm, one of a fixed list,
-	// and a backup schedule, whose "hourly" renders as it is.
-	sentinels := []string{"zimamsentinel", "$2y$12$zimamsentinel" + strings.Repeat("a", 40), "0 0 1 1 *", "rsa-sha2-512 rsa-sha2-256", "hourly"}
+	// a backup schedule, whose "hourly" renders as it is, and a clock time.
+	sentinels := []string{"zimamsentinel", "$2y$12$zimamsentinel" + strings.Repeat("a", 40), "0 0 1 1 *", "rsa-sha2-512 rsa-sha2-256", "hourly", "12:34"}
 	var found []renderedString
 	for name, files := range goldenCases {
 		for _, gf := range files {

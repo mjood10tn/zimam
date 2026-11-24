@@ -24,7 +24,7 @@ import (
 func phpV(s string) contract.PHPVersion { return contract.PHPVersion(s) }
 
 var designOrder = []string{
-	"agent-config", "directories", "sury-repository", "php", "nginx", "panel-release",
+	"agent-config", "directories", "automatic-updates", "sury-repository", "php", "nginx", "panel-release",
 	"panel-site", "panel-certificate", "units", "log-policy", "setup-link",
 }
 
@@ -76,15 +76,15 @@ func TestResumeAfterCertFailure(t *testing.T) {
 	if !errors.As(err, &se) || se.Step != "panel-certificate" {
 		t.Fatalf("first run: %v, want a failure at panel-certificate", err)
 	}
-	if got, want := w.auditedSteps(0), append(slices.Clone(designOrder[:7]), "panel-certificate error:internal"); !slices.Equal(got, want) {
+	if got, want := w.auditedSteps(0), append(slices.Clone(designOrder[:8]), "panel-certificate error:internal"); !slices.Equal(got, want) {
 		t.Fatalf("first run audited %q, want %q", got, want)
 	}
 
 	w.sys.fail = nil
 	entries := len(w.auditEntries())
 	w.mustRun(opts())
-	if got := w.auditedSteps(entries); !slices.Equal(got, designOrder[7:]) {
-		t.Fatalf("second run applied %q, want %q (steps 1–7 skipped)", got, designOrder[7:])
+	if got := w.auditedSteps(entries); !slices.Equal(got, designOrder[8:]) {
+		t.Fatalf("second run applied %q, want %q (steps 1–8 skipped)", got, designOrder[8:])
 	}
 }
 
@@ -669,5 +669,38 @@ func TestBootstrapWritesAllowFiles(t *testing.T) {
 		if string(b) != "root\n" || fi.Mode().Perm() != 0o644 {
 			t.Errorf("%s: %q %v after the repair", f, b, fi.Mode())
 		}
+	}
+}
+
+// OQ8: a new install turns Ubuntu's automatic security updates on.
+func TestBootstrapTurnsAutoUpdatesOnForNewInstalls(t *testing.T) {
+	w := newWorld(t)
+	w.mustRun(opts())
+	b, err := os.ReadFile(w.p.AptAutoUpgrades())
+	if err != nil || !strings.Contains(string(b), `APT::Periodic::Unattended-Upgrade "1";`) {
+		t.Fatalf("21zimam-auto-upgrades = %q, %v", b, err)
+	}
+	if r, _ := os.ReadFile(w.p.AptUnattendedReboot()); !strings.Contains(string(r), `Automatic-Reboot "false";`) {
+		t.Errorf("automatic reboots aren't off by default: %q", r)
+	}
+}
+
+// OQ8: re-running the installer on a server installed before v0.6.0 leaves
+// its automatic updates as they are; the check and the toggle cover it.
+func TestRepairLeavesAutoUpdatesAsTheyAre(t *testing.T) {
+	w := newWorld(t)
+	w.mustRun(opts())
+	for _, path := range []string{w.p.AptAutoUpgrades(), w.p.AptUnattendedReboot()} {
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries := len(w.auditEntries())
+	w.mustRun(opts())
+	if slices.Contains(w.auditedSteps(entries), "automatic-updates") {
+		t.Error("a repair turned automatic updates on")
+	}
+	if _, err := os.Stat(w.p.AptAutoUpgrades()); err == nil {
+		t.Error("a repair wrote 21zimam-auto-upgrades")
 	}
 }

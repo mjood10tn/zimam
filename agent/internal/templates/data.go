@@ -215,3 +215,13 @@ type Fail2banJails struct {
 type CloudflareRealIP struct {
 	Ranges []netip.Prefix
 }
+
+// AutoUpgrades is apt/21zimam-auto-upgrades (R06-D12).
+type AutoUpgrades struct{ Enabled bool }
+
+// UnattendedReboot is apt/52zimam-unattended-reboot (R06-D16). RebootTime is
+// rendered only with AutoReboot.
+type UnattendedReboot struct {
+	AutoReboot bool
+	RebootTime contract.ClockTime
+}

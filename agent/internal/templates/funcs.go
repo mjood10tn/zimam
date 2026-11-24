@@ -27,6 +27,7 @@ var funcs = template.FuncMap{
 	"siteName":          siteName,
 	"planID":            planID,
 	"onCalendar":        onCalendar,
+	"clockTime":         clockTime,
 }
 
 // safeRe is all a string may contain on its way into a config file. Without
@@ -183,4 +184,12 @@ func onCalendar(s contract.BackupSchedule) (string, error) {
 		return "", fmt.Errorf("onCalendar: %q %v", s, err)
 	}
 	return s.OnCalendar(), nil
+}
+
+// clockTime renders an HH:MM time only if it is one (R06-D16).
+func clockTime(v contract.ClockTime) (string, error) {
+	if err := v.Validate(); err != nil {
+		return "", fmt.Errorf("clockTime: %q %v", v, err)
+	}
+	return string(v), nil
 }

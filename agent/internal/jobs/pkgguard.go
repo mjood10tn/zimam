@@ -7,7 +7,7 @@ import (
 	"zimam/agent/internal/sysexec"
 )
 
-// packageGuard runs apt-get and dpkg under the job's cancel lock, so
+// packageGuard runs apt-get, dpkg and unattended-upgrade under the job's cancel lock, so
 // job.cancel refuses rather than stopping dpkg midway: systemctl stop
 // signals everything in the unit, and an interrupted dpkg leaves the
 // package database needing dpkg --configure -a. apt-get update changes no
@@ -31,7 +31,7 @@ func (g packageGuard) Run(ctx context.Context, c sysexec.Cmd) (sysexec.Result, e
 
 func changesPackages(c sysexec.Cmd) bool {
 	switch c.Path {
-	case "/usr/bin/dpkg":
+	case "/usr/bin/dpkg", "/usr/bin/unattended-upgrade":
 		return true
 	case "/usr/bin/apt-get":
 		return !slices.Contains(c.Args, "update")

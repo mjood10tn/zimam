@@ -260,6 +260,18 @@ func (f *fakeSystem) Run(ctx context.Context, c sysexec.Cmd) (sysexec.Result, er
 		return sysexec.Result{ExitCode: 2}, &sysexec.ExitError{Path: c.Path, Code: 2}
 	case c.Path == "/usr/bin/certbot" && !slices.Contains(c.Args, "--dry-run"):
 		writeCert(t, p.LetsEncryptCert(c.Args[slices.Index(c.Args, "--cert-name")+1]))
+	case c.Path == "/usr/bin/apt-config":
+		// apt reads Zimam's drop-ins: their lines without the comments.
+		var out []byte
+		for _, path := range []string{p.AptAutoUpgrades(), p.AptUnattendedReboot()} {
+			b, _ := os.ReadFile(path)
+			for line := range strings.Lines(string(b)) {
+				if !strings.HasPrefix(line, "//") {
+					out = append(out, line...)
+				}
+			}
+		}
+		return sysexec.Result{Stdout: out}, nil
 	case c.Path == "/usr/sbin/runuser" && slices.Contains(c.Args, "zimam:setup-link"):
 		return sysexec.Result{Stdout: []byte(testLink + "\nPanel IP allowlist: empty\n")}, nil
 	}

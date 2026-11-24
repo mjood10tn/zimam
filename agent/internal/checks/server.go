@@ -18,6 +18,7 @@ import (
 	"zimam/agent/internal/fail2ban"
 	"zimam/agent/internal/firewall"
 	"zimam/agent/internal/maintenance"
+	"zimam/agent/internal/osupdates"
 	"zimam/agent/internal/php"
 	"zimam/agent/internal/systemd"
 )
@@ -32,7 +33,7 @@ func Server(ctx context.Context, e Env) ([]contract.Finding, error) {
 	if f := cloudflareRanges(e); f != nil {
 		out = append(out, *f)
 	}
-	return append(out, securityUpdates(e), rebootRequired(e), stockPools(e), socketPermissions(e)), nil
+	return append(out, securityUpdates(e), automaticSecurityUpdates(ctx, e), rebootRequired(e), stockPools(e), socketPermissions(e)), nil
 }
 
 // firewallActive lists Zimam's rules and the ones it didn't make, from UFW's
@@ -280,4 +281,20 @@ func groupEntry(path, group string) (int, []string, error) {
 		return gid, members, nil
 	}
 	return 0, nil, errors.New(path + " has no group " + group)
+}
+
+// automaticSecurityUpdates warns when apt's automatic security updates are
+// off, or when the timer that runs them isn't active (R06-D15).
+func automaticSecurityUpdates(ctx context.Context, e Env) contract.Finding {
+	const check = "automatic_security_updates"
+	a, err := osupdates.ReadAuto(ctx, e.D)
+	switch {
+	case err != nil:
+		return finding(check, contract.FindingInconclusive, "%v", err)
+	case !a.Enabled:
+		return finding(check, contract.FindingWarn, "Automatic security updates are off.")
+	case systemd.Systemctl(ctx, e.D, "is-active", "--quiet", "apt-daily-upgrade.timer") != nil:
+		return finding(check, contract.FindingWarn, "Automatic security updates are on, but apt-daily-upgrade.timer isn't active, so they don't run.")
+	}
+	return finding(check, contract.FindingPass, "Automatic security updates are on.")
 }

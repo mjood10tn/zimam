@@ -105,6 +105,27 @@ if [ -d "$src/etc/nginx" ]; then
 	nginx -t || fail "nginx -t failed"
 fi
 
+if [ -d "$src/etc/apt/apt.conf.d" ]; then
+	# Zimam's apt drop-ins (R06-D12, D16): apt-config must read every value
+	# they set, so a malformed line or a later file overriding them fails.
+	echo "== apt-config dump"
+	dump=$(apt-config dump) || fail "apt-config dump failed"
+	for f in "$src"/etc/apt/apt.conf.d/*; do
+		while IFS= read -r line; do
+			case "$line" in '' | //*) continue ;; esac
+			grep -qxF "$line" <<<"$dump" || fail "apt-config doesn't read $(basename "$f")'s line: $line"
+		done <"$f"
+	done
+fi
+
+if [ -d "$src/etc/needrestart" ]; then
+	# needrestart's config is Perl (R06-D13).
+	for f in "$src"/etc/needrestart/conf.d/*.conf; do
+		echo "== perl -c $(basename "$f")"
+		perl -c "$f" || fail "$(basename "$f") isn't valid Perl"
+	done
+fi
+
 if [ -d "$src/etc/apt" ]; then
 	# apt-cache policy reads every source and pin; it fails on a malformed
 	# entry, but not on a Signed-By keyring that doesn't exist.

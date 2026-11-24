@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "at": {
+      "pattern": "^(now|([01][0-9]|2[0-3]):[0-5][0-9])$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "at"
+  ],
+  "title": "system.reboot params",
+  "type": "object"
+}

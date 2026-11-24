@@ -29,6 +29,10 @@ type SystemStatusResult struct {
 	Services       ServicesStatus `json:"services"`
 	Node           *NodeStatus    `json:"node,omitempty"` // R04-D6; absent on a v0.3 agent, and when dpkg could not be read
 	Timezone       string         `json:"timezone"`       // IANA name of the server's zone, UTC when unreadable (ruling R7); absent on an older agent
+	// R06-D12, D16: apt's automatic updates, absent when apt-config could not
+	// be read; and a scheduled reboot (R06-D14), absent when none is.
+	AutoUpdates     *AutoUpdates `json:"auto_updates,omitempty"`
+	RebootScheduled *time.Time   `json:"reboot_scheduled,omitempty"`
 }
 
 // PHPStatus carries the allowlist and its end dates as well as what is

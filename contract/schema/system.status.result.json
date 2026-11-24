@@ -8,6 +8,33 @@
     "agent_version": {
       "type": "string"
     },
+    "auto_updates": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "auto_reboot": {
+              "type": "boolean"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "reboot_time": {
+              "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "auto_reboot",
+            "enabled"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "nginx_version": {
       "type": "string"
     },
@@ -169,6 +196,17 @@
     },
     "reboot_required": {
       "type": "boolean"
+    },
+    "reboot_scheduled": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "services": {
       "additionalProperties": false,

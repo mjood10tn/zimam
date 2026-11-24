@@ -1,0 +1,4 @@
+// Managed by Zimam (updates.auto). Changes here are overwritten.
+// It sorts after 50unattended-upgrades, so these values win (R06-D16).
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-Time "03:30";
