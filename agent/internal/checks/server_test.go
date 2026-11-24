@@ -52,7 +52,10 @@ func tuple(action, proto, port, src, comment string) string {
 }
 
 func TestFirewallCheckListsRuleKinds(t *testing.T) {
-	e := serverEnv(t)
+	ufw := func(state string) sysexec.Script {
+		return sysexec.Script{Path: "/usr/sbin/ufw", Args: []string{"status"}, Result: sysexec.Result{Stdout: []byte("Status: " + state + "\n")}}
+	}
+	e := serverEnv(t, ufw("active"))
 	write(t, e.D.Paths.UFWConf(), "ENABLED=yes\n")
 	write(t, e.D.Paths.UFWUserRules(), tuple("allow", "tcp", "22", "0.0.0.0/0", "zimam:ssh-22")+
 		tuple("allow", "tcp", "443", "0.0.0.0/0", "zimam:https")+
@@ -67,7 +70,10 @@ func TestFirewallCheckListsRuleKinds(t *testing.T) {
 			t.Errorf("detail %q lacks %q", f.Detail, want)
 		}
 	}
-	write(t, e.D.Paths.UFWConf(), "ENABLED=no\n")
+	// ufw.conf says enabled, but UFW isn't running (an LXD container installed
+	// with --skip-firewall): ufw status decides.
+	e = serverEnv(t, ufw("inactive"))
+	write(t, e.D.Paths.UFWConf(), "ENABLED=yes\n")
 	wantStatus(t, firewallActive(context.Background(), e), "firewall_active", contract.FindingFail)
 }
 
