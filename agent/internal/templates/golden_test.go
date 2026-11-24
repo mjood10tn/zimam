@@ -79,9 +79,13 @@ var goldenCases = map[string][]goldenFile{
 	// list, and only SSH on.
 	"fail2ban-all": fail2banFiles(contract.IPList{"203.0.113.0/24", "2001:db8::7"}, true),
 	"fail2ban-ssh": fail2banFiles(contract.IPList{}, false),
-	"ssh-ports":    {sshDropIn(SSHSettings{PasswordAuth: true, RootLogin: "no", Ports: []contract.TCPPort{22, 2222, 2200, 65535}, MaxAuthTries: 3, LoginGraceSeconds: 30})},
-	"panel-http":   panel(false),
-	"panel-https":  panel(true),
+	// What cloudflare.mode writes (R06-D7), with ranges of both families.
+	"cloudflare-realip": {{path: paths.Paths{}.NginxRealIPConf(), tmpl: "nginx/zimam-realip.conf", data: func() any {
+		return CloudflareRealIP{Ranges: []netip.Prefix{netip.MustParsePrefix("173.245.48.0/20"), netip.MustParsePrefix("103.21.244.0/22"), netip.MustParsePrefix("2400:cb00::/32")}}
+	}}},
+	"ssh-ports":   {sshDropIn(SSHSettings{PasswordAuth: true, RootLogin: "no", Ports: []contract.TCPPort{22, 2222, 2200, 65535}, MaxAuthTries: 3, LoginGraceSeconds: 30})},
+	"panel-http":  panel(false),
+	"panel-https": panel(true),
 	// Zimam's own units (§7.1, §11.3).
 	"units": units(),
 	// rclone.conf (R05-D2): one S3 destination, one SFTP destination with a

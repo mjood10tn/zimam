@@ -94,6 +94,11 @@ func (p Paths) SSHDropIn() string { return p.at("etc/ssh/sshd_config.d/10-zimam.
 func (p Paths) Fail2banJails() string       { return p.at("etc/fail2ban/jail.d/zimam.local") }
 func (p Paths) Fail2banPanelFilter() string { return p.at("etc/fail2ban/filter.d/zimam-panel.conf") }
 func (p Paths) Fail2banClient() string      { return p.at("usr/bin/fail2ban-client") }
+
+// Cloudflare mode (R06-D7): Nginx's realip settings, which exist only while
+// the mode is on, and the ranges maintenance last fetched.
+func (p Paths) NginxRealIPConf() string  { return p.at("etc/nginx/conf.d/zimam-realip.conf") }
+func (p Paths) CloudflareRanges() string { return p.at("var/lib/zimam/cloudflare-ranges.json") }
 func (p Paths) JobDir(id contract.JobID) string {
 	return p.at("var/lib/zimam/jobs", string(id))
 }

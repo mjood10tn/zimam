@@ -209,3 +209,9 @@ type Fail2banJails struct {
 	Ignore []netip.Prefix
 	Jails  []contract.Fail2banJail
 }
+
+// CloudflareRealIP is nginx/zimam-realip.conf (R06-D7): Cloudflare's ranges,
+// parsed.
+type CloudflareRealIP struct {
+	Ranges []netip.Prefix
+}
