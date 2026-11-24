@@ -298,4 +298,21 @@ if [ "${#units[@]}" -gt 0 ]; then
 	done
 fi
 
+if [ -d "$src/etc/ssh" ]; then
+	# sshd -t needs host keys and its privilege-separation directory, which a
+	# server has (R06-D4).
+	ssh-keygen -A >/dev/null
+	mkdir -p /run/sshd
+	echo "== sshd -t"
+	sshd -t || fail "sshd -t failed"
+	# Zimam's values must be the effective ones: its drop-in sorts first.
+	for f in "$src"/etc/ssh/sshd_config.d/*.conf; do
+		while read -r key value; do
+			case "$key" in '' | '#'* | Port) continue ;; esac
+			got=$(sshd -T | awk -v k="${key,,}" '$1 == k { print $2; exit }')
+			[ "$got" = "${value,,}" ] || fail "$(basename "$f"): sshd -T gives ${key} '$got', not '$value'"
+		done <"$f"
+	done
+fi
+
 echo "configcheck: passed"

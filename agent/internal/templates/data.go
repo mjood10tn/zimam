@@ -193,3 +193,12 @@ type RcloneRemote struct {
 	Password          string
 	Password2         string
 }
+
+// SSHSettings is ssh/10-zimam.conf (R06-D4).
+type SSHSettings struct {
+	PasswordAuth      bool
+	RootLogin         contract.RootLogin
+	Ports             []contract.TCPPort
+	MaxAuthTries      contract.MaxAuthTries
+	LoginGraceSeconds contract.LoginGraceSeconds
+}

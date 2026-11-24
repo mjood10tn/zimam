@@ -72,8 +72,12 @@ var goldenCases = map[string][]goldenFile{
 		{Name: "my-shop", Hash: sha256.Sum256([]byte("shop password"))},
 	})},
 	"valkey-dropin": {{path: paths.Paths{}.ValkeyDropIn(), tmpl: "valkey/valkey-server-dropin.conf"}},
-	"panel-http":    panel(false),
-	"panel-https":   panel(true),
+	// What ssh.settings writes (R06-D4): the defaults, and passwords on with
+	// root off and four ports.
+	"ssh-default": {sshDropIn(SSHSettings{RootLogin: "prohibit-password", Ports: []contract.TCPPort{22}, MaxAuthTries: 6, LoginGraceSeconds: 120})},
+	"ssh-ports":   {sshDropIn(SSHSettings{PasswordAuth: true, RootLogin: "no", Ports: []contract.TCPPort{22, 2222, 2200, 65535}, MaxAuthTries: 3, LoginGraceSeconds: 30})},
+	"panel-http":  panel(false),
+	"panel-https": panel(true),
 	// Zimam's own units (§7.1, §11.3).
 	"units": units(),
 	// rclone.conf (R05-D2): one S3 destination, one SFTP destination with a
@@ -521,4 +525,8 @@ func nodeRepo(major contract.NodeMajor) []goldenFile {
 		{path: p.NodeSources(), tmpl: "apt/zimam-nodesource.sources", data: func() any { return NodeRepo{Major: major} }},
 		{path: p.NodePin(), tmpl: "apt/zimam-nodesource.pref"},
 	}
+}
+
+func sshDropIn(s SSHSettings) goldenFile {
+	return goldenFile{path: paths.Paths{}.SSHDropIn(), tmpl: "ssh/10-zimam.conf", data: func() any { return s }}
 }
