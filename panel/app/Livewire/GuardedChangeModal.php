@@ -130,6 +130,9 @@ class GuardedChangeModal extends Component implements HasActions, HasSchemas
         if (! $revert && $change->kind === GuardedChange::SSH) {
             app(PanelSettings::class)->setSsh($change->params);
         }
+        if (! $revert && $change->kind === GuardedChange::CLOUDFLARE) {
+            app(PanelSettings::class)->setCloudflare($change->params['enabled'], $change->params['restrict_origin']);
+        }
         Notification::make()->title(__($revert ? 'zimam.server_security.change.reverted' : 'zimam.server_security.change.kept'))->success()->send();
         $this->ended();
     }

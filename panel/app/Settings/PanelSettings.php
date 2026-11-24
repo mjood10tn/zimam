@@ -128,6 +128,41 @@ class PanelSettings
         $this->set('ssh_settings', array_intersect_key($settings, self::SSH_DEFAULTS));
     }
 
+    /**
+     * The addresses no fail2ban jail bans, as last applied; null until the
+     * owner saves the jails (the form then offers their own address).
+     *
+     * @return list<string>|null
+     */
+    public function fail2banIgnore(): ?array
+    {
+        $ignore = $this->get('fail2ban_ignore', null);
+
+        return $ignore === null ? null : array_values(array_map('strval', (array) $ignore));
+    }
+
+    /** @param list<string> $entries */
+    public function setFail2banIgnore(array $entries): void
+    {
+        $this->set('fail2ban_ignore', array_values($entries));
+    }
+
+    /**
+     * Cloudflare mode as last applied (R06-D7, D9); the origin restriction
+     * counts only once the owner kept it.
+     *
+     * @return array{enabled: bool, restrict_origin: bool}
+     */
+    public function cloudflare(): array
+    {
+        return array_map('boolval', (array) $this->get('cloudflare', []) + ['enabled' => false, 'restrict_origin' => false]);
+    }
+
+    public function setCloudflare(bool $enabled, bool $restrictOrigin): void
+    {
+        $this->set('cloudflare', ['enabled' => $enabled, 'restrict_origin' => $enabled && $restrictOrigin]);
+    }
+
     private function get(string $key, mixed $default): mixed
     {
         $setting = Setting::query()->where('key', $key)->first();

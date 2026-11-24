@@ -19,11 +19,15 @@ use App\Agent\Commands\CacheUser;
 use App\Agent\Commands\CertIssue;
 use App\Agent\Commands\ChangeConfirm;
 use App\Agent\Commands\ChangeRevert;
+use App\Agent\Commands\CloudflareMode;
 use App\Agent\Commands\DbCreate;
 use App\Agent\Commands\DbDrop;
 use App\Agent\Commands\DbList;
 use App\Agent\Commands\DbUser;
 use App\Agent\Commands\E2eSleep;
+use App\Agent\Commands\Fail2banConfig;
+use App\Agent\Commands\Fail2banStatus;
+use App\Agent\Commands\Fail2banUnban;
 use App\Agent\Commands\FirewallRules;
 use App\Agent\Commands\FirewallStatus;
 use App\Agent\Commands\JobCancel;
@@ -155,6 +159,10 @@ final class SchemaTest extends TestCase
             new SshSettings(true, 'prohibit-password', [22, 2222], 6, 120),
             new ChangeConfirm(self::JOB),
             new ChangeRevert(self::JOB),
+            new Fail2banConfig(self::fail2banJails(), ['203.0.113.0/24', '2001:db8::7']),
+            new Fail2banStatus,
+            new Fail2banUnban('zimam-panel', '192.0.2.44'),
+            new CloudflareMode(true, true),
         ];
 
         return array_combine(
@@ -482,6 +490,32 @@ final class SchemaTest extends TestCase
         $this->assertResult('change.confirm', $fake->call(new ChangeConfirm($changes[1]))->data, 'fake change.confirm');
         $this->expectException(AgentNotFound::class);
         $fake->call(new ChangeConfirm($changes[1]));
+    }
+
+    /** @return list<array<string, mixed>> the three jails as Fail2banForm builds them */
+    private static function fail2banJails(): array
+    {
+        return [
+            ['name' => 'sshd', 'enabled' => true, 'max_retry' => 5, 'find_time' => 600, 'ban_time' => 3600],
+            ['name' => 'zimam-panel', 'enabled' => true, 'max_retry' => 5, 'find_time' => 600, 'ban_time' => 3600],
+            ['name' => 'zimam-site-auth', 'enabled' => false, 'max_retry' => 10, 'find_time' => 600, 'ban_time' => 600],
+        ];
+    }
+
+    /** fail2ban and Cloudflare mode: status before and after, unban, and both shapes of cloudflare.mode's result. */
+    public function testFakeFail2banAndCloudflareResultsMatchSchemas(): void
+    {
+        $fake = new FakeAgentClient;
+        $this->assertResult('fail2ban.status', $fake->call(new Fail2banStatus)->data, 'fake fail2ban.status, not installed');
+        $fake->fail2banBan('zimam-panel', '192.0.2.44');
+        $this->assertResult('fail2ban.status', $fake->call(new Fail2banStatus)->data, 'fake fail2ban.status with a ban');
+        foreach ([new Fail2banConfig(self::fail2banJails(), []), new Fail2banUnban('zimam-panel', '192.0.2.44'), new CloudflareMode(true, false), new CloudflareMode(true, true)] as $command) {
+            $final = $fake->follow($fake->submit($command)->id, 0, function (): void {});
+            $this->assertSame('succeeded', $final->status);
+            $this->assertResult($command->name(), $final->result, "fake {$command->name()} result");
+        }
+        $this->assertSame([], $fake->call(new Fail2banStatus)->data['jails'][1]['banned']);
+        $this->assertArrayHasKey('change', $final->result);
     }
 
     /** What the fake's jobs answer when they succeed matches each command's result schema. */
