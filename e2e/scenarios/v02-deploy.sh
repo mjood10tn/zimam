@@ -130,7 +130,11 @@ loop)
 			done'
 		in_c bash -c "rm -rf $remote; mkdir -p $remote; setsid nohup bash -c $(printf '%q' "$loop") $remote $host \
 			>$remote/results 2>$remote/loop.err </dev/null & echo \$! >$remote/pid"
-		sleep 2
+		# The first request after a deploy can take seconds on a busy server.
+		for _ in $(seq 1 20); do
+			sleep 1
+			in_c test -s "$remote/results" && break
+		done
 		in_c test -s "$remote/results" || die "the request loop isn't answering: $(in_c cat "$remote/loop.err" "$remote/curl.err" 2>/dev/null)"
 		log "the request loop runs on the server"
 		;;
