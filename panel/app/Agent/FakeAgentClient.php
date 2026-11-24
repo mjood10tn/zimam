@@ -123,8 +123,14 @@ final class FakeAgentClient implements AgentClient
         'external' => [],
     ];
 
-    /** @var array<string, array{deadline: CarbonImmutable, rules: list<array<string, mixed>>}> guarded changes waiting for Keep, with the rules a revert puts back */
+    /** @var array<string, array{deadline: CarbonImmutable, rules: list<array<string, mixed>>, restrict: bool}> guarded changes waiting for Keep, with the rules and origin restriction a revert puts back */
     private array $changes = [];
+
+    /** @var array{installed: bool, running: bool, jails: list<array{name: string, banned: list<array{address: string, until: string}>}>} fail2ban as fail2ban.status answers it */
+    private array $fail2ban = ['installed' => false, 'running' => false, 'jails' => []];
+
+    /** @var array{enabled: bool, restrict_origin: bool} Cloudflare mode on the fake's server */
+    private array $cloudflare = ['enabled' => false, 'restrict_origin' => false];
 
     public function __construct()
     {
@@ -291,12 +297,50 @@ final class FakeAgentClient implements AgentClient
         return $this;
     }
 
+    /** fail2ban is installed and running on the fake's server, with $address banned in $jail for an hour. */
+    public function fail2banBan(string $jail, string $address): static
+    {
+        $this->fail2ban['installed'] = $this->fail2ban['running'] = true;
+        $until = self::goTime(CarbonImmutable::now('UTC')->addHour());
+        foreach ($this->fail2ban['jails'] as &$j) {
+            if ($j['name'] === $jail) {
+                $j['banned'][] = ['address' => $address, 'until' => $until];
+
+                return $this;
+            }
+        }
+        unset($j);
+        $this->fail2ban['jails'][] = ['name' => $jail, 'banned' => [['address' => $address, 'until' => $until]]];
+
+        return $this;
+    }
+
+    /**
+     * fail2ban's status once fail2ban.config applied: installed, running
+     * the enabled jails, their bans kept.
+     *
+     * @param  array<string, mixed>  $params
+     * @return array<string, mixed>
+     */
+    private function fail2banAfter(array $params): array
+    {
+        $banned = array_column($this->fail2ban['jails'], 'banned', 'name');
+        $jails = [];
+        foreach ($params['jails'] as $jail) {
+            if ($jail['enabled']) {
+                $jails[] = ['name' => $jail['name'], 'banned' => $banned[$jail['name']] ?? []];
+            }
+        }
+
+        return ['installed' => true, 'running' => true, 'jails' => $jails];
+    }
+
     /** @return array{change: string, deadline: string} a guarded change, recorded with the rules a revert puts back */
     private function beginChange(int $seconds): array
     {
         $id = strtoupper((string) Str::ulid());
         $deadline = CarbonImmutable::now('UTC')->addSeconds($seconds);
-        $this->changes[$id] = ['deadline' => $deadline, 'rules' => $this->firewall['rules']];
+        $this->changes[$id] = ['deadline' => $deadline, 'rules' => $this->firewall['rules'], 'restrict' => $this->cloudflare['restrict_origin']];
 
         return ['change' => $id, 'deadline' => self::goTime($deadline)];
     }
@@ -314,6 +358,7 @@ final class FakeAgentClient implements AgentClient
         }
         if ($revert) {
             $this->firewall['rules'] = $this->changes[$id]['rules'];
+            $this->cloudflare['restrict_origin'] = $this->changes[$id]['restrict'];
         }
         unset($this->changes[$id]);
 
@@ -424,6 +469,7 @@ final class FakeAgentClient implements AgentClient
             $command->name() === 'backup.destination.keys' => $this->backupKeys($command->params()['id']),
             $command->name() === 'backup.list' => $this->backupList($command->params()['plan']),
             $command->name() === 'firewall.status' => $this->firewall,
+            $command->name() === 'fail2ban.status' => $this->fail2ban,
             $command->name() === 'change.confirm' => $this->endChange($command->params()['change'], revert: false),
             $command->name() === 'change.revert' => $this->endChange($command->params()['change'], revert: true),
             $command->name() === 'backup.runs' => ['runs' => array_values(array_filter(
@@ -522,6 +568,9 @@ final class FakeAgentClient implements AgentClient
 
             return;
         }
+        if ($command->name() === 'fail2ban.unban' && ! $this->fail2ban['installed']) {
+            throw new AgentNotFound("fail2ban isn't installed.");
+        }
         if ($command->name() === 'node.uninstall' && ! ($this->systemStatus['node']['installed'] ?? false)) {
             throw new AgentNotFound("Node.js isn't installed.");
         }
@@ -583,6 +632,10 @@ final class FakeAgentClient implements AgentClient
             // Guarded changes (R06-D1, OQ2): 120 s for the firewall, 300 s for SSH.
             'firewall.rules' => $this->beginChange(120),
             'ssh.settings' => $this->beginChange(300),
+            // Only a change to the origin restriction is guarded (R06-D9).
+            'cloudflare.mode' => $params + ($params['restrict_origin'] !== $this->cloudflare['restrict_origin'] ? $this->beginChange(120) : []),
+            'fail2ban.config' => $this->fail2banAfter($params),
+            'fail2ban.unban' => $params + ['unbanned' => in_array($params['address'], array_column(array_column($this->fail2ban['jails'], 'banned', 'name')[$params['jail']] ?? [], 'address'), true)],
             'security.check' => self::securityFindings($params),
             'logs.policy' => $params,
             // Let's Encrypt's certificates last 90 days.
@@ -720,6 +773,20 @@ final class FakeAgentClient implements AgentClient
         // In force at once; a revert puts beginChange's copy back.
         if ($command === 'firewall.rules') {
             $this->firewall['rules'] = $params['rules'];
+        }
+        if ($command === 'cloudflare.mode') {
+            $this->cloudflare = ['enabled' => $params['enabled'], 'restrict_origin' => $params['restrict_origin']];
+        }
+        if ($command === 'fail2ban.config' && is_array($result)) {
+            $this->fail2ban = $result;
+        }
+        if ($command === 'fail2ban.unban') {
+            foreach ($this->fail2ban['jails'] as &$jail) {
+                if ($jail['name'] === $params['jail']) {
+                    $jail['banned'] = array_values(array_filter($jail['banned'], fn (array $b): bool => $b['address'] !== $params['address']));
+                }
+            }
+            unset($jail);
         }
         match ($command) {
             'php.install' => $php['installed'][] = ['version' => $params['version'], 'fpm_active' => false, 'in_use' => false],
@@ -1019,6 +1086,29 @@ final class FakeAgentClient implements AgentClient
                 if (in_array($rule['id'], ['http', 'https'], true) || str_starts_with($rule['id'], 'ssh-')) {
                     throw new AgentValidationFailed('Invalid parameters', ["rules.{$i}.id" => 'is kept by the agent']);
                 }
+            }
+
+            return;
+        }
+        if ($command->name() === 'cloudflare.mode') {
+            if ($params['restrict_origin'] && ! $params['enabled']) {
+                throw new AgentValidationFailed('Invalid parameters', ['restrict_origin' => 'needs Cloudflare mode on']);
+            }
+
+            return;
+        }
+        if ($command->name() === 'fail2ban.config') {
+            $fields = [];
+            if (array_column($params['jails'], 'name') !== ['sshd', 'zimam-panel', 'zimam-site-auth']) {
+                $fields['jails'] = 'must list sshd, zimam-panel and zimam-site-auth once each';
+            }
+            foreach ($params['ignore'] as $i => $entry) {
+                if (IpEntry::error($entry) !== null) {
+                    $fields['ignore'] ??= 'entry '.($i + 1).' '.IpEntry::error($entry);
+                }
+            }
+            if ($fields !== []) {
+                throw new AgentValidationFailed('Invalid parameters', $fields);
             }
 
             return;

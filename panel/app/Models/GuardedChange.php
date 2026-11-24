@@ -21,8 +21,11 @@ class GuardedChange extends Model
 
     public const SSH = 'ssh';
 
-    /** The job commands that start one, and the kind each makes. */
-    public const COMMANDS = ['firewall.rules' => self::FIREWALL, 'ssh.settings' => self::SSH];
+    /** Cloudflare's origin restriction (R06-D9), a firewall change on the server. */
+    public const CLOUDFLARE = 'cloudflare';
+
+    /** The job commands that may start one, and the kind each makes (cloudflare.mode only when the restriction changes). */
+    public const COMMANDS = ['firewall.rules' => self::FIREWALL, 'ssh.settings' => self::SSH, 'cloudflare.mode' => self::CLOUDFLARE];
 
     protected $fillable = ['agent_change_id', 'kind', 'deadline', 'status', 'params', 'created_by'];
 

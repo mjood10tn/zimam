@@ -13,26 +13,34 @@ use Carbon\CarbonImmutable;
  * started the agent's revert timer (R06-D1): the panel records the change,
  * and the Server security page asks the owner to keep it. Nothing else moves
  * until the owner keeps it, so a reverted change leaves the panel's copy as
- * it was.
+ * it was. cloudflare.mode records one through ServerSecurityOutcomes.
  */
 final class GuardedChangeOutcomes
 {
     public static function register(JobOutcomes $outcomes): void
     {
-        foreach (GuardedChange::COMMANDS as $command => $kind) {
-            $outcomes->register($command, function (AgentJob $job, AgentJobStatus $status) use ($kind): void {
-                if ($status->status !== AgentJob::SUCCEEDED || ! is_array($status->result)) {
-                    return;
+        foreach (['firewall.rules', 'ssh.settings'] as $command) {
+            $outcomes->register($command, function (AgentJob $job, AgentJobStatus $status): void {
+                if ($status->status === AgentJob::SUCCEEDED) {
+                    self::record($job, $status);
                 }
-                GuardedChange::create([
-                    'agent_change_id' => $status->result['change'],
-                    'kind' => $kind,
-                    'deadline' => CarbonImmutable::parse($status->result['deadline']),
-                    'status' => GuardedChange::PENDING,
-                    'params' => $job->params,
-                    'created_by' => $job->created_by,
-                ]);
             });
         }
+    }
+
+    /** Records the change a succeeded job's result names; a result without one started none. */
+    public static function record(AgentJob $job, AgentJobStatus $status): void
+    {
+        if (! is_array($status->result) || ! isset($status->result['change'], $status->result['deadline'])) {
+            return;
+        }
+        GuardedChange::create([
+            'agent_change_id' => $status->result['change'],
+            'kind' => GuardedChange::COMMANDS[$job->command],
+            'deadline' => CarbonImmutable::parse($status->result['deadline']),
+            'status' => GuardedChange::PENDING,
+            'params' => $job->params,
+            'created_by' => $job->created_by,
+        ]);
     }
 }
