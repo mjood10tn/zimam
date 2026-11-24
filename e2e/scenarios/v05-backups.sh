@@ -216,7 +216,9 @@ lxc exec "$E2E_CONTAINER" --cwd /home/zimam/panel/current --env HOME=/home/zimam
 as_root dd if=/dev/zero of="$E2E_WORK/fill/full" bs=1M count=52 status=none
 # shellcheck disable=SC2329 # called through until_true
 mailed() {
-	bash "$sinks" mail | grep -q -- "$1"
+	# The messages are quoted-printable: a soft line break ("=" at the end of
+	# a line) can fall inside the path, so they are decoded before the search.
+	bash "$sinks" mail | python3 -I -c 'import quopri, sys; sys.stdout.buffer.write(quopri.decodestring(sys.stdin.buffer.read()))' | grep -q -- "$1"
 }
 until_true 300 mailed "$fillmount" || die "FAIL no warning mail for $fillmount within 5 minutes: $(bash "$sinks" mail | tail -n 20)"
 pass "the warning for $fillmount reached the SMTP sink"
