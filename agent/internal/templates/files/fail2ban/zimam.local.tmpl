@@ -1,0 +1,22 @@
+# Managed by Zimam (fail2ban.config). Changes here are overwritten.
+# It is read after jail.d/defaults-debian.conf, so its values win (R06-D5).
+[DEFAULT]
+ignoreip = 127.0.0.1/8 ::1{{range .Ignore}} {{prefix .}}{{end}}
+{{range .Jails}}
+[{{safe .Name}}]
+enabled = {{if .Enabled}}true{{else}}false{{end}}
+maxretry = {{.MaxRetry}}
+findtime = {{.FindTime}}
+bantime = {{.BanTime}}
+{{- if eq (safe .Name) "zimam-panel"}}
+backend = systemd
+filter = zimam-panel
+{{- else if eq (safe .Name) "zimam-site-auth"}}
+# Nginx's own error log always exists, so the jail starts before any site.
+backend = auto
+filter = nginx-http-auth
+port = http,https
+logpath = /var/log/nginx/error.log
+          /var/log/zimam/sites/*/error.log
+{{- end}}
+{{end -}}

@@ -165,6 +165,9 @@ var production = map[string]string{
 	"UFWConf":                 "/etc/ufw/ufw.conf",
 	"UFWDefaults":             "/etc/default/ufw",
 	"SSHDropIn":               "/etc/ssh/sshd_config.d/10-zimam.conf",
+	"Fail2banJails":           "/etc/fail2ban/jail.d/zimam.local",
+	"Fail2banPanelFilter":     "/etc/fail2ban/filter.d/zimam-panel.conf",
+	"Fail2banClient":          "/usr/bin/fail2ban-client",
 }
 
 const testJob = "01JBX7Q2M5YQ8T3N6V0R4K9W1E"

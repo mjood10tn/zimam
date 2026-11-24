@@ -1,0 +1,11 @@
+# Managed by Zimam (fail2ban.config). Changes here are overwritten.
+# The panel logs one line per failed sign-in, 2FA code or setup link to the
+# journal as zimam-panel-auth (R06-D6). The journal backend hands the filter
+# "host ident[pid]: message", hence __prefix_line (spike).
+[INCLUDES]
+before = common.conf
+
+[Definition]
+_daemon = zimam-panel-auth
+failregex = ^%(__prefix_line)sauth failure from <ADDR> kind=(?:password|totp|setup)$
+journalmatch = SYSLOG_IDENTIFIER=zimam-panel-auth

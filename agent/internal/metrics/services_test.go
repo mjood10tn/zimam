@@ -302,3 +302,23 @@ func TestMemTotal(t *testing.T) {
 		t.Error("MemTotal accepted a size it can't read")
 	}
 }
+
+func TestServicesIncludeFail2banOnceInstalled(t *testing.T) {
+	units := append([]string{"nginx.service", "fail2ban.service"}, alwaysUnits...)
+	blocks := append([][3]string{{"nginx.service", "active", "enabled"}, {"fail2ban.service", "active", "enabled"}}, fixedBlocks()...)
+	run := sysexec.NewFakeRunner(sysexec.Script{Path: "/usr/bin/systemctl", Args: showArgs(units...), Result: sysexec.Result{Stdout: show(blocks...)}})
+	d := testDeps(t, run)
+	if err := os.MkdirAll(filepath.Dir(d.Paths.Fail2banClient()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(d.Paths.Fail2banClient(), nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Services(context.Background(), d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[1].Unit != "fail2ban.service" || got[1].ActiveState != "active" {
+		t.Errorf("Services = %+v", got)
+	}
+}

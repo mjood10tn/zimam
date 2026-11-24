@@ -46,6 +46,7 @@ func New(d sysexec.Deps, m *jobs.Manager) Handlers {
 		"backup.list":             backupList(d),
 		"change.confirm":          changeConfirm(d),
 		"firewall.status":         firewallStatus(d),
+		"fail2ban.status":         fail2banStatus(d),
 	}
 	if m == nil {
 		return h

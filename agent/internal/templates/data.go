@@ -202,3 +202,10 @@ type SSHSettings struct {
 	MaxAuthTries      contract.MaxAuthTries
 	LoginGraceSeconds contract.LoginGraceSeconds
 }
+
+// Fail2banJails is fail2ban/zimam.local (R06-D5): every jail's settings, and
+// the addresses no jail bans, parsed.
+type Fail2banJails struct {
+	Ignore []netip.Prefix
+	Jails  []contract.Fail2banJail
+}

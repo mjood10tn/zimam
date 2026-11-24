@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"zimam/agent/contract"
@@ -29,7 +30,7 @@ var fixedUnits = []string{
 // Services reports the state of every monitored unit (§7.5) from one
 // systemctl show call: nginx, php<v>-fpm for each version with a Zimam
 // pool (a version without one is stopped on purpose, §8.3), mysql and
-// valkey-server once they are installed, Zimam's own units, certbot's timer,
+// valkey-server once they are installed, fail2ban once installed, Zimam's own units, certbot's timer,
 // and ssh.socket or ssh.service, whichever is enabled, preferring the socket
 // that Ubuntu 26.04 starts sshd from.
 func Services(ctx context.Context, d sysexec.Deps) ([]contract.ServiceState, error) {
@@ -54,6 +55,10 @@ func Services(ctx context.Context, d sysexec.Deps) ([]contract.ServiceState, err
 	}
 	if installed.Valkey.Installed {
 		units = append(units, "valkey-server.service")
+	}
+	// fail2ban once fail2ban.config installed it (R06-D5).
+	if _, err := os.Stat(d.Paths.Fail2banClient()); err == nil {
+		units = append(units, "fail2ban.service")
 	}
 	units = append(units, fixedUnits...)
 	res, err := d.Run.Run(ctx, sysexec.Cmd{Path: systemctl, Args: append([]string{"show", "-p", "Id,ActiveState,UnitFileState", "--"}, units...)})

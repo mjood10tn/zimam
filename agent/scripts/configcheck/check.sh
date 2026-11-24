@@ -315,4 +315,22 @@ if [ -d "$src/etc/ssh" ]; then
 	done
 fi
 
+if [ -d "$src/etc/fail2ban" ]; then
+	# The site-auth jail's first log path is Nginx's, which a server has.
+	mkdir -p /var/log/nginx /var/log/zimam/sites/demo
+	touch /var/log/nginx/error.log /var/log/zimam/sites/demo/error.log
+	# fail2ban-client -t accepts a broken regex (R06-D5 spike), so each
+	# filter must also match a line it is for.
+	if [ -f "$src/etc/fail2ban/filter.d/zimam-panel.conf" ]; then
+		echo "== fail2ban-regex zimam-panel"
+		out=$(fail2ban-regex "zimam-panel-auth[1]: auth failure from 192.0.2.1 kind=totp" /etc/fail2ban/filter.d/zimam-panel.conf) ||
+			fail "fail2ban-regex refused zimam-panel.conf"
+		grep -q '1 matched' <<<"$out" || fail "zimam-panel.conf doesn't match a failed 2FA code"
+		out=$(fail2ban-regex "zimam-panel-auth[1]: signed in from 192.0.2.1" /etc/fail2ban/filter.d/zimam-panel.conf)
+		grep -q '0 matched' <<<"$out" || fail "zimam-panel.conf matches a line that isn't a failure"
+	fi
+	echo "== fail2ban-client -t"
+	fail2ban-client -t || fail "fail2ban-client -t failed"
+fi
+
 echo "configcheck: passed"
