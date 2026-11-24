@@ -15,8 +15,8 @@
 #      is logged with its real peer; off removes the file;
 #   6. only where UFW is active (the VM and the VPS run): a firewall rule
 #      for 8181 is kept and a listener there answers; one not kept is gone
-#      after 120 s; SSH moves to 2222 alongside 22 and is kept after a login
-#      on 2222; change.confirm of a made-up id is not_found.
+#      after 120 s; SSH moves to 2223 alongside 22 and is kept after a login
+#      on 2223; change.confirm of a made-up id is not_found.
 # Containers run with --skip-firewall, so part 6 says SKIP there.
 # shellcheck source=../probes/lib.sh
 source "$(dirname "$0")/../probes/lib.sh"
@@ -134,13 +134,14 @@ sleep 130
 in_c ufw status | grep -e 8181 >/dev/null || die "FAIL the revert lost the kept rule"
 pass "a rule nobody kept is gone after 120 s; the kept one stays"
 
-ssh='{"password_auth":false,"root_login":"prohibit-password","ports":[22,2222],"max_auth_tries":6,"login_grace_seconds":120}'
+# Not 2222: on a VPS the Git host's tunnel holds 127.0.0.1:2222.
+ssh='{"password_auth":false,"root_login":"prohibit-password","ports":[22,2223],"max_auth_tries":6,"login_grace_seconds":120}'
 change=$(job ssh.settings "$ssh" | py 'import json, sys; print(json.load(sys.stdin)["change"])')
-ssh -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 "root@$CIP" true || die "FAIL no SSH login on 2222"
+ssh -p 2223 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 "root@$CIP" true || die "FAIL no SSH login on 2223"
 data change.confirm "{\"change\":\"$change\"}" >/dev/null
-in_c sshd -T | grep -xe 'port 2222' >/dev/null || die "FAIL sshd doesn't listen on 2222 after keeping the change"
+in_c sshd -T | grep -xe 'port 2223' >/dev/null || die "FAIL sshd doesn't listen on 2223 after keeping the change"
 in_c sshd -T | grep -xe 'passwordauthentication no' >/dev/null || die "FAIL password login is still on"
-pass "SSH moved to 22 and 2222, password login off, kept after a login on 2222"
+pass "SSH moved to 22 and 2223, password login off, kept after a login on 2223"
 # The owner's rules go again, kept: later scenarios expect only the locked ones.
 change=$(job firewall.rules "$(rules '')" | py 'import json, sys; print(json.load(sys.stdin)["change"])')
 data change.confirm "{\"change\":\"$change\"}" >/dev/null
