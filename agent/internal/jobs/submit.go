@@ -147,6 +147,10 @@ func newJobID(now time.Time) contract.JobID {
 	return contract.JobID(out[:])
 }
 
+// NewULID is a ULID for other records that sort by creation time, such as
+// guarded changes (R06-D1).
+func NewULID(now time.Time) string { return string(newJobID(now)) }
+
 // ActiveSubjects lists the subjects of the jobs that are queued or running,
 // for a command that must not start while a site's job is in flight.
 func ActiveSubjects(p paths.Paths) ([]string, error) {

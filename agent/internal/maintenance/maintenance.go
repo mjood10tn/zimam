@@ -18,6 +18,7 @@ import (
 
 	"zimam/agent/contract"
 	"zimam/agent/internal/audit"
+	guarded "zimam/agent/internal/changes"
 	"zimam/agent/internal/configtx"
 	"zimam/agent/internal/node"
 	"zimam/agent/internal/php"
@@ -72,12 +73,14 @@ const keyringRefreshEvery = 7 * 24 * time.Hour
 // updates and rotating logs aren't changes: a run that did only those
 // isn't audited (D18).
 type changes struct {
-	RestoredConfigs  []string `json:"restored_configs,omitempty"` // undone after their process died
-	ReconciledJobs   int      `json:"reconciled_jobs"`
-	KeyringRefreshed bool     `json:"keyring_refreshed"`           // the repository's files changed
-	DeletedArchives  []string `json:"deleted_archives,omitempty"`  // over a site's log cap (§11.4), or past a retention period
-	PrunedJobs       int      `json:"pruned_jobs"`                 // older than the log retention period
-	RotationTimeouts []string `json:"rotation_timeouts,omitempty"` // rules files whose logrotate ran out of its budget
+	RestoredConfigs []string `json:"restored_configs,omitempty"` // undone after their process died
+	// Guarded changes whose revert timer a reboot dropped (R06-D1).
+	RevertedChanges  []contract.ChangeID `json:"reverted_changes,omitempty"`
+	ReconciledJobs   int                 `json:"reconciled_jobs"`
+	KeyringRefreshed bool                `json:"keyring_refreshed"`           // the repository's files changed
+	DeletedArchives  []string            `json:"deleted_archives,omitempty"`  // over a site's log cap (§11.4), or past a retention period
+	PrunedJobs       int                 `json:"pruned_jobs"`                 // older than the log retention period
+	RotationTimeouts []string            `json:"rotation_timeouts,omitempty"` // rules files whose logrotate ran out of its budget
 	// PHP versions whose FPM a deploy marked, reloaded gracefully (spike
 	// amendment A3).
 	ReloadedPHP []contract.PHPVersion `json:"reloaded_php,omitempty"`
@@ -111,6 +114,15 @@ func Run(ctx context.Context, d sysexec.Deps, j Jobs, homes Homes, w interface{ 
 	}
 	for _, path := range c.RestoredConfigs {
 		d.Logf("Restored %s, left untested by a change whose process died", path)
+	}
+	// Next, so a change nobody confirmed doesn't outlive its deadline by more
+	// than one run.
+	c.RevertedChanges, err = guarded.RevertOverdue(runCtx, d)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("reverting overdue changes: %w", err))
+	}
+	for _, id := range c.RevertedChanges {
+		d.Logf("Reverted change %s, which nobody confirmed before its deadline", id)
 	}
 	sctx, cancel := step(runCtx, limits.reconcile)
 	c.ReconciledJobs, err = j.Reconcile(sctx)
@@ -166,7 +178,7 @@ func Run(ctx context.Context, d sysexec.Deps, j Jobs, homes Homes, w interface{ 
 		errs = append(errs, fmt.Errorf("reloading the PHP versions deploys marked: %w", err))
 	}
 	err = errors.Join(errs...)
-	if len(c.RestoredConfigs) == 0 && c.ReconciledJobs == 0 && !c.KeyringRefreshed && len(c.DeletedArchives) == 0 && c.PrunedJobs == 0 && len(c.RotationTimeouts) == 0 && len(c.ReloadedPHP) == 0 {
+	if len(c.RestoredConfigs) == 0 && len(c.RevertedChanges) == 0 && c.ReconciledJobs == 0 && !c.KeyringRefreshed && len(c.DeletedArchives) == 0 && c.PrunedJobs == 0 && len(c.RotationTimeouts) == 0 && len(c.ReloadedPHP) == 0 {
 		return err
 	}
 	outcome := "ok"

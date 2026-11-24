@@ -15,6 +15,7 @@ var wantSubcommands = []string{
 	"maintenance",
 	"job run",
 	"as-user",
+	"change revert",
 	"version", // D25: the installer's repair check (M1 review, M5)
 }
 

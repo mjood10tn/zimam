@@ -44,6 +44,7 @@ func New(d sysexec.Deps, m *jobs.Manager) Handlers {
 		"backup.destination.keys": backupDestinationKeys(d),
 		"backup.runs":             backupRuns(d),
 		"backup.list":             backupList(d),
+		"change.confirm":          changeConfirm(d),
 	}
 	if m == nil {
 		return h

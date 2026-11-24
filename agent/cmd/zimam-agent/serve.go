@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"zimam/agent/internal/audit"
+	"zimam/agent/internal/changes"
 	"zimam/agent/internal/commands"
 	"zimam/agent/internal/config"
 	"zimam/agent/internal/server"
@@ -65,6 +66,14 @@ func serve(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// The read commands' view of the system. system.status reads agent.json
 	// itself on each call, since jobs change it while serve runs.
 	d := sysexec.Deps{Paths: p, Run: sysexec.ExecRunner{}, Logf: log.Printf, Now: time.Now}
+	// A reboot drops guarded changes' revert timers, and the panel's first
+	// request after boot starts serve, usually well before maintenance runs
+	// (R06-D1, spike).
+	if ids, err := changes.RevertOverdue(ctx, d); err != nil {
+		log.Printf("reverting overdue changes: %v", err)
+	} else if len(ids) > 0 {
+		log.Printf("reverted overdue changes %v", ids)
+	}
 	s := &server.Server{
 		Listener:       ln,
 		Allowed:        server.AllowRootAndZimam(zimam, zimamExists),
