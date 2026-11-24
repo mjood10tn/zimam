@@ -19,7 +19,7 @@ ARG RCLONE_ARM64_SHA256=ee169016675e23a69d77240565133ff7dbc9b33d16fa8f7053d4af39
 RUN set -eux; \
 	export DEBIAN_FRONTEND=noninteractive; \
 	apt-get update; \
-	apt-get install -y --no-install-recommends ca-certificates curl gpg nginx logrotate systemd openssl mysql-server valkey-server unzip; \
+	apt-get install -y --no-install-recommends ca-certificates curl gpg nginx logrotate systemd openssl mysql-server valkey-server unzip openssh-server fail2ban; \
 	curl -fsSL https://packages.sury.org/php/apt.gpg -o /tmp/sury.gpg; \
 	fingerprint="$(gpg --show-keys --with-colons /tmp/sury.gpg | awk -F: '$1 == "fpr" { print $10; exit }')"; \
 	test "$fingerprint" = "$SURY_FINGERPRINT"; \
