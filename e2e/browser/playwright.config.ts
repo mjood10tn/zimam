@@ -38,7 +38,8 @@ export default defineConfig({
   // MySQL and Valkey. v0.4.0's workers, cron jobs and Node.js page (--project
   // v04-workers) use v0.2.0's site "laravel" and the Node.js that
   // e2e/scenarios/v04-workers.sh leaves installed. v0.5.0's Backups page
-  // (--project v05-backups) needs the sinks (e2e/sinks).
+  // (--project v05-backups) needs the sinks (e2e/sinks). v0.6.0's Server
+  // security page is --project v06-security.
   projects: [
     { name: 'setup', testMatch: 'setup.spec.ts' },
     { name: 'recovery', testMatch: 'recovery.spec.ts', dependencies: ['setup'] },
@@ -52,5 +53,6 @@ export default defineConfig({
     { name: 'v03-databases', testMatch: 'databases.spec.ts' },
     { name: 'v04-workers', testMatch: 'workers.spec.ts' },
     { name: 'v05-backups', testMatch: 'backups.spec.ts' },
+    { name: 'v06-security', testMatch: 'server-security.spec.ts' },
   ],
 });

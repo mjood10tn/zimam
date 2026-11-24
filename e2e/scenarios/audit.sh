@@ -159,7 +159,8 @@ def count(**want):
     return sum(all(e.get(k) == v for k, v in want.items()) for e in entries)
 
 
-# The 47 commands, §5.3's 18, v0.2.0's six, v0.3.0's seven, v0.4.0's six and v0.5.0's ten: the jobs are
+# 55 commands: the 47 of §5.3 and v0.2.0 to v0.5.0, and the eight v0.6.0 ones v06-security.sh runs everywhere (its
+# guarded firewall and SSH changes run only where UFW is active): the jobs are
 # audited at submission and outcome, job.cancel when it acts, the routine
 # reads never, unless refused, and site.env.read, which returns a secret,
 # every time.
@@ -169,11 +170,13 @@ jobs = ["php.install", "php.uninstall", "php.default", "site.provision", "site.p
         "mysql.install", "valkey.install", "db.create", "db.drop", "db.user", "cache.user",
         "site.workers", "site.workers.restart", "site.cron", "node.install", "node.uninstall",
         "backup.destination", "backup.destination.test", "backup.plan", "backup.plan.delete", "backup.run",
-        "backup.restore", "backup.destination.delete"]
+        "backup.restore", "backup.destination.delete",
+        "updates.auto", "updates.install", "system.reboot", "system.reboot.cancel", "fail2ban.config", "fail2ban.unban",
+        "cloudflare.mode"]
 reads = ["agent.version", "system.status", "system.metrics", "job.status", "job.follow", "logs.list", "logs.read",
-         "site.releases", "db.list", "site.workers.status", "backup.list", "backup.runs"]
+         "site.releases", "db.list", "site.workers.status", "backup.list", "backup.runs", "fail2ban.status"]
 audited_reads = ["site.env.read", "backup.destination.keys"]
-assert len(jobs) + 1 + len(reads) + len(audited_reads) == 47
+assert len(jobs) + 1 + len(reads) + len(audited_reads) == 55
 backups = sys.argv[4] == "lxd"
 if not backups:
     jobs = [c for c in jobs if not c.startswith("backup.")]

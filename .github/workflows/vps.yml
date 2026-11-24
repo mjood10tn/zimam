@@ -162,6 +162,8 @@ jobs:
       # with that reason, and audit.sh asks for no backup command.
       - name: v0.5.0, backups (skipped on a VPS, which has no sinks)
         run: bash e2e/scenarios/v05-backups.sh
+      - name: v0.6.0, server security, guarded firewall and SSH changes included (UFW is active here)
+        run: bash e2e/scenarios/v06-security.sh
       - name: done-when 12, every root-escalation probe in one pass between two identical snapshots
         run: bash e2e/probes/run-all.sh
       - name: done-when 11, the audit re-check

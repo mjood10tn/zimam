@@ -85,6 +85,10 @@ jobs:
         run: bash e2e/scenarios/v05-backups.sh
       - name: v0.5.0, a backup destination with its keys shown once, tested and deleted, in the browser
         run: bash e2e/scripts/browser.sh --project v05-backups
+      - name: v0.6.0, automatic updates, Install updates now, a scheduled reboot cancelled, fail2ban banning and unbanning, Cloudflare mode against a forged header
+        run: bash e2e/scenarios/v06-security.sh
+      - name: v0.6.0, the Server security page, in the browser
+        run: bash e2e/scripts/browser.sh --project v06-security
       - name: done-when 12, every root-escalation probe in one pass between two identical snapshots
         run: bash e2e/probes/run-all.sh
       - name: done-when 11, the audit re-check (every command, the redaction, the cli:root runs, certbot renew)
