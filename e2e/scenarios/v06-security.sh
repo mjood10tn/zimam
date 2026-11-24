@@ -137,10 +137,14 @@ pass "a rule nobody kept is gone after 120 s; the kept one stays"
 # Not 2222: on a VPS the Git host's tunnel holds 127.0.0.1:2222.
 ssh='{"password_auth":false,"root_login":"prohibit-password","ports":[22,2223],"max_auth_tries":6,"login_grace_seconds":120}'
 change=$(job ssh.settings "$ssh" | py 'import json, sys; print(json.load(sys.stdin)["change"])')
-ssh -p 2223 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 "root@$CIP" true || die "FAIL no SSH login on 2223"
+# On a VPS the server takes only the harness's key (lxc-ssh's E2E_SSH_KEY).
+key=()
+[[ -z ${E2E_SSH_KEY:-} ]] || key=(-i "$E2E_SSH_KEY" -o IdentitiesOnly=yes)
+ssh -p 2223 "${key[@]}" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 "root@$CIP" true || die "FAIL no SSH login on 2223"
 data change.confirm "{\"change\":\"$change\"}" >/dev/null
-in_c sshd -T | grep -xe 'port 2223' >/dev/null || die "FAIL sshd doesn't listen on 2223 after keeping the change"
-in_c sshd -T | grep -xe 'passwordauthentication no' >/dev/null || die "FAIL password login is still on"
+# sshd -T refuses to run without /run/sshd, which goes when ssh.service stops.
+in_c sh -c 'mkdir -p /run/sshd && sshd -T' | grep -xe 'port 2223' >/dev/null || die "FAIL sshd doesn't listen on 2223 after keeping the change"
+in_c sh -c 'mkdir -p /run/sshd && sshd -T' | grep -xe 'passwordauthentication no' >/dev/null || die "FAIL password login is still on"
 pass "SSH moved to 22 and 2223, password login off, kept after a login on 2223"
 # The owner's rules go again, kept: later scenarios expect only the locked ones.
 change=$(job firewall.rules "$(rules '')" | py 'import json, sys; print(json.load(sys.stdin)["change"])')
