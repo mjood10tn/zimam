@@ -26,6 +26,10 @@ final class SecurityOutcomes
             $site = $job->related instanceof Site ? $job->related : null;
             $scope = $status->result['scope'] ?? ($site === null ? 'server' : 'site');
             $now = CarbonImmutable::now();
+            // The agent sends every check it runs; one it no longer runs
+            // (cloudflare_ranges_fresh outside Cloudflare mode) goes.
+            SecurityFinding::query()->where('scope', $scope)->where('site_id', $site?->id)
+                ->whereNotIn('check', array_column($status->result['findings'] ?? [], 'check'))->delete();
             foreach ($status->result['findings'] ?? [] as $f) {
                 SecurityFinding::query()->updateOrCreate(
                     ['scope' => $scope, 'site_id' => $site?->id, 'check' => $f['check']],

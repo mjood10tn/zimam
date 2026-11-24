@@ -5,6 +5,7 @@ namespace Tests\Feature\Security;
 use App\Agent\AgentClient;
 use App\Agent\FakeAgentClient;
 use App\Filament\Pages\Security;
+use App\Filament\Pages\ServerSecurity;
 use App\Jobs\TrackAgentJob;
 use App\Models\AgentJob;
 use App\Models\Certificate;
@@ -158,5 +159,31 @@ final class SecurityChecksTest extends TestCase
             __('zimam.checks.names.firewall_active'), 'UFW isn’t active.',
             __('zimam.checks.names.reboot_required'),
         ])->assertDontSee('HTTP answers 301.');
+    }
+
+    /** A failing SSH or firewall check links to the form that fixes it (R06-D10). */
+    public function testCheckLinksToForm(): void
+    {
+        $now = now();
+        foreach (['ssh_password_login' => 'warn', 'ssh_root_login' => 'pass', 'firewall_active' => 'fail'] as $check => $status) {
+            SecurityFinding::create(['scope' => 'server', 'check' => $check, 'status' => $status, 'detail' => 'x', 'checked_at' => $now]);
+        }
+
+        $html = $this->get('/admin/security')->assertOk()->getContent();
+
+        $this->assertStringContainsString(ServerSecurity::getUrl().'#ssh', $html);
+        $this->assertStringContainsString(ServerSecurity::getUrl().'#firewall', $html);
+        $this->assertSame(1, substr_count($html, __('zimam.checks.fix.ssh')), 'only the failing SSH check links');
+    }
+
+    /** A check the agent no longer runs (Cloudflare mode turned off) leaves the screen. */
+    public function testFindingsTheAgentDroppedAreRemoved(): void
+    {
+        SecurityFinding::create(['scope' => 'server', 'check' => 'cloudflare_ranges_fresh', 'status' => 'warn', 'detail' => 'old', 'checked_at' => now()]);
+        $this->scriptFindings('server', null, [$this->finding('firewall_active', 'pass')]);
+        Artisan::call('zimam:run-security-checks', ['--server' => true]);
+        $this->trackAll();
+
+        $this->assertSame(['firewall_active'], SecurityFinding::where('scope', 'server')->pluck('check')->all());
     }
 }

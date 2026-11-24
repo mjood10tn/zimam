@@ -1,5 +1,5 @@
 {{-- The Server security page's SSH settings (R06-D4). --}}
-<x-filament::section :heading="__('zimam.server_security.ssh.heading')" :description="__('zimam.server_security.ssh.lede')">
+<x-filament::section id="ssh" :heading="__('zimam.server_security.ssh.heading')" :description="__('zimam.server_security.ssh.lede')">
     <form wire:submit.prevent class="grid gap-6">
         {{ $this->form }}
 
