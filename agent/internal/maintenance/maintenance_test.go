@@ -18,6 +18,7 @@ import (
 
 	"zimam/agent/contract"
 	"zimam/agent/internal/audit"
+	guarded "zimam/agent/internal/changes"
 	"zimam/agent/internal/config"
 	"zimam/agent/internal/helper"
 	"zimam/agent/internal/paths"
@@ -712,5 +713,31 @@ func TestRotationTimeoutIsAudited(t *testing.T) {
 	}
 	if entries[0]["outcome"] != "ok" {
 		t.Errorf("outcome %v, want ok: a timed-out file isn't a failed run", entries[0]["outcome"])
+	}
+}
+
+// A guarded change whose timer a reboot dropped is reverted, and the run
+// is audited.
+func TestMaintenanceRevertsOrphanedRecord(t *testing.T) {
+	const id = contract.ChangeID("01JD5Z3W4X6Y7Z8A9B0C1D2E3F")
+	e := newEnv(t, fixed(sysexec.Script{Path: "/usr/bin/systemctl", Args: []string{"stop", "zimam-revert-" + string(id) + ".timer"}}))
+	var reverted int
+	guarded.Register("maintenance-test", guarded.Hooks{Revert: func(context.Context, sysexec.Deps, []byte) error { reverted++; return nil }})
+	if err := os.MkdirAll(e.d.Paths.ChangesDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	record := `{"id":"` + string(id) + `","kind":"maintenance-test","previous":null,"deadline":"` + testNow.Add(-time.Hour).Format(time.RFC3339) + `"}`
+	if err := os.WriteFile(e.d.Paths.ChangeRecord(id), []byte(record), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.maintain(); err != nil {
+		t.Fatal(err)
+	}
+	if reverted != 1 {
+		t.Errorf("reverted %d times, want 1", reverted)
+	}
+	b, _ := os.ReadFile(e.d.Paths.AuditLog())
+	if !strings.Contains(string(b), `"reverted_changes":["`+string(id)+`"]`) {
+		t.Errorf("audit log doesn't name the reverted change:\n%s", b)
 	}
 }

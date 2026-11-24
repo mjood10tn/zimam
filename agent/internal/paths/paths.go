@@ -71,6 +71,14 @@ func (p Paths) JobsDir() string  { return p.at("var/lib/zimam/jobs") }
 
 // ConfigTxDir holds the record of each config change in flight (configtx).
 func (p Paths) ConfigTxDir() string { return p.at("var/lib/zimam/configtx") }
+
+// ChangesDir holds the record of each guarded change waiting for its
+// confirmation (R06-D1); ChangesLock keeps only one pending.
+func (p Paths) ChangesDir() string { return p.at("var/lib/zimam/changes") }
+func (p Paths) ChangeRecord(id contract.ChangeID) string {
+	return p.at("var/lib/zimam/changes", string(id)+".json")
+}
+func (p Paths) ChangesLock() string { return p.at("run/zimam/locks/changes.lock") }
 func (p Paths) JobDir(id contract.JobID) string {
 	return p.at("var/lib/zimam/jobs", string(id))
 }

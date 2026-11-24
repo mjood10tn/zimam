@@ -27,6 +27,7 @@ var subcommands = map[string]subcommand{
 	"hook cert-deployed": hookCertDeployed,
 	"maintenance":        runMaintenance,
 	"backup run":         backupRun,
+	"change revert":      changeRevert,
 	"job run":            jobRun,
 	"as-user":            runAsUser,
 	"version":            version,
