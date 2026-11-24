@@ -22,6 +22,8 @@
 source "$(dirname "$0")/../probes/lib.sh"
 load_state
 
+# grep reads all its input here (no -q): under pipefail, an early exit would
+# kill the command before it with SIGPIPE and fail the check.
 py() { python3 -I -c "$1" "${@:2}"; }
 
 data() {
@@ -51,10 +53,10 @@ job updates.auto '{"enabled":false,"auto_reboot":false}' >/dev/null
 [[ $(check_status automatic_security_updates) == warn ]] || die "FAIL automatic_security_updates doesn't warn with updates off"
 pass "automatic_security_updates warns with updates off"
 job updates.auto '{"enabled":true,"auto_reboot":true,"reboot_time":"04:30"}' >/dev/null
-in_c apt-config dump | grep -qx 'Unattended-Upgrade::Automatic-Reboot-Time "04:30";' || die "FAIL apt-config doesn't read the reboot time"
+in_c apt-config dump | grep -xe 'Unattended-Upgrade::Automatic-Reboot-Time "04:30";' >/dev/null || die "FAIL apt-config doesn't read the reboot time"
 job updates.auto '{"enabled":true,"auto_reboot":false}' >/dev/null
 [[ $(check_status automatic_security_updates) == pass ]] || die "FAIL automatic_security_updates doesn't pass with updates on"
-in_c apt-config dump | grep -qx 'APT::Periodic::Unattended-Upgrade "1";' || die "FAIL apt-config doesn't read updates as on"
+in_c apt-config dump | grep -xe 'APT::Periodic::Unattended-Upgrade "1";' >/dev/null || die "FAIL apt-config doesn't read updates as on"
 pass "updates.auto turns automatic updates off and on, as apt-config reads them"
 
 # 2. Install updates now.
@@ -105,7 +107,7 @@ job cloudflare.mode '{"enabled":false,"restrict_origin":false}' >/dev/null
 pass "Cloudflare mode off removes zimam-realip.conf"
 
 # 6. Guarded firewall and SSH changes, where UFW is active.
-if ! in_c ufw status | grep -q '^Status: active'; then
+if ! in_c ufw status | grep -e '^Status: active' >/dev/null; then
 	echo "SKIP  guarded firewall and SSH changes: UFW isn't active here (--skip-firewall)"
 	exit 0
 fi
@@ -125,18 +127,18 @@ in_c pkill -f 'http.server 8080' || true
 
 temp='{"id":"temp9090","action":"allow","proto":"tcp","port_from":9090,"port_to":9090,"from":[]}'
 job firewall.rules "$(rules "$web,$temp")" >/dev/null
-in_c ufw status | grep -q 9090 || die "FAIL the unconfirmed rule isn't in force"
+in_c ufw status | grep -e 9090 >/dev/null || die "FAIL the unconfirmed rule isn't in force"
 sleep 130
-! in_c ufw status | grep -q 9090 || die "FAIL the unconfirmed rule is still there after 130 s"
-in_c ufw status | grep -q 8080 || die "FAIL the revert lost the kept rule"
+! in_c ufw status | grep -e 9090 >/dev/null || die "FAIL the unconfirmed rule is still there after 130 s"
+in_c ufw status | grep -e 8080 >/dev/null || die "FAIL the revert lost the kept rule"
 pass "a rule nobody kept is gone after 120 s; the kept one stays"
 
 ssh='{"password_auth":false,"root_login":"prohibit-password","ports":[22,2222],"max_auth_tries":6,"login_grace_seconds":120}'
 change=$(job ssh.settings "$ssh" | py 'import json, sys; print(json.load(sys.stdin)["change"])')
 ssh -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 "root@$CIP" true || die "FAIL no SSH login on 2222"
 data change.confirm "{\"change\":\"$change\"}" >/dev/null
-in_c sshd -T | grep -qx 'port 2222' || die "FAIL sshd doesn't listen on 2222 after keeping the change"
-in_c sshd -T | grep -qx 'passwordauthentication no' || die "FAIL password login is still on"
+in_c sshd -T | grep -xe 'port 2222' >/dev/null || die "FAIL sshd doesn't listen on 2222 after keeping the change"
+in_c sshd -T | grep -xe 'passwordauthentication no' >/dev/null || die "FAIL password login is still on"
 pass "SSH moved to 22 and 2222, password login off, kept after a login on 2222"
 # The owner's rules go again, kept: later scenarios expect only the locked ones.
 change=$(job firewall.rules "$(rules '')" | py 'import json, sys; print(json.load(sys.stdin)["change"])')
