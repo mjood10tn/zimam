@@ -157,6 +157,14 @@ var production = map[string]string{
 	"UnzipBinary":             "/usr/bin/unzip",
 	"FPMReloadDir":            "/run/zimam/fpm-reload",
 	"FPMReloadMark":           "/run/zimam/fpm-reload/8.4",
+	"ChangesDir":              "/var/lib/zimam/changes",
+	"ChangeRecord":            "/var/lib/zimam/changes/01JD5Z3W4X6Y7Z8A9B0C1D2E3F.json",
+	"ChangesLock":             "/run/zimam/locks/changes.lock",
+	"UFWUserRules":            "/etc/ufw/user.rules",
+	"UFWUser6Rules":           "/etc/ufw/user6.rules",
+	"UFWConf":                 "/etc/ufw/ufw.conf",
+	"UFWDefaults":             "/etc/default/ufw",
+	"SSHDropIn":               "/etc/ssh/sshd_config.d/10-zimam.conf",
 }
 
 const testJob = "01JBX7Q2M5YQ8T3N6V0R4K9W1E"
@@ -172,6 +180,7 @@ func callAll(t *testing.T, p Paths) map[string]string {
 		reflect.TypeFor[contract.DestinationID](): reflect.ValueOf(contract.DestinationID("offsite")),
 		reflect.TypeFor[contract.PlanID]():        reflect.ValueOf(contract.PlanID("nightly")),
 		reflect.TypeFor[contract.BackupID]():      reflect.ValueOf(contract.BackupID("20261123T033000Z")),
+		reflect.TypeFor[contract.ChangeID]():      reflect.ValueOf(contract.ChangeID("01JD5Z3W4X6Y7Z8A9B0C1D2E3F")),
 		reflect.TypeFor[string]():                 reflect.ValueOf("site:shop"),
 	}
 	v := reflect.ValueOf(p)

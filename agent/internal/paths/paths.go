@@ -79,6 +79,16 @@ func (p Paths) ChangeRecord(id contract.ChangeID) string {
 	return p.at("var/lib/zimam/changes", string(id)+".json")
 }
 func (p Paths) ChangesLock() string { return p.at("run/zimam/locks/changes.lock") }
+
+// UFW's own files: the rules it keeps (one "### tuple ###" line per rule,
+// R06-D3), whether it is enabled, and whether it handles IPv6.
+func (p Paths) UFWUserRules() string  { return p.at("etc/ufw/user.rules") }
+func (p Paths) UFWUser6Rules() string { return p.at("etc/ufw/user6.rules") }
+func (p Paths) UFWConf() string       { return p.at("etc/ufw/ufw.conf") }
+func (p Paths) UFWDefaults() string   { return p.at("etc/default/ufw") }
+
+// SSHDropIn is Zimam's sshd settings (R06-D4).
+func (p Paths) SSHDropIn() string { return p.at("etc/ssh/sshd_config.d/10-zimam.conf") }
 func (p Paths) JobDir(id contract.JobID) string {
 	return p.at("var/lib/zimam/jobs", string(id))
 }
