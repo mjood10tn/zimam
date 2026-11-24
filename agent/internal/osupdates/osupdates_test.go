@@ -275,3 +275,12 @@ func TestStatusReportsScheduledReboot(t *testing.T) {
 		t.Errorf("a poweroff counted as a reboot: %v", at)
 	}
 }
+
+// needrestart lists the restarts it defers (dbus, logind, itself) after the
+// ones it ran; those didn't restart (seen on 26.04).
+func TestRestartedLeavesOutDeferredRestarts(t *testing.T) {
+	out := "Restarting services...\n systemctl restart cron.service nginx.service\n\nService restarts being deferred:\n /etc/needrestart/restart.d/dbus.service\n systemctl restart systemd-logind.service\n\nNo containers need to be restarted.\nRestarting services...\n systemctl restart ssh.service\n"
+	if got := restarted([]byte(out)); !slices.Equal(got, []string{"cron.service", "nginx.service", "ssh.service"}) {
+		t.Errorf("restarted = %v", got)
+	}
+}

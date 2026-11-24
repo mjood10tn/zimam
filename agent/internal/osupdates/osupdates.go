@@ -226,7 +226,8 @@ func diff(before, after []pkg) []contract.UpgradedPackage {
 }
 
 // restarted reads needrestart's " systemctl restart <unit>..." lines after
-// "Restarting services..." (spike).
+// "Restarting services..." (spike), but not those under "Service restarts
+// being deferred:", which it didn't run.
 func restarted(stdout []byte) []string {
 	out := []string{}
 	in := false
@@ -235,6 +236,8 @@ func restarted(stdout []byte) []string {
 		switch {
 		case strings.HasPrefix(line, "Restarting services..."):
 			in = true
+		case strings.HasPrefix(line, "Service restarts being deferred"):
+			in = false
 		case in && strings.HasPrefix(line, "systemctl restart "):
 			for _, u := range strings.Fields(strings.TrimPrefix(line, "systemctl restart ")) {
 				if !slices.Contains(out, u) {
