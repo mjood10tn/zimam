@@ -346,3 +346,75 @@ func TestSSHPorts(t *testing.T) {
 		t.Error("SSHPorts accepted port 0")
 	}
 }
+
+func TestOriginRestrictionReplacesWebRules(t *testing.T) {
+	// The installer's untagged web rules would keep 80 and 443 open to
+	// everyone, so they go too; the owner's other rules stay.
+	v4, v6 := installerRules()
+	v4 += tupleLine("allow", "tcp", "8080", "0.0.0.0/0", "")
+	tuples := append(parseTuples([]byte(v4), false), parseTuples([]byte(v6), true)...)
+	got, err := webCalls(contract.IPList{"173.245.48.0/20", "2400:cb00::/32"}, tuples, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	add := func(src, port, id string) []string {
+		return []string{"allow", "proto", "tcp", "from", src, "to", "any", "port", port, "comment", "zimam:" + id}
+	}
+	del := func(port string) []string {
+		return []string{"delete", "allow", "proto", "tcp", "from", "any", "to", "any", "port", port}
+	}
+	// Adds first, so the sites never lose their ports.
+	want := [][]string{
+		add("173.245.48.0/20", "80", "http"), add("2400:cb00::/32", "80", "http"),
+		add("173.245.48.0/20", "443", "https"), add("2400:cb00::/32", "443", "https"),
+		del("80"), del("443"),
+	}
+	if !slices.EqualFunc(got, want, slices.Equal) {
+		t.Errorf("webCalls =\n%q\nwant\n%q", got, want)
+	}
+
+	// Lifting it again: anywhere first, then each range goes.
+	cf := tupleLine("allow", "tcp", "80", "173.245.48.0/20", "zimam:http") + tupleLine("allow", "tcp", "443", "173.245.48.0/20", "zimam:https")
+	tuples = parseTuples([]byte(cf), false)
+	got, err = webCalls(contract.IPList{}, tuples, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = [][]string{
+		add("any", "80", "http"), add("any", "443", "https"),
+		{"delete", "allow", "proto", "tcp", "from", "173.245.48.0/20", "to", "any", "port", "80"},
+		{"delete", "allow", "proto", "tcp", "from", "173.245.48.0/20", "to", "any", "port", "443"},
+	}
+	if !slices.EqualFunc(got, want, slices.Equal) {
+		t.Errorf("webCalls =\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestWebRestricted(t *testing.T) {
+	v4, v6 := installerRules()
+	e := newEnv(t, v4, v6)
+	if on, err := WebRestricted(e.d); err != nil || on {
+		t.Errorf("installer rules: WebRestricted = %v, %v", on, err)
+	}
+	e = newEnv(t, tupleLine("allow", "tcp", "443", "173.245.48.0/20", "zimam:https"), "")
+	if on, err := WebRestricted(e.d); err != nil || !on {
+		t.Errorf("Cloudflare-only https: WebRestricted = %v, %v", on, err)
+	}
+}
+
+func TestLiftingRestrictionAdoptsInstallerWebRules(t *testing.T) {
+	v4, v6 := installerRules()
+	tuples := append(parseTuples([]byte(v4), false), parseTuples([]byte(v6), true)...)
+	got, err := webCalls(contract.IPList{}, tuples, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range got {
+		if args[0] == "delete" {
+			t.Errorf("deletes the rule it adopts: %q", args)
+		}
+	}
+	if len(got) != 2 {
+		t.Errorf("webCalls = %q, want the two adoptions", got)
+	}
+}

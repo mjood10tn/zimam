@@ -168,6 +168,8 @@ var production = map[string]string{
 	"Fail2banJails":           "/etc/fail2ban/jail.d/zimam.local",
 	"Fail2banPanelFilter":     "/etc/fail2ban/filter.d/zimam-panel.conf",
 	"Fail2banClient":          "/usr/bin/fail2ban-client",
+	"NginxRealIPConf":         "/etc/nginx/conf.d/zimam-realip.conf",
+	"CloudflareRanges":        "/var/lib/zimam/cloudflare-ranges.json",
 }
 
 const testJob = "01JBX7Q2M5YQ8T3N6V0R4K9W1E"

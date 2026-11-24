@@ -4,6 +4,7 @@ use App\Http\Middleware\EnforcePanelIpAllowlist;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -21,6 +22,10 @@ return Application::configure(basePath: dirname(__DIR__))
         // setup page and Livewire's update requests included; only the
         // hooks, which authenticate by signature or token, are exempt (OQ2).
         $middleware->prepend(EnforcePanelIpAllowlist::class);
+        // The client's address is the TCP peer as Nginx passes it, rewritten
+        // by realip only in Cloudflare mode; no proxy header is ever read
+        // (R06-D8, global rule 10).
+        $middleware->remove(TrustProxies::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

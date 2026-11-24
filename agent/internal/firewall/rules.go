@@ -59,15 +59,78 @@ func lockedRules(ssh []contract.TCPPort, tuples []tuple) []contract.FirewallRule
 	for _, port := range ssh {
 		out = append(out, contract.FirewallRule{ID: contract.FirewallRuleID("ssh-" + strconv.Itoa(int(port))), Action: "allow", Proto: "tcp", PortFrom: port, PortTo: port, From: contract.IPList{}})
 	}
-	for _, w := range []struct {
-		id   contract.FirewallRuleID
-		port contract.TCPPort
-	}{{"http", 80}, {"https", 443}} {
-		if !slices.ContainsFunc(tuples, func(t tuple) bool { return t.ID == w.id }) {
-			out = append(out, contract.FirewallRule{ID: w.id, Action: "allow", Proto: "tcp", PortFrom: w.port, PortTo: w.port, From: contract.IPList{}})
+	for _, r := range webRules(contract.IPList{}) {
+		if !slices.ContainsFunc(tuples, func(t tuple) bool { return t.ID == r.ID }) {
+			out = append(out, r)
 		}
 	}
 	return out
+}
+
+// webRules are the locked http and https rules, allowing from these sources
+// (anywhere when empty).
+func webRules(from contract.IPList) []contract.FirewallRule {
+	return []contract.FirewallRule{
+		{ID: "http", Action: "allow", Proto: "tcp", PortFrom: 80, PortTo: 80, From: from},
+		{ID: "https", Action: "allow", Proto: "tcp", PortFrom: 443, PortTo: 443, From: from},
+	}
+}
+
+// isWebRule reports a tuple of the http or https rule. An untagged "allow
+// 80 (or 443) from anywhere" counts too: it is the installer's rule not yet
+// adopted, and left in place it would keep the port open to everyone.
+func isWebRule(t tuple) bool {
+	if t.ID == "http" || t.ID == "https" {
+		return true
+	}
+	return t.ID == "" && t.Action == "allow" && t.Proto == "tcp" && (t.Port == "80" || t.Port == "443") && t.anywhere()
+}
+
+// WebRestricted reports whether the http or https rule allows less than
+// anywhere: Cloudflare's origin restriction is on (R06-D9).
+func WebRestricted(d sysexec.Deps) (bool, error) {
+	tuples, err := readTuples(d.Paths)
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(tuples, func(t tuple) bool { return (t.ID == "http" || t.ID == "https") && !t.anywhere() }), nil
+}
+
+// WebSources makes the http and https rules allow from these sources, or
+// from anywhere when from is empty (R06-D9). It doesn't guard: cloudflare.mode
+// runs it inside Guarded, and a range refresh runs it as it is.
+func WebSources(ctx context.Context, d sysexec.Deps, from contract.IPList) error {
+	tuples, err := readTuples(d.Paths)
+	if err != nil {
+		return err
+	}
+	v6, err := ipv6Enabled(d.Paths.UFWDefaults())
+	if err != nil {
+		return err
+	}
+	calls, err := webCalls(from, tuples, v6)
+	if err != nil {
+		return err
+	}
+	return runCalls(ctx, d, calls)
+}
+
+// webCalls adds the new web rules before deleting the old ones, so the sites
+// never lose their ports.
+func webCalls(from contract.IPList, tuples []tuple, v6 bool) ([][]string, error) {
+	want := webRules(from)
+	calls, err := adds(want, tuples, v6)
+	if err != nil {
+		return nil, err
+	}
+	wanted := allSpecs(want)
+	for _, t := range tuples {
+		// An untagged rule a wanted spec matches was just adopted by adds.
+		if isWebRule(t) && !slices.ContainsFunc(wanted, func(s spec) bool { return (s.ID == t.ID || t.ID == "") && s.matches(t) }) {
+			calls = appendOnce(calls, deleteArgs(t))
+		}
+	}
+	return calls, nil
 }
 
 // plan is the ufw calls that turn the tagged rules into the wanted ones:

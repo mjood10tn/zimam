@@ -2,7 +2,8 @@
 // zimam-maintenance.timer runs every 15 minutes (design §11.3). It settles
 // dead jobs, rotates Zimam's and every site's logs, counts the pending updates hourly and
 // refreshes the sury and NodeSource keyrings weekly and reloads the PHP versions deploys
-// marked (spike amendment A3).
+// marked (spike amendment A3), and in Cloudflare mode refreshes Cloudflare's ranges
+// weekly (R06-D7).
 package maintenance
 
 import (
@@ -19,6 +20,7 @@ import (
 	"zimam/agent/contract"
 	"zimam/agent/internal/audit"
 	guarded "zimam/agent/internal/changes"
+	"zimam/agent/internal/cloudflare"
 	"zimam/agent/internal/configtx"
 	"zimam/agent/internal/node"
 	"zimam/agent/internal/php"
@@ -37,8 +39,8 @@ var runBudget = 18 * time.Minute
 // step ends rotationReserve before the run's budget, so the steps after it
 // still have time.
 type stepLimits struct {
-	reconcile, updates, caps, retention, keyring, fpmReload time.Duration
-	rotationReserve                                         time.Duration
+	reconcile, updates, caps, retention, keyring, fpmReload, cloudflare time.Duration
+	rotationReserve                                                     time.Duration
 }
 
 var limits = stepLimits{
@@ -48,6 +50,7 @@ var limits = stepLimits{
 	retention:       2 * time.Minute,
 	keyring:         3 * time.Minute,
 	fpmReload:       3 * time.Minute,
+	cloudflare:      2 * time.Minute,
 	rotationReserve: 5 * time.Minute,
 }
 
@@ -84,6 +87,8 @@ type changes struct {
 	// PHP versions whose FPM a deploy marked, reloaded gracefully (spike
 	// amendment A3).
 	ReloadedPHP []contract.PHPVersion `json:"reloaded_php,omitempty"`
+	// Cloudflare's ranges changed and were applied (R06-D7).
+	CloudflareRefreshed bool `json:"cloudflare_refreshed,omitempty"`
 }
 
 // Run is one maintenance run, which never overlaps another. Its steps don't
@@ -177,8 +182,15 @@ func Run(ctx context.Context, d sysexec.Deps, j Jobs, homes Homes, w interface{ 
 	if err != nil {
 		errs = append(errs, fmt.Errorf("reloading the PHP versions deploys marked: %w", err))
 	}
+	// Weekly, in Cloudflare mode only; a failed download is only recorded.
+	sctx, cancel = step(runCtx, limits.cloudflare)
+	c.CloudflareRefreshed, err = cloudflare.Refresh(sctx, d)
+	cancel()
+	if err != nil {
+		errs = append(errs, fmt.Errorf("refreshing Cloudflare's ranges: %w", err))
+	}
 	err = errors.Join(errs...)
-	if len(c.RestoredConfigs) == 0 && len(c.RevertedChanges) == 0 && c.ReconciledJobs == 0 && !c.KeyringRefreshed && len(c.DeletedArchives) == 0 && c.PrunedJobs == 0 && len(c.RotationTimeouts) == 0 && len(c.ReloadedPHP) == 0 {
+	if len(c.RestoredConfigs) == 0 && len(c.RevertedChanges) == 0 && c.ReconciledJobs == 0 && !c.KeyringRefreshed && len(c.DeletedArchives) == 0 && c.PrunedJobs == 0 && len(c.RotationTimeouts) == 0 && len(c.ReloadedPHP) == 0 && !c.CloudflareRefreshed {
 		return err
 	}
 	outcome := "ok"
