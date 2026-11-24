@@ -89,6 +89,11 @@ func (p Paths) UFWDefaults() string   { return p.at("etc/default/ufw") }
 
 // SSHDropIn is Zimam's sshd settings (R06-D4).
 func (p Paths) SSHDropIn() string { return p.at("etc/ssh/sshd_config.d/10-zimam.conf") }
+
+// fail2ban's files Zimam writes (R06-D5), and its client.
+func (p Paths) Fail2banJails() string       { return p.at("etc/fail2ban/jail.d/zimam.local") }
+func (p Paths) Fail2banPanelFilter() string { return p.at("etc/fail2ban/filter.d/zimam-panel.conf") }
+func (p Paths) Fail2banClient() string      { return p.at("usr/bin/fail2ban-client") }
 func (p Paths) JobDir(id contract.JobID) string {
 	return p.at("var/lib/zimam/jobs", string(id))
 }

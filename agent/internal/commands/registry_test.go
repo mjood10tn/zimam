@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewAddsJobCommands(t *testing.T) {
-	if h := New(sysexec.Deps{}, nil); len(h) != 14 || h["change.confirm"] == nil || h["firewall.status"] == nil || h["backup.destination.keys"] == nil || h["backup.runs"] == nil || h["backup.list"] == nil || h["site.workers.status"] == nil || h["agent.version"] == nil || h["system.status"] == nil || h["system.metrics"] == nil || h["logs.list"] == nil || h["logs.read"] == nil || h["site.releases"] == nil || h["site.env.read"] == nil || h["db.list"] == nil {
+	if h := New(sysexec.Deps{}, nil); len(h) != 15 || h["change.confirm"] == nil || h["firewall.status"] == nil || h["fail2ban.status"] == nil || h["backup.destination.keys"] == nil || h["backup.runs"] == nil || h["backup.list"] == nil || h["site.workers.status"] == nil || h["agent.version"] == nil || h["system.status"] == nil || h["system.metrics"] == nil || h["logs.list"] == nil || h["logs.read"] == nil || h["site.releases"] == nil || h["site.env.read"] == nil || h["db.list"] == nil {
 		t.Errorf("New(d, nil) has %d handlers, want only the reads and change.confirm: agent.version, system.status, system.metrics, logs.list, logs.read, site.releases, site.env.read, db.list, site.workers.status, backup.destination.keys, backup.runs and backup.list", len(h))
 	}
 	m := &jobs.Manager{Handlers: map[string]jobs.Handler{"php.default": nil}}

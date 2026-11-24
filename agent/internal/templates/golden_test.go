@@ -75,9 +75,13 @@ var goldenCases = map[string][]goldenFile{
 	// What ssh.settings writes (R06-D4): the defaults, and passwords on with
 	// root off and four ports.
 	"ssh-default": {sshDropIn(SSHSettings{RootLogin: "prohibit-password", Ports: []contract.TCPPort{22}, MaxAuthTries: 6, LoginGraceSeconds: 120})},
-	"ssh-ports":   {sshDropIn(SSHSettings{PasswordAuth: true, RootLogin: "no", Ports: []contract.TCPPort{22, 2222, 2200, 65535}, MaxAuthTries: 3, LoginGraceSeconds: 30})},
-	"panel-http":  panel(false),
-	"panel-https": panel(true),
+	// What fail2ban.config writes (R06-D5): every jail on with an ignore
+	// list, and only SSH on.
+	"fail2ban-all": fail2banFiles(contract.IPList{"203.0.113.0/24", "2001:db8::7"}, true),
+	"fail2ban-ssh": fail2banFiles(contract.IPList{}, false),
+	"ssh-ports":    {sshDropIn(SSHSettings{PasswordAuth: true, RootLogin: "no", Ports: []contract.TCPPort{22, 2222, 2200, 65535}, MaxAuthTries: 3, LoginGraceSeconds: 30})},
+	"panel-http":   panel(false),
+	"panel-https":  panel(true),
 	// Zimam's own units (§7.1, §11.3).
 	"units": units(),
 	// rclone.conf (R05-D2): one S3 destination, one SFTP destination with a
@@ -529,4 +533,20 @@ func nodeRepo(major contract.NodeMajor) []goldenFile {
 
 func sshDropIn(s SSHSettings) goldenFile {
 	return goldenFile{path: paths.Paths{}.SSHDropIn(), tmpl: "ssh/10-zimam.conf", data: func() any { return s }}
+}
+
+func fail2banFiles(ignore contract.IPList, all bool) []goldenFile {
+	data := Fail2banJails{Jails: []contract.Fail2banJail{
+		{Name: "sshd", Enabled: true, MaxRetry: 5, FindTime: 600, BanTime: 3600},
+		{Name: "zimam-panel", Enabled: all, MaxRetry: 5, FindTime: 600, BanTime: 3600},
+		{Name: "zimam-site-auth", Enabled: all, MaxRetry: 10, FindTime: 600, BanTime: 600},
+	}}
+	for _, e := range ignore {
+		p, _ := contract.ParseIPEntry(e)
+		data.Ignore = append(data.Ignore, p)
+	}
+	return []goldenFile{
+		{path: paths.Paths{}.Fail2banJails(), tmpl: "fail2ban/zimam.local", data: func() any { return data }},
+		{path: paths.Paths{}.Fail2banPanelFilter(), tmpl: "fail2ban/zimam-panel.conf"},
+	}
 }
