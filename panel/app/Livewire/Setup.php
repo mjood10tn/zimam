@@ -4,6 +4,7 @@ namespace App\Livewire;
 
 use App\Models\SetupToken;
 use App\Models\User;
+use App\Support\AuthFailureLog;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\TextInput;
@@ -39,7 +40,7 @@ class Setup extends SimplePage
 
     public function mount(string $token): void
     {
-        abort_unless(SetupToken::findUsable($token), 404);
+        $this->abortUnlessUsable(SetupToken::findUsable($token));
 
         $this->token = $token;
         $this->isReset = User::query()->exists();
@@ -93,13 +94,22 @@ class Setup extends SimplePage
             ]);
     }
 
+    /** A refused setup link is logged for fail2ban's zimam-panel jail (R06-D6), then 404s as before. */
+    private function abortUnlessUsable(?SetupToken $token): void
+    {
+        if ($token === null) {
+            app(AuthFailureLog::class)->record('setup', request()->ip());
+        }
+        abort_unless($token, 404);
+    }
+
     public function save(): void
     {
         $data = $this->form->getState();
         // Stored in lowercase, as sign-in compares it, so the case it was typed in never matters.
         $data['email'] = Str::lower(trim($data['email']));
         $token = SetupToken::findUsable($this->token);
-        abort_unless($token, 404);
+        $this->abortUnlessUsable($token);
 
         $user = DB::transaction(function () use ($data, $token): User {
             $user = User::query()->first();
