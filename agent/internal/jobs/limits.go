@@ -52,6 +52,11 @@ var limits = map[string]Limits{
 	"fail2ban.config": {MemoryMax: "512M", RuntimeMaxSec: 600},
 	"fail2ban.unban":  {MemoryMax: "128M", RuntimeMaxSec: 60},
 	"cloudflare.mode": {MemoryMax: "256M", RuntimeMaxSec: 120},
+	// OS updates (R06-D12..D14).
+	"updates.auto":         {MemoryMax: "512M", RuntimeMaxSec: 600},
+	"updates.install":      {MemoryMax: "2G", RuntimeMaxSec: 3600},
+	"system.reboot":        {MemoryMax: "64M", RuntimeMaxSec: 60},
+	"system.reboot.cancel": {MemoryMax: "64M", RuntimeMaxSec: 60},
 }
 
 // LimitsFor returns a job command's limits. Every job command has them; a

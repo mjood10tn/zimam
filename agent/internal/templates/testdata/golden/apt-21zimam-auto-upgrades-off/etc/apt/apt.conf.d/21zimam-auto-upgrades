@@ -1,0 +1,5 @@
+// Managed by Zimam (updates.auto). Changes here are overwritten.
+// It sorts after 20auto-upgrades, so these values win without editing the
+// package's own file (R06-D12).
+APT::Periodic::Update-Package-Lists "0";
+APT::Periodic::Unattended-Upgrade "0";

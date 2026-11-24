@@ -99,6 +99,16 @@ func (p Paths) Fail2banClient() string      { return p.at("usr/bin/fail2ban-clie
 // the mode is on, and the ranges maintenance last fetched.
 func (p Paths) NginxRealIPConf() string  { return p.at("etc/nginx/conf.d/zimam-realip.conf") }
 func (p Paths) CloudflareRanges() string { return p.at("var/lib/zimam/cloudflare-ranges.json") }
+
+// OS updates (R06-D12..D16): Zimam's apt drop-ins, needrestart's, and
+// systemd's record of a scheduled shutdown.
+func (p Paths) AptAutoUpgrades() string { return p.at("etc/apt/apt.conf.d/21zimam-auto-upgrades") }
+func (p Paths) AptUnattendedReboot() string {
+	return p.at("etc/apt/apt.conf.d/52zimam-unattended-reboot")
+}
+func (p Paths) NeedrestartConf() string   { return p.at("etc/needrestart/conf.d/50-zimam.conf") }
+func (p Paths) ShutdownScheduled() string { return p.at("run/systemd/shutdown/scheduled") }
+func (p Paths) UnattendedUpgrade() string { return p.at("usr/bin/unattended-upgrade") }
 func (p Paths) JobDir(id contract.JobID) string {
 	return p.at("var/lib/zimam/jobs", string(id))
 }

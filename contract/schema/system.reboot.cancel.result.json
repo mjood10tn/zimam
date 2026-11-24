@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "cancelled": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "cancelled"
+  ],
+  "title": "system.reboot.cancel result",
+  "type": "object"
+}

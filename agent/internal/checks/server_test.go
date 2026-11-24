@@ -186,3 +186,17 @@ func TestAgentSocketPermissions(t *testing.T) {
 func itoa(n int) string {
 	return strings.TrimSpace(strings.Repeat(" ", 0) + big.NewInt(int64(n)).String())
 }
+
+func TestAutomaticSecurityUpdatesCheck(t *testing.T) {
+	dump := func(on string) sysexec.Script {
+		return sysexec.Script{Path: "/usr/bin/apt-config", Args: []string{"dump"}, Result: sysexec.Result{Stdout: []byte(
+			"APT::Periodic::Update-Package-Lists \"" + on + "\";\nAPT::Periodic::Unattended-Upgrade \"" + on + "\";\n")}}
+	}
+	timer := func(code int) sysexec.Script {
+		return sysexec.Script{Path: "/usr/bin/systemctl", Args: []string{"is-active", "--quiet", "apt-daily-upgrade.timer"}, Result: sysexec.Result{ExitCode: code}}
+	}
+	wantStatus(t, automaticSecurityUpdates(context.Background(), serverEnv(t, dump("1"), timer(0))), "automatic_security_updates", contract.FindingPass)
+	wantStatus(t, automaticSecurityUpdates(context.Background(), serverEnv(t, dump("0"), timer(0))), "automatic_security_updates", contract.FindingWarn)
+	wantStatus(t, automaticSecurityUpdates(context.Background(), serverEnv(t, dump("1"), timer(3))), "automatic_security_updates", contract.FindingWarn)
+	wantStatus(t, automaticSecurityUpdates(context.Background(), serverEnv(t)), "automatic_security_updates", contract.FindingInconclusive)
+}

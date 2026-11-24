@@ -170,6 +170,11 @@ var production = map[string]string{
 	"Fail2banClient":          "/usr/bin/fail2ban-client",
 	"NginxRealIPConf":         "/etc/nginx/conf.d/zimam-realip.conf",
 	"CloudflareRanges":        "/var/lib/zimam/cloudflare-ranges.json",
+	"AptAutoUpgrades":         "/etc/apt/apt.conf.d/21zimam-auto-upgrades",
+	"AptUnattendedReboot":     "/etc/apt/apt.conf.d/52zimam-unattended-reboot",
+	"NeedrestartConf":         "/etc/needrestart/conf.d/50-zimam.conf",
+	"ShutdownScheduled":       "/run/systemd/shutdown/scheduled",
+	"UnattendedUpgrade":       "/usr/bin/unattended-upgrade",
 }
 
 const testJob = "01JBX7Q2M5YQ8T3N6V0R4K9W1E"

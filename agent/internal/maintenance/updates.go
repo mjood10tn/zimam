@@ -51,12 +51,22 @@ func refreshUpdates(ctx context.Context, d sysexec.Deps) error {
 	if err == nil && u.CheckedAt != nil && !u.CheckedAt.After(now) && now.Sub(*u.CheckedAt) <= updatesMaxAge {
 		return nil
 	}
+	_, err = CountUpdatesNow(ctx, d)
+	return err
+}
+
+// CountUpdatesNow counts the pending updates and writes updates.json at
+// once, whatever their age: updates.install refreshes them right after an
+// upgrade (R06-D13, §7.5).
+func CountUpdatesNow(ctx context.Context, d sysexec.Deps) (contract.UpdateCounts, error) {
+	now := d.Now().UTC()
 	total, security, err := countUpdates(ctx, d)
 	if err != nil {
-		return fmt.Errorf("counting pending updates: %w", err)
+		return contract.UpdateCounts{}, fmt.Errorf("counting pending updates: %w", err)
 	}
 	d.Logf("%d updates pending, %d of them security updates", total, security)
-	return writeRootJSON(d.Paths.UpdatesCache(), contract.UpdateCounts{Total: &total, Security: &security, CheckedAt: &now})
+	u := contract.UpdateCounts{Total: &total, Security: &security, CheckedAt: &now}
+	return u, writeRootJSON(d.Paths.UpdatesCache(), u)
 }
 
 // countUpdates asks apt-check when update-notifier-common provides it, and

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -375,8 +376,8 @@ func TestStatusWithoutServices(t *testing.T) {
 	if want := (contract.ServicesStatus{MySQL: &contract.ServiceStatus{}, Valkey: &contract.ServiceStatus{}}); !reflect.DeepEqual(st.Services, want) {
 		t.Errorf("services = %+v, want none installed", st.Services)
 	}
-	if n := len(run.Calls()); n != 2 {
-		t.Errorf("ran %d commands, want only nginx -v and the nodejs query", n)
+	if n := len(run.Calls()); n != 3 {
+		t.Errorf("ran %d commands, want only nginx -v, the nodejs query and apt-config dump", n)
 	}
 }
 
@@ -497,5 +498,24 @@ func TestStatusTimezone(t *testing.T) {
 	touch(t, d.Paths.Localtime())
 	if got := getStatus(t, d).Timezone; got != "UTC" {
 		t.Errorf("regular /etc/localtime: timezone = %q, want UTC", got)
+	}
+}
+
+func TestStatusReportsAutoUpdatesAndScheduledReboot(t *testing.T) {
+	dump := sysexec.Script{Path: "/usr/bin/apt-config", Args: []string{"dump"}, Result: sysexec.Result{Stdout: []byte(
+		"APT::Periodic::Update-Package-Lists \"1\";\nAPT::Periodic::Unattended-Upgrade \"1\";\nUnattended-Upgrade::Automatic-Reboot \"true\";\nUnattended-Upgrade::Automatic-Reboot-Time \"04:15\";\n")}}
+	run := sysexec.NewFakeRunner(nginxV(t), dump)
+	d := statusDeps(t, run)
+	at := time.Date(2026, 11, 25, 4, 15, 0, 0, time.UTC)
+	touch(t, d.Paths.ShutdownScheduled())
+	if err := os.WriteFile(d.Paths.ShutdownScheduled(), []byte("USEC="+strconv.FormatInt(at.UnixMicro(), 10)+"\nMODE=reboot\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := getStatus(t, d)
+	if got.AutoUpdates == nil || *got.AutoUpdates != (contract.AutoUpdates{Enabled: true, AutoReboot: true, RebootTime: "04:15"}) {
+		t.Errorf("auto_updates = %+v", got.AutoUpdates)
+	}
+	if got.RebootScheduled == nil || !got.RebootScheduled.Equal(at) {
+		t.Errorf("reboot_scheduled = %v", got.RebootScheduled)
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"zimam/agent/internal/configtx"
 	"zimam/agent/internal/logpolicy"
 	"zimam/agent/internal/nginx"
+	"zimam/agent/internal/osupdates"
 	"zimam/agent/internal/php"
 	"zimam/agent/internal/sysexec"
 	"zimam/agent/internal/systemd"
@@ -33,6 +34,8 @@ func (r *run) steps() []Step {
 	return []Step{
 		{"agent-config", r.configDone, r.configApply},
 		{"directories", r.dirsDone, r.dirsApply},
+		// OQ8: on for new installs only; a repair leaves them as they are.
+		{"automatic-updates", r.autoDone, r.autoApply},
 		{"sury-repository", r.repoDone, r.repoApply},
 		{"php", r.phpDone, r.phpApply},
 		{"nginx", r.nginxDone, r.nginxApply},
@@ -63,6 +66,7 @@ func (r *run) deps() sysexec.Deps {
 func (r *run) configDone(ctx context.Context) (bool, error) {
 	stored, err := config.Load(r.Deps.Paths)
 	saved := err == nil
+	r.fresh = !saved
 	switch {
 	case saved:
 		if stored.PanelDomain != r.o.PanelDomain {
@@ -572,4 +576,20 @@ func fileIs(path string, content []byte) bool {
 func rendered(path, name string, data any) bool {
 	content, err := templates.Render(name, data)
 	return err == nil && fileIs(path, content)
+}
+
+// Step 3: automatic security updates (R06-D12, OQ8). They are turned on
+// once, on a new install: a server installed before keeps what its owner
+// chose, and a later run finds the drop-in there.
+func (r *run) autoDone(context.Context) (bool, error) {
+	if !r.fresh {
+		return true, nil
+	}
+	_, err := os.Stat(r.Deps.Paths.AptAutoUpgrades())
+	return err == nil, nil
+}
+
+func (r *run) autoApply(ctx context.Context) error {
+	_, err := osupdates.Auto(ctx, r.deps(), contract.UpdatesAutoParams{Enabled: true})
+	return err
 }
