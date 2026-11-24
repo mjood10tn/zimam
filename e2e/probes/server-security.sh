@@ -16,7 +16,7 @@ else
 	fail "change records left: $(in_c ls /var/lib/zimam/changes)"
 fi
 
-if ! in_c ufw status | grep -q '^Status: active'; then
+if ! in_c ufw status | grep -e '^Status: active' >/dev/null; then
 	echo "SKIP  an unconfirmed change across an agent restart: UFW isn't active here (--skip-firewall)"
 	exit "$failed"
 fi
