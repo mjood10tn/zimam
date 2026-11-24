@@ -111,6 +111,21 @@ final class FakeAgentClient implements AgentClient
     /** @var list<array<string, mixed>> the run records, oldest first, as backup.runs answers them */
     private array $backupRuns = [];
 
+    /** @var array{active: bool, rules: list<array<string, mixed>>, locked: list<array<string, mixed>>, external: list<array<string, mixed>>} UFW as firewall.status answers it */
+    private array $firewall = [
+        'active' => true,
+        'rules' => [],
+        'locked' => [
+            ['id' => 'ssh-22', 'action' => 'allow', 'proto' => 'tcp', 'port_from' => 22, 'port_to' => 22, 'from' => []],
+            ['id' => 'http', 'action' => 'allow', 'proto' => 'tcp', 'port_from' => 80, 'port_to' => 80, 'from' => []],
+            ['id' => 'https', 'action' => 'allow', 'proto' => 'tcp', 'port_from' => 443, 'port_to' => 443, 'from' => []],
+        ],
+        'external' => [],
+    ];
+
+    /** @var array<string, array{deadline: CarbonImmutable, rules: list<array<string, mixed>>}> guarded changes waiting for Keep, with the rules a revert puts back */
+    private array $changes = [];
+
     public function __construct()
     {
         $this->systemStatus = self::serverStatus(demo: false);
@@ -261,6 +276,50 @@ final class FakeAgentClient implements AgentClient
      *
      * @param  array<string, mixed>  $record  BackupRunRecord's fields; plan and backup at least
      */
+    /**
+     * UFW's rules on the fake's server: the owner's Zimam rules and rules
+     * Zimam didn't make.
+     *
+     * @param  list<array<string, mixed>>  $rules
+     * @param  list<array<string, mixed>>  $external
+     */
+    public function firewall(array $rules, array $external = []): static
+    {
+        $this->firewall['rules'] = $rules;
+        $this->firewall['external'] = $external;
+
+        return $this;
+    }
+
+    /** @return array{change: string, deadline: string} a guarded change, recorded with the rules a revert puts back */
+    private function beginChange(int $seconds): array
+    {
+        $id = strtoupper((string) Str::ulid());
+        $deadline = CarbonImmutable::now('UTC')->addSeconds($seconds);
+        $this->changes[$id] = ['deadline' => $deadline, 'rules' => $this->firewall['rules']];
+
+        return ['change' => $id, 'deadline' => self::goTime($deadline)];
+    }
+
+    /**
+     * change.confirm and change.revert: a change kept, reverted or past its
+     * deadline is not_found, as the agent says.
+     *
+     * @return array{change: string}
+     */
+    private function endChange(string $id, bool $revert): array
+    {
+        if (! isset($this->changes[$id]) || $this->changes[$id]['deadline']->isPast()) {
+            throw new AgentNotFound('This change was already reverted or kept.');
+        }
+        if ($revert) {
+            $this->firewall['rules'] = $this->changes[$id]['rules'];
+        }
+        unset($this->changes[$id]);
+
+        return ['change' => $id];
+    }
+
     public function backupRunRecord(array $record): static
     {
         $record += ['trigger' => 'timer', 'status' => 'succeeded', 'parts' => [], 'started_at' => self::goTime(CarbonImmutable::createFromFormat('Ymd\THis\Z', $record['backup'], 'UTC'))];
@@ -364,6 +423,9 @@ final class FakeAgentClient implements AgentClient
             $command->name() === 'site.workers.status' => $this->siteWorkersStatus($command->params()['name']),
             $command->name() === 'backup.destination.keys' => $this->backupKeys($command->params()['id']),
             $command->name() === 'backup.list' => $this->backupList($command->params()['plan']),
+            $command->name() === 'firewall.status' => $this->firewall,
+            $command->name() === 'change.confirm' => $this->endChange($command->params()['change'], revert: false),
+            $command->name() === 'change.revert' => $this->endChange($command->params()['change'], revert: true),
             $command->name() === 'backup.runs' => ['runs' => array_values(array_filter(
                 $this->backupRuns,
                 fn (array $r): bool => (! isset($command->params()['plan']) || $r['plan'] === $command->params()['plan'])
@@ -518,6 +580,9 @@ final class FakeAgentClient implements AgentClient
             'backup.plan.delete' => ['id' => $params['plan']],
             'backup.run' => ['plan' => $params['plan'], 'backup' => CarbonImmutable::now('UTC')->format('Ymd\THis\Z'), 'parts' => $this->backupParts($this->plans[$params['plan']])],
             'backup.restore' => $this->restoreResult($params),
+            // Guarded changes (R06-D1, OQ2): 120 s for the firewall, 300 s for SSH.
+            'firewall.rules' => $this->beginChange(120),
+            'ssh.settings' => $this->beginChange(300),
             'security.check' => self::securityFindings($params),
             'logs.policy' => $params,
             // Let's Encrypt's certificates last 90 days.
@@ -651,6 +716,10 @@ final class FakeAgentClient implements AgentClient
         }
         if ($command === 'cert.issue') {
             $this->certified[$params['name']] = true;
+        }
+        // In force at once; a revert puts beginChange's copy back.
+        if ($command === 'firewall.rules') {
+            $this->firewall['rules'] = $params['rules'];
         }
         match ($command) {
             'php.install' => $php['installed'][] = ['version' => $params['version'], 'fpm_active' => false, 'in_use' => false],
@@ -942,6 +1011,22 @@ final class FakeAgentClient implements AgentClient
         }
         if (in_array($command->name(), ['db.create', 'db.drop', 'db.user', 'cache.user'], true)) {
             $this->validateDatabase($command->name(), $params);
+
+            return;
+        }
+        if ($command->name() === 'firewall.rules') {
+            foreach ($params['rules'] as $i => $rule) {
+                if (in_array($rule['id'], ['http', 'https'], true) || str_starts_with($rule['id'], 'ssh-')) {
+                    throw new AgentValidationFailed('Invalid parameters', ["rules.{$i}.id" => 'is kept by the agent']);
+                }
+            }
+
+            return;
+        }
+        if ($command->name() === 'ssh.settings') {
+            if (! in_array($params['root_login'], ['no', 'prohibit-password'], true)) {
+                throw new AgentValidationFailed('Invalid parameters', ['root_login' => 'must be no or prohibit-password']);
+            }
 
             return;
         }

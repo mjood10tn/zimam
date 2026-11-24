@@ -16,6 +16,7 @@ use App\Agent\Outcomes\CertificateOutcomes;
 use App\Agent\Outcomes\CronOutcomes;
 use App\Agent\Outcomes\DatabaseOutcomes;
 use App\Agent\Outcomes\DeploymentOutcomes;
+use App\Agent\Outcomes\GuardedChangeOutcomes;
 use App\Agent\Outcomes\NodeOutcomes;
 use App\Agent\Outcomes\PhpOutcomes;
 use App\Agent\Outcomes\SecurityOutcomes;
@@ -49,6 +50,7 @@ class AgentServiceProvider extends ServiceProvider
             CronOutcomes::register($outcomes);
             NodeOutcomes::register($outcomes);
             BackupOutcomes::register($outcomes);
+            GuardedChangeOutcomes::register($outcomes);
 
             return $outcomes;
         });

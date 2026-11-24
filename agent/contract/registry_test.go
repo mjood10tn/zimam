@@ -77,6 +77,7 @@ var designCommands = []struct {
 	{"firewall.status", KindRead, "", false, true},
 	{"ssh.settings", KindJob, "server", true, true},
 	{"change.confirm", KindDirect, "", true, true},
+	{"change.revert", KindDirect, "", true, true},
 	{"fail2ban.config", KindJob, "server", true, true},
 	{"fail2ban.status", KindRead, "", false, true},
 	{"fail2ban.unban", KindJob, "server", true, true},
@@ -94,8 +95,8 @@ func subjectPattern(s string) *regexp.Regexp {
 }
 
 func TestDescriptorsMatchDesign(t *testing.T) {
-	if len(designCommands) != 55 {
-		t.Fatalf("the table has %d rows, want all 18 of §5.3, v0.2.0's 6, v0.3.0's 7, v0.4.0's 6, v0.5.0's 10 and v0.6.0's 8", len(designCommands))
+	if len(designCommands) != 56 {
+		t.Fatalf("the table has %d rows, want all 18 of §5.3, v0.2.0's 6, v0.3.0's 7, v0.4.0's 6, v0.5.0's 10 and v0.6.0's 9", len(designCommands))
 	}
 	rows := map[string]int{}
 	for i, row := range designCommands {
