@@ -23,6 +23,12 @@
                     <span class="zimam-age">{{ $warning['at'] }}</span>
                 </p>
                 <p class="zimam-detail">{{ $warning['detail'] }}</p>
+                @isset($warning['action'])
+                    {{-- A warning card's one primary action (DESIGN.md, R06-D15). --}}
+                    <div class="zimam-warning-actions">
+                        <x-filament::button tag="a" :href="$warning['action']['url']">{{ $warning['action']['label'] }}</x-filament::button>
+                    </div>
+                @endisset
             </li>
         @endforeach
     </ul>

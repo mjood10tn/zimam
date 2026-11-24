@@ -6,6 +6,7 @@ use App\Filament\Pages\ServerSecurity\CloudflareForm;
 use App\Filament\Pages\ServerSecurity\Fail2banForm;
 use App\Filament\Pages\ServerSecurity\FirewallTable;
 use App\Filament\Pages\ServerSecurity\SshForm;
+use App\Filament\Pages\ServerSecurity\UpdatesSection;
 use App\Livewire\GuardedChangeModal;
 use BackedEnum;
 use Filament\Pages\Page;
@@ -44,6 +45,7 @@ class ServerSecurity extends Page
             Livewire::make(SshForm::class)->key('ssh-settings'),
             Livewire::make(Fail2banForm::class)->key('fail2ban'),
             Livewire::make(CloudflareForm::class)->key('cloudflare'),
+            Livewire::make(UpdatesSection::class)->key('updates'),
         ]);
     }
 }

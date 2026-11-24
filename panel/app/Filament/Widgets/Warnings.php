@@ -5,6 +5,7 @@ namespace App\Filament\Widgets;
 use App\Agent\AgentHealth;
 use App\Agent\MetricsReading;
 use App\Agent\ServerStatus;
+use App\Filament\Pages\ServerSecurity;
 use App\Models\Certificate;
 use App\Support\DisplayTime;
 use App\Support\MetricWarnings;
@@ -43,7 +44,7 @@ class Warnings extends Widget
         ];
     }
 
-    /** @return list<array{severity: 'critical'|'warning', title: string, detail: string, at: string}> */
+    /** @return list<array{severity: 'critical'|'warning', title: string, detail: string, at: string, action?: array{label: string, url: string}}> */
     protected function warnings(ServerStatus $status): array
     {
         $warnings = [];
@@ -52,6 +53,7 @@ class Warnings extends Widget
                 'severity' => 'warning',
                 'title' => __('zimam.dashboard.warnings.reboot.title'),
                 'detail' => __('zimam.dashboard.warnings.reboot.detail'),
+                'action' => ['label' => __('zimam.dashboard.warnings.reboot.action'), 'url' => ServerSecurity::getUrl().'#updates'],
                 'at' => __('zimam.dashboard.checked', ['time' => self::time($status->issuedAt, 'H:i')]),
             ];
         }
@@ -62,6 +64,7 @@ class Warnings extends Widget
                 'severity' => 'warning',
                 'title' => trans_choice('zimam.dashboard.warnings.security_updates.title', $security),
                 'detail' => __('zimam.dashboard.warnings.security_updates.detail'),
+                'action' => ['label' => __('zimam.dashboard.warnings.security_updates.action'), 'url' => ServerSecurity::getUrl().'#updates'],
                 'at' => __('zimam.dashboard.checked', ['time' => self::time(is_string($checked) ? CarbonImmutable::parse($checked) : $status->issuedAt, 'H:i')]),
             ];
         }

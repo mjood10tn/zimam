@@ -18,6 +18,7 @@ use App\Agent\Outcomes\DatabaseOutcomes;
 use App\Agent\Outcomes\DeploymentOutcomes;
 use App\Agent\Outcomes\GuardedChangeOutcomes;
 use App\Agent\Outcomes\NodeOutcomes;
+use App\Agent\Outcomes\OsUpdateOutcomes;
 use App\Agent\Outcomes\PhpOutcomes;
 use App\Agent\Outcomes\SecurityOutcomes;
 use App\Agent\Outcomes\ServerSecurityOutcomes;
@@ -53,6 +54,7 @@ class AgentServiceProvider extends ServiceProvider
             BackupOutcomes::register($outcomes);
             GuardedChangeOutcomes::register($outcomes);
             ServerSecurityOutcomes::register($outcomes);
+            OsUpdateOutcomes::register($outcomes);
 
             return $outcomes;
         });
