@@ -14,7 +14,7 @@
 #      forged CF-Connecting-IP from an address outside Cloudflare's ranges
 #      is logged with its real peer; off removes the file;
 #   6. only where UFW is active (the VM and the VPS run): a firewall rule
-#      for 8080 is kept and a listener there answers; one not kept is gone
+#      for 8181 is kept and a listener there answers; one not kept is gone
 #      after 120 s; SSH moves to 2222 alongside 22 and is kept after a login
 #      on 2222; change.confirm of a made-up id is not_found.
 # Containers run with --skip-firewall, so part 6 says SKIP there.
@@ -116,21 +116,22 @@ reply=$(request change.confirm '{"change":"01JD5Z3W4X6Y7Z8A9B0C1D2E3F"}')
 pass "change.confirm of a made-up id is not_found"
 
 rules() { echo "{\"rules\":[$1]}"; }
-web='{"id":"web8080","action":"allow","proto":"tcp","port_from":8080,"port_to":8080,"from":[]}'
+# Not 8080: on a VPS the release is served on 127.0.0.1:8080.
+web='{"id":"web8181","action":"allow","proto":"tcp","port_from":8181,"port_to":8181,"from":[]}'
 change=$(job firewall.rules "$(rules "$web")" | py 'import json, sys; print(json.load(sys.stdin)["change"])')
 data change.confirm "{\"change\":\"$change\"}" >/dev/null
-in_c sh -c 'setsid -f python3 -m http.server 8080 --bind 0.0.0.0 >/dev/null 2>&1'
+in_c sh -c 'setsid -f python3 -m http.server 8181 --bind 0.0.0.0 >/dev/null 2>&1'
 sleep 2
-curl -s -o /dev/null --max-time 5 "http://$CIP:8080/" || die "FAIL 8080 doesn't answer after the rule was kept"
-pass "a kept rule for 8080 lets a listener there answer"
-in_c pkill -f 'http.server 8080' || true
+curl -s -o /dev/null --max-time 5 "http://$CIP:8181/" || die "FAIL 8181 doesn't answer after the rule was kept"
+pass "a kept rule for 8181 lets a listener there answer"
+in_c pkill -f 'http.server 8181' || true
 
 temp='{"id":"temp9090","action":"allow","proto":"tcp","port_from":9090,"port_to":9090,"from":[]}'
 job firewall.rules "$(rules "$web,$temp")" >/dev/null
 in_c ufw status | grep -e 9090 >/dev/null || die "FAIL the unconfirmed rule isn't in force"
 sleep 130
 ! in_c ufw status | grep -e 9090 >/dev/null || die "FAIL the unconfirmed rule is still there after 130 s"
-in_c ufw status | grep -e 8080 >/dev/null || die "FAIL the revert lost the kept rule"
+in_c ufw status | grep -e 8181 >/dev/null || die "FAIL the revert lost the kept rule"
 pass "a rule nobody kept is gone after 120 s; the kept one stays"
 
 ssh='{"password_auth":false,"root_login":"prohibit-password","ports":[22,2222],"max_auth_tries":6,"login_grace_seconds":120}'
