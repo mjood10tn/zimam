@@ -48,6 +48,12 @@ func TestLimitsMatchDesign(t *testing.T) {
 		"backup.plan.delete":        {MemoryMax: "128M", RuntimeMaxSec: 120},
 		"backup.run":                {MemoryMax: "1G", RuntimeMaxSec: 21600},
 		"backup.restore":            {MemoryMax: "1G", RuntimeMaxSec: 21600},
+		// v0.6.0 server security commands (the plan's "New agent commands" table).
+		"firewall.rules":  {MemoryMax: "256M", RuntimeMaxSec: 120},
+		"ssh.settings":    {MemoryMax: "256M", RuntimeMaxSec: 120},
+		"fail2ban.config": {MemoryMax: "512M", RuntimeMaxSec: 600},
+		"fail2ban.unban":  {MemoryMax: "128M", RuntimeMaxSec: 60},
+		"cloudflare.mode": {MemoryMax: "256M", RuntimeMaxSec: 120},
 	}
 	for name, w := range want {
 		if got, ok := LimitsFor(name); !ok || got != w {

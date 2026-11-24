@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "change": {
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+      "type": "string"
+    },
+    "deadline": {
+      "format": "date-time",
+      "type": "string"
+    }
+  },
+  "required": [
+    "change",
+    "deadline"
+  ],
+  "title": "firewall.rules result",
+  "type": "object"
+}

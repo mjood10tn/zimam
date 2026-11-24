@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "address": {
+      "pattern": "^[0-9a-f.:]+$",
+      "type": "string"
+    },
+    "jail": {
+      "enum": [
+        "sshd",
+        "zimam-panel",
+        "zimam-site-auth"
+      ],
+      "type": "string"
+    },
+    "unbanned": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "address",
+    "jail",
+    "unbanned"
+  ],
+  "title": "fail2ban.unban result",
+  "type": "object"
+}

@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "ignore": {
+      "items": {
+        "pattern": "^[0-9A-Fa-f.:]+(/[0-9]{1,3})?$",
+        "type": "string"
+      },
+      "maxItems": 100,
+      "type": "array"
+    },
+    "jails": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "ban_time": {
+            "maximum": 2592000,
+            "minimum": 60,
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "find_time": {
+            "maximum": 86400,
+            "minimum": 60,
+            "type": "integer"
+          },
+          "max_retry": {
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "name": {
+            "enum": [
+              "sshd",
+              "zimam-panel",
+              "zimam-site-auth"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "ban_time",
+          "enabled",
+          "find_time",
+          "max_retry",
+          "name"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "ignore",
+    "jails"
+  ],
+  "title": "fail2ban.config params",
+  "type": "object"
+}

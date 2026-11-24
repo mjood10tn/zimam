@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "installed": {
+      "type": "boolean"
+    },
+    "jails": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "banned": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "address": {
+                  "type": "string"
+                },
+                "until": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "address",
+                "until"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "name": {
+            "enum": [
+              "sshd",
+              "zimam-panel",
+              "zimam-site-auth"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "banned",
+          "name"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "running": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "installed",
+    "jails",
+    "running"
+  ],
+  "title": "fail2ban.status result",
+  "type": "object"
+}
