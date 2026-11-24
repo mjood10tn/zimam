@@ -17,11 +17,15 @@ use App\Agent\Commands\BackupRun;
 use App\Agent\Commands\BackupRuns;
 use App\Agent\Commands\CacheUser;
 use App\Agent\Commands\CertIssue;
+use App\Agent\Commands\ChangeConfirm;
+use App\Agent\Commands\ChangeRevert;
 use App\Agent\Commands\DbCreate;
 use App\Agent\Commands\DbDrop;
 use App\Agent\Commands\DbList;
 use App\Agent\Commands\DbUser;
 use App\Agent\Commands\E2eSleep;
+use App\Agent\Commands\FirewallRules;
+use App\Agent\Commands\FirewallStatus;
 use App\Agent\Commands\JobCancel;
 use App\Agent\Commands\JobFollow;
 use App\Agent\Commands\JobStatus;
@@ -49,6 +53,7 @@ use App\Agent\Commands\SiteSecurity;
 use App\Agent\Commands\SiteWorkers;
 use App\Agent\Commands\SiteWorkersRestart;
 use App\Agent\Commands\SiteWorkersStatus;
+use App\Agent\Commands\SshSettings;
 use App\Agent\Commands\SystemMetrics;
 use App\Agent\Commands\SystemStatus;
 use App\Agent\Commands\ValkeyInstall;
@@ -142,6 +147,14 @@ final class SchemaTest extends TestCase
             new BackupList('nightly'),
             new BackupRuns('nightly', '20261123T020000Z'),
             new BackupRestore('nightly', '20261123T020000Z', 'db-s_shop_main', 'shop', 's_shop_main', overwrite: true),
+            new FirewallRules([
+                ['id' => 'app', 'action' => 'allow', 'proto' => 'tcp', 'port_from' => 8080, 'port_to' => 8080, 'from' => ['203.0.113.0/24', '2001:db8::7']],
+                ['id' => 'games', 'action' => 'limit', 'proto' => 'udp', 'port_from' => 27000, 'port_to' => 27015, 'from' => []],
+            ]),
+            new FirewallStatus,
+            new SshSettings(true, 'prohibit-password', [22, 2222], 6, 120),
+            new ChangeConfirm(self::JOB),
+            new ChangeRevert(self::JOB),
         ];
 
         return array_combine(
@@ -446,6 +459,29 @@ final class SchemaTest extends TestCase
             $data['services'] = $services;
             $this->assertResult('system.status', $data, 'system.status with services '.json_encode($services));
         }
+    }
+
+    /** The guarded commands (R06-D1): their results, firewall.status, and Keep and Revert now. */
+    public function testFakeGuardedChangeResultsMatchSchemas(): void
+    {
+        $fake = (new FakeAgentClient)->firewall(
+            [['id' => 'app', 'action' => 'allow', 'proto' => 'tcp', 'port_from' => 8080, 'port_to' => 8080, 'from' => ['203.0.113.0/24']]],
+            [['action' => 'allow', 'proto' => 'udp', 'port' => '51820', 'from' => 'any', 'ipv6' => false]],
+        );
+        $this->assertResult('firewall.status', $fake->call(new FirewallStatus)->data, 'fake firewall.status');
+        $changes = [];
+        foreach ([new FirewallRules([]), new SshSettings(false, 'no', [22, 2222], 3, 30)] as $command) {
+            $final = $fake->follow($fake->submit($command)->id, 0, function (): void {});
+            $this->assertSame('succeeded', $final->status);
+            $this->assertResult($command->name(), $final->result, "fake {$command->name()} result");
+            $changes[] = $final->result['change'];
+        }
+        $this->assertSame([], $fake->call(new FirewallStatus)->data['rules']);
+        $this->assertResult('change.revert', $fake->call(new ChangeRevert($changes[0]))->data, 'fake change.revert');
+        $this->assertSame('app', $fake->call(new FirewallStatus)->data['rules'][0]['id']);
+        $this->assertResult('change.confirm', $fake->call(new ChangeConfirm($changes[1]))->data, 'fake change.confirm');
+        $this->expectException(AgentNotFound::class);
+        $fake->call(new ChangeConfirm($changes[1]));
     }
 
     /** What the fake's jobs answer when they succeed matches each command's result schema. */

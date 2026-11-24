@@ -21,6 +21,9 @@ class PanelSettings
 
     public const SITE_LOG_CAP_BYTES = 5 * 1024 * 1024 * 1024;
 
+    /** sshd's own defaults on Ubuntu 26.04, with root by key only. */
+    public const SSH_DEFAULTS = ['password_auth' => true, 'root_login' => 'prohibit-password', 'ports' => [22], 'max_auth_tries' => 6, 'login_grace_seconds' => 120];
+
     /** The display zone, read once per request: Filament asks for it per cell. */
     private ?string $zone = null;
 
@@ -103,6 +106,26 @@ class PanelSettings
             $smtp['password'] = Crypt::encryptString($smtp['password']);
         }
         $this->set('smtp', $smtp);
+    }
+
+    /**
+     * The SSH settings last kept (R06-D4): what the SSH form shows. Until the
+     * owner keeps a change, Ubuntu's defaults.
+     *
+     * shortcut: these are what the panel last applied, not sshd -T's live
+     * values; read them from the agent once a read command reports them.
+     *
+     * @return array{password_auth: bool, root_login: string, ports: list<int>, max_auth_tries: int, login_grace_seconds: int}
+     */
+    public function ssh(): array
+    {
+        return (array) $this->get('ssh_settings', []) + self::SSH_DEFAULTS;
+    }
+
+    /** @param array<string, mixed> $settings ssh.settings's params, once kept */
+    public function setSsh(array $settings): void
+    {
+        $this->set('ssh_settings', array_intersect_key($settings, self::SSH_DEFAULTS));
     }
 
     private function get(string $key, mixed $default): mixed

@@ -44,3 +44,31 @@ func (p *ChangeConfirmParams) Validate() error {
 type ChangeConfirmResult struct {
 	Change ChangeID `json:"change"`
 }
+
+// change.revert undoes a guarded change before its deadline, when the owner
+// presses Revert now in the panel (R06-D2), through the same code path as
+// its timer. Direct, like change.confirm.
+func init() {
+	Register(Descriptor{
+		Name:    "change.revert",
+		Kind:    KindDirect,
+		Audited: true,
+		Params:  func() Params { return &ChangeRevertParams{} },
+		Result:  ChangeRevertResult{},
+	})
+}
+
+type ChangeRevertParams struct {
+	Change ChangeID `json:"change"`
+}
+
+func (p *ChangeRevertParams) Validate() error {
+	f := FieldErrors{}
+	f.Check("change", p.Change)
+	return f.Err()
+}
+
+// ChangeRevertResult is the change that is now undone.
+type ChangeRevertResult struct {
+	Change ChangeID `json:"change"`
+}
