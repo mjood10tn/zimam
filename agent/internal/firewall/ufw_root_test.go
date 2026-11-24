@@ -31,6 +31,20 @@ func TestRulesAgainstRealUFW(t *testing.T) {
 			t.Fatalf("%v: %v\n%s", args, err, out)
 		}
 	}
+	// The e2e run calls this on its server (m1-roottests.sh), whose later
+	// steps expect UFW as the installer left it, off under --skip-firewall:
+	// /etc/ufw and UFW's state go back exactly when the test ends.
+	backup := t.TempDir() + "/ufw.tar"
+	sh("tar", "-C", "/etc", "-cf", backup, "ufw")
+	wasActive := exec.Command("sh", "-c", "ufw status | grep -q '^Status: active'").Run() == nil
+	t.Cleanup(func() {
+		sh("ufw", "--force", "disable")
+		sh("rm", "-rf", "/etc/ufw")
+		sh("tar", "-C", "/etc", "-xpf", backup)
+		if wasActive {
+			sh("ufw", "--force", "enable")
+		}
+	})
 	sh("ufw", "--force", "reset")
 	for _, port := range []string{"22/tcp", "80/tcp", "443/tcp"} {
 		sh("ufw", "allow", port)
