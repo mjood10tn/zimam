@@ -15,6 +15,9 @@ type Script struct {
 	Args   []string
 	Result Result
 	Err    error // returned as is; otherwise a non-zero ExitCode gives an *ExitError
+	// AnyArgs matches every call to Path, for arguments a test can't know
+	// in advance (a random id).
+	AnyArgs bool
 }
 
 // Call is one recorded Run, with everything the caller wrote to Stdin.
@@ -82,7 +85,7 @@ func (f *FakeRunner) answer(c Cmd) (Result, error) {
 	}
 	last := -1
 	for i, s := range f.scripts {
-		if s.Path != c.Path || !slices.Equal(s.Args, c.Args) {
+		if s.Path != c.Path || !s.AnyArgs && !slices.Equal(s.Args, c.Args) {
 			continue
 		}
 		last = i
