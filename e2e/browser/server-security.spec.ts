@@ -17,11 +17,13 @@ test('v0.6.0: the Server security page', async ({ page }) => {
   await signInAsAdmin(page);
   await page.goto(`${panel}/admin/server-security`);
 
+  // SSH's rule shows either locked (once a firewall.rules adopted the
+  // installer's rules, R06-D3) or, before that, among the rules Zimam didn't
+  // make; a locked row never offers Delete.
   const firewall = page.locator('#firewall');
-  await expect(firewall.getByText('ssh-22', { exact: true })).toBeVisible();
-  await expect(firewall.getByText('Kept by Zimam').first()).toBeVisible();
-  const row = firewall.getByRole('row').filter({ hasText: 'ssh-22' });
-  await expect(row.getByRole('button', { name: 'Delete' })).toHaveCount(0);
+  await expect(firewall).toContainText(/ssh-22|allow tcp 22 from/);
+  const locked = firewall.getByRole('row').filter({ hasText: 'Kept by Zimam' });
+  await expect(locked.getByRole('button', { name: 'Delete' })).toHaveCount(0);
   for (const id of ['#ssh', '#fail2ban', '#cloudflare', '#updates']) {
     await expect(page.locator(id)).toBeVisible();
   }
