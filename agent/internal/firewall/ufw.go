@@ -211,9 +211,18 @@ func runUFW(ctx context.Context, d sysexec.Deps, args ...string) error {
 	return err
 }
 
+// PrepareSSHD makes the directory sshd -t and -T refuse to run without.
+// Under socket activation it exists only while ssh.service runs.
+func PrepareSSHD(d sysexec.Deps) error {
+	return os.MkdirAll(d.Paths.SSHDRunDir(), 0o755)
+}
+
 // SSHPorts reads the ports sshd listens on from sshd -T, the effective
 // configuration whichever drop-in set them.
 func SSHPorts(ctx context.Context, d sysexec.Deps) ([]contract.TCPPort, error) {
+	if err := PrepareSSHD(d); err != nil {
+		return nil, err
+	}
 	res, err := d.Run.Run(ctx, sysexec.Cmd{Path: sshd, Args: []string{"-T"}})
 	if err != nil {
 		return nil, fmt.Errorf("reading sshd's ports: %w", err)

@@ -154,8 +154,9 @@ func listeningPorts(e Env) string {
 
 // sshChecks read sshd -T, the effective configuration.
 func sshChecks(ctx context.Context, e Env) []contract.Finding {
-	res, err := e.D.Run.Run(ctx, sysexecCmd(sshd, "-T"))
-	if err != nil {
+	err := firewall.PrepareSSHD(e.D)
+	res, rerr := e.D.Run.Run(ctx, sysexecCmd(sshd, "-T"))
+	if err = errors.Join(err, rerr); err != nil {
 		return []contract.Finding{
 			finding("ssh_password_login", contract.FindingInconclusive, "sshd -T failed: %v", err),
 			finding("ssh_root_login", contract.FindingInconclusive, "sshd -T failed: %v", err),
