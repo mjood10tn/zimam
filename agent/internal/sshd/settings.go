@@ -102,6 +102,9 @@ func Apply(ctx context.Context, d sysexec.Deps, p contract.SSHSettingsParams) (c
 
 func test(d sysexec.Deps) func(context.Context) error {
 	return func(ctx context.Context) error {
+		if err := firewall.PrepareSSHD(d); err != nil {
+			return err
+		}
 		return configtx.RunTest(ctx, d.Run, sysexec.Cmd{Path: sshd, Args: []string{"-t"}})
 	}
 }
@@ -131,14 +134,25 @@ func revert(ctx context.Context, d sysexec.Deps, b []byte) error {
 	if err := configtx.Apply(ctx, []configtx.Change{c}, test(d)); err != nil {
 		return err
 	}
-	now, err := firewall.SSHPorts(ctx, d)
-	if err != nil {
-		return err
-	}
-	if err := reload(ctx, d, !sameSet(now, prev.Ports)); err != nil {
+	if err := restore(ctx, d); err != nil {
 		return err
 	}
 	return firewall.Restore(ctx, d, prev.Firewall)
+}
+
+// restore brings sshd back on the restored settings whatever state the
+// change left it in. A socket restart that failed (a new port someone else
+// holds) leaves ssh.socket failed and ssh.service stopped, so a reload
+// would leave SSH down: the socket is restarted whenever it's in use.
+func restore(ctx context.Context, d sysexec.Deps) error {
+	if systemd.Systemctl(ctx, d, "is-active", "--quiet", "ssh.socket") == nil ||
+		systemd.Systemctl(ctx, d, "is-failed", "--quiet", "ssh.socket") == nil {
+		if err := systemd.Systemctl(ctx, d, "daemon-reload"); err != nil {
+			return err
+		}
+		return systemd.Systemctl(ctx, d, "restart", "ssh.socket")
+	}
+	return systemd.Systemctl(ctx, d, "reload-or-restart", "ssh.service")
 }
 
 // confirm closes the firewall on ports sshd left.

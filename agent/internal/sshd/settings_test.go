@@ -167,6 +167,9 @@ func TestSettingsOnlyReloadService(t *testing.T) {
 	if got := lines(run); !slices.Equal(got, []string{"sshd -T", "sshd -t", "systemctl reload ssh.service"}) {
 		t.Errorf("calls = %q", got)
 	}
+	if _, err := os.Stat(d.Paths.SSHDRunDir()); err != nil {
+		t.Errorf("no %s for sshd -t: %v", d.Paths.SSHDRunDir(), err)
+	}
 }
 
 func TestBadConfigRestoresPrevious(t *testing.T) {
@@ -185,6 +188,37 @@ func TestBadConfigRestoresPrevious(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(d.Paths.ChangesDir()); len(entries) != 0 {
 		t.Errorf("the failed change is still pending: %v", entries)
+	}
+}
+
+// A new port something else holds fails ssh.socket's restart, which also
+// stops ssh.service: the revert must restart the socket on the old ports,
+// not reload a stopped service, or SSH stays down (seen on a VPS).
+func TestFailedSocketRestartRevertRestartsSocket(t *testing.T) {
+	busy := call(systemctl, "restart", "ssh.socket")
+	busy.Result.ExitCode = 1
+	failed := call(systemctl, "is-active", "--quiet", "ssh.socket")
+	failed.Result.ExitCode = 3
+	d, run := newEnv(t, "",
+		sshdT("22"),
+		call(ufw, append([]string{"--dry-run"}, add2222...)...), call(ufw, add2222...),
+		call(sshd, "-t"), call(systemctl, "is-active", "--quiet", "ssh.socket"),
+		call(systemctl, "daemon-reload"), busy,
+		failed, call(systemctl, "is-failed", "--quiet", "ssh.socket"),
+		call(systemctl, "restart", "ssh.socket"), call(ufw, "reload"),
+	)
+	if _, _, err := Apply(context.Background(), d, settings(22, 2222)); err == nil {
+		t.Fatal("Apply succeeded with ssh.socket failing")
+	}
+	got := lines(run)
+	i := slices.Index(got, "systemctl restart ssh.socket")
+	want := []string{"systemctl restart ssh.socket", "sshd -t", "systemctl is-active --quiet ssh.socket",
+		"systemctl is-failed --quiet ssh.socket", "systemctl daemon-reload", "systemctl restart ssh.socket", "ufw reload"}
+	if i < 0 || !slices.Equal(got[i:], want) {
+		t.Errorf("calls = %q, want them to end %q", got, want)
+	}
+	if _, err := os.Stat(d.Paths.SSHDropIn()); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("drop-in still there: %v", err)
 	}
 }
 
@@ -221,7 +255,7 @@ func TestRevertRestoresDropinsAndRules(t *testing.T) {
 			got = append(got, filepath.Base(c.Path)+" "+strings.Join(c.Args, " "))
 		}
 	}
-	want := []string{"sshd -t", "sshd -T", "systemctl is-active --quiet ssh.socket", "systemctl daemon-reload", "systemctl restart ssh.socket", "ufw reload"}
+	want := []string{"sshd -t", "systemctl is-active --quiet ssh.socket", "systemctl daemon-reload", "systemctl restart ssh.socket", "ufw reload"}
 	if !slices.Equal(got, want) {
 		t.Errorf("revert ran %q, want %q", got, want)
 	}
