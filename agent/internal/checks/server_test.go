@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/pem"
 	"math/big"
 	"net"
@@ -41,32 +42,59 @@ func serverEnv(t *testing.T, scripts ...sysexec.Script) Env {
 	return Env{D: sysexec.Deps{Paths: p, Run: sysexec.NewFakeRunner(scripts...), Logf: t.Logf, Now: func() time.Time { return testNow }}}
 }
 
-const ufwActive = `Status: active
-
-To                         Action      From
---                         ------      ----
-22/tcp                     ALLOW       Anywhere
-80/tcp                     ALLOW       Anywhere
-443/tcp                    ALLOW       Anywhere
-22/tcp (v6)                ALLOW       Anywhere (v6)
-`
-
-func TestFirewallActive(t *testing.T) {
-	ufw := func(out string) sysexec.Script {
-		return sysexec.Script{Path: "/usr/sbin/ufw", Args: []string{"status"}, Result: sysexec.Result{Stdout: []byte(out)}}
+// tuple writes a user.rules line as UFW does, comment hex-encoded.
+func tuple(action, proto, port, src, comment string) string {
+	line := "### tuple ### " + action + " " + proto + " " + port + " 0.0.0.0/0 any " + src + " in"
+	if comment != "" {
+		line += " comment=" + hex.EncodeToString([]byte(comment))
 	}
-	e := serverEnv(t, ufw(ufwActive))
+	return line + "\n"
+}
+
+func TestFirewallCheckListsRuleKinds(t *testing.T) {
+	e := serverEnv(t)
+	write(t, e.D.Paths.UFWConf(), "ENABLED=yes\n")
+	write(t, e.D.Paths.UFWUserRules(), tuple("allow", "tcp", "22", "0.0.0.0/0", "zimam:ssh-22")+
+		tuple("allow", "tcp", "443", "0.0.0.0/0", "zimam:https")+
+		tuple("allow", "tcp", "8080", "203.0.113.0/24", "zimam:app")+
+		tuple("allow", "udp", "51820", "0.0.0.0/0", ""))
 	write(t, e.D.Paths.ProcNetTCP(), "  sl  local_address rem_address   st\n   0: 00000000:0016 00000000:0000 0A 0\n   1: 0100007F:0CEA 00000000:0000 0A 0\n   2: 0100007F:0050 0200007F:9999 01 0\n")
 	write(t, e.D.Paths.ProcNetTCP6(), "  sl  local_address rem_address   st\n   0: 00000000000000000000000000000000:01BB 00000000000000000000000000000000:0000 0A 0\n")
 	f := firewallActive(context.Background(), e)
 	wantStatus(t, f, "firewall_active", contract.FindingPass)
-	for _, want := range []string{"22/tcp, 80/tcp, 443/tcp", "22, 443, 3306"} {
+	for _, want := range []string{"ssh-22 22/tcp", "https 443/tcp", "app 8080/tcp from 203.0.113.0/24", "allow 51820/udp from 0.0.0.0/0", "22, 443, 3306"} {
 		if !strings.Contains(f.Detail, want) {
 			t.Errorf("detail %q lacks %q", f.Detail, want)
 		}
 	}
-	e = serverEnv(t, ufw("Status: inactive\n"))
+	write(t, e.D.Paths.UFWConf(), "ENABLED=no\n")
 	wantStatus(t, firewallActive(context.Background(), e), "firewall_active", contract.FindingFail)
+}
+
+func TestFail2banActiveCheck(t *testing.T) {
+	isActive := func(code int) sysexec.Script {
+		return sysexec.Script{Path: "/usr/bin/systemctl", Args: []string{"is-active", "--quiet", "fail2ban.service"}, Result: sysexec.Result{ExitCode: code}}
+	}
+	e := serverEnv(t)
+	wantStatus(t, fail2banActive(context.Background(), e), "fail2ban_active", contract.FindingPass)
+	e = serverEnv(t, isActive(3))
+	write(t, e.D.Paths.Fail2banClient(), "")
+	wantStatus(t, fail2banActive(context.Background(), e), "fail2ban_active", contract.FindingWarn)
+	e = serverEnv(t, isActive(0))
+	write(t, e.D.Paths.Fail2banClient(), "")
+	wantStatus(t, fail2banActive(context.Background(), e), "fail2ban_active", contract.FindingPass)
+}
+
+func TestCloudflareRangesFreshCheck(t *testing.T) {
+	e := serverEnv(t)
+	if f := cloudflareRanges(e); f != nil {
+		t.Errorf("outside Cloudflare mode: %+v, want no finding", f)
+	}
+	write(t, e.D.Paths.NginxRealIPConf(), "")
+	write(t, e.D.Paths.CloudflareRanges(), `{"v4":["173.245.48.0/20"],"v6":["2400:cb00::/32"],"refreshed_at":"`+testNow.AddDate(0, 0, -3).Format(time.RFC3339)+`"}`)
+	wantStatus(t, *cloudflareRanges(e), "cloudflare_ranges_fresh", contract.FindingPass)
+	write(t, e.D.Paths.CloudflareRanges(), `{"v4":["173.245.48.0/20"],"v6":["2400:cb00::/32"],"refreshed_at":"`+testNow.AddDate(0, 0, -15).Format(time.RFC3339)+`"}`)
+	wantStatus(t, *cloudflareRanges(e), "cloudflare_ranges_fresh", contract.FindingWarn)
 }
 
 func TestSshChecks(t *testing.T) {

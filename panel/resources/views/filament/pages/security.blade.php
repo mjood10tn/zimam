@@ -59,6 +59,10 @@
                                 {{ __('zimam.checks.status.'.$finding->status) }}
                             </x-filament::badge>
                             {{ $finding->detail }}
+                            @if ($finding->status !== 'pass' && isset(\App\Models\SecurityFinding::FIXED_IN[$finding->check]))
+                                @php($section = \App\Models\SecurityFinding::FIXED_IN[$finding->check])
+                                <a href="{{ \App\Filament\Pages\ServerSecurity::getUrl() }}#{{ $section }}" class="underline">{{ __('zimam.checks.fix.'.$section) }}</a>
+                            @endif
                         </dd>
                     @endforeach
                 </dl>

@@ -774,6 +774,10 @@ return [
         'failing' => 'Checks',
         'not_run' => 'Not checked yet. Checks run daily at 03:30, or now with Run checks now.',
         'all_pass' => 'Every check passes.',
+        'fix' => [
+            'firewall' => 'Open the firewall rules',
+            'ssh' => 'Open the SSH settings',
+        ],
         'https' => [
             'label' => 'HTTPS',
             'forced' => 'Forced: HTTP redirects to HTTPS',
@@ -809,6 +813,8 @@ return [
             'firewall_active' => 'Firewall active',
             'ssh_password_login' => 'SSH password login off',
             'ssh_root_login' => 'SSH root login restricted',
+            'fail2ban_active' => 'fail2ban running',
+            'cloudflare_ranges_fresh' => 'Cloudflare ranges up to date',
             'security_updates_pending' => 'No security updates pending',
             'reboot_required' => 'No reboot required',
             'stock_www_pools_removed' => 'Stock www pools removed',

@@ -1,5 +1,6 @@
 {{-- The Server security page's firewall rules (R06-D3). --}}
 <x-filament::section
+    id="firewall"
     :heading="__('zimam.server_security.firewall.heading')"
     :description="match ($active) {
         true => __('zimam.server_security.firewall.active'),

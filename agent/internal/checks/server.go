@@ -3,6 +3,7 @@ package checks
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"slices"
@@ -10,50 +11,106 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"zimam/agent/contract"
+	"zimam/agent/internal/cloudflare"
+	"zimam/agent/internal/fail2ban"
+	"zimam/agent/internal/firewall"
 	"zimam/agent/internal/maintenance"
 	"zimam/agent/internal/php"
+	"zimam/agent/internal/systemd"
 )
 
-const (
-	ufw  = "/usr/sbin/ufw"
-	sshd = "/usr/sbin/sshd"
-)
+const sshd = "/usr/sbin/sshd"
 
 // Server runs every server check of §9.7, in its order.
 func Server(ctx context.Context, e Env) ([]contract.Finding, error) {
 	out := []contract.Finding{firewallActive(ctx, e)}
 	out = append(out, sshChecks(ctx, e)...)
+	out = append(out, fail2banActive(ctx, e))
+	if f := cloudflareRanges(e); f != nil {
+		out = append(out, *f)
+	}
 	return append(out, securityUpdates(e), rebootRequired(e), stockPools(e), socketPermissions(e)), nil
 }
 
-// firewallActive reads ufw status and lists the allowed ports beside the
-// TCP ports something listens on, from /proc/net/tcp and tcp6.
-func firewallActive(ctx context.Context, e Env) contract.Finding {
+// firewallActive lists Zimam's rules and the ones it didn't make, from UFW's
+// own files (firewall.Status), beside the TCP ports something listens on,
+// from /proc/net/tcp and tcp6 (R06-D10).
+func firewallActive(_ context.Context, e Env) contract.Finding {
 	const check = "firewall_active"
-	res, err := e.D.Run.Run(ctx, sysexecCmd(ufw, "status"))
+	s, err := firewall.Status(e.D)
 	if err != nil {
-		return finding(check, contract.FindingInconclusive, "ufw status failed: %v", err)
+		return finding(check, contract.FindingInconclusive, "UFW's rules can't be read: %v", err)
 	}
-	var allowed []string
-	active := false
-	for line := range strings.Lines(string(res.Stdout)) {
-		f := strings.Fields(line)
-		switch {
-		case len(f) >= 2 && f[0] == "Status:":
-			active = f[1] == "active"
-		case len(f) >= 2 && f[1] == "ALLOW" && !slices.Contains(allowed, f[0]):
-			allowed = append(allowed, f[0])
-		case len(f) >= 3 && f[1] == "(v6)" && f[2] == "ALLOW" && !slices.Contains(allowed, f[0]):
-			allowed = append(allowed, f[0])
+	var zimam, external []string
+	for _, r := range append(slices.Clone(s.Locked), s.Rules...) {
+		ports := strconv.Itoa(int(r.PortFrom))
+		if r.PortTo != r.PortFrom {
+			ports += ":" + strconv.Itoa(int(r.PortTo))
+		}
+		rule := fmt.Sprintf("%s %s/%s", r.ID, ports, r.Proto)
+		if r.Action != "allow" {
+			rule = fmt.Sprintf("%s %s %s/%s", r.ID, r.Action, ports, r.Proto)
+		}
+		if len(r.From) > 0 {
+			rule += " from " + strings.Join(r.From, ", ")
+		}
+		zimam = append(zimam, rule)
+	}
+	for _, r := range s.External {
+		rule := fmt.Sprintf("%s %s/%s from %s", r.Action, r.Port, r.Proto, r.From)
+		if !slices.Contains(external, rule) {
+			external = append(external, rule)
 		}
 	}
 	listening := listeningPorts(e)
-	if !active {
+	if !s.Active {
 		return finding(check, contract.FindingFail, "UFW isn't active. Listening TCP ports: %s.", listening)
 	}
-	return finding(check, contract.FindingPass, "UFW is active and allows %s. Listening TCP ports: %s.", orNone(strings.Join(allowed, ", ")), listening)
+	return finding(check, contract.FindingPass, "UFW is active. Zimam's rules: %s. Other rules: %s. Listening TCP ports: %s.",
+		orNone(strings.Join(zimam, "; ")), orNone(strings.Join(external, "; ")), listening)
+}
+
+// fail2banActive warns when fail2ban is installed but not running: the
+// jails the owner set up ban nobody (R06-D10).
+func fail2banActive(ctx context.Context, e Env) contract.Finding {
+	const check = "fail2ban_active"
+	installed, err := fail2ban.Installed(e.D)
+	switch {
+	case err != nil:
+		return finding(check, contract.FindingInconclusive, "%v", err)
+	case !installed:
+		return finding(check, contract.FindingPass, "fail2ban isn't installed.")
+	case systemd.Systemctl(ctx, e.D, "is-active", "--quiet", "fail2ban.service") != nil:
+		return finding(check, contract.FindingWarn, "fail2ban is installed but not running, so nobody is banned.")
+	}
+	return finding(check, contract.FindingPass, "fail2ban is running.")
+}
+
+// rangesStaleAfter is how old Cloudflare's ranges may get before the check
+// warns: two missed weekly refreshes (R06-D10).
+const rangesStaleAfter = 14 * 24 * time.Hour
+
+// cloudflareRanges checks, in Cloudflare mode only, that the ranges Nginx
+// trusts were fetched in the last 14 days; nil outside the mode.
+func cloudflareRanges(e Env) *contract.Finding {
+	const check = "cloudflare_ranges_fresh"
+	if on, err := cloudflare.Enabled(e.D.Paths); err != nil || !on {
+		return nil
+	}
+	_, at, err := cloudflare.Current(e.D.Paths)
+	var f contract.Finding
+	switch {
+	case err != nil:
+		f = finding(check, contract.FindingInconclusive, "%v", err)
+	case e.D.Now().Sub(at) > rangesStaleAfter:
+		f = finding(check, contract.FindingWarn, "Cloudflare's ranges were last fetched on %s. Maintenance refreshes them weekly; check that the server can reach www.cloudflare.com.", at.Format(time.DateOnly))
+	default:
+		f = finding(check, contract.FindingPass, "Cloudflare's ranges were fetched on %s.", at.Format(time.DateOnly))
+	}
+	return &f
 }
 
 func orNone(s string) string {
