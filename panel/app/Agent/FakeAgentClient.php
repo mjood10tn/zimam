@@ -297,6 +297,17 @@ final class FakeAgentClient implements AgentClient
         return $this;
     }
 
+    /** When system.reboot reboots: 15 s on for "now", else the next HH:MM (the fake's server runs on UTC). */
+    private static function rebootAt(string $at): CarbonImmutable
+    {
+        if ($at === 'now') {
+            return CarbonImmutable::now('UTC')->addSeconds(15);
+        }
+        $next = CarbonImmutable::parse($at, 'UTC');
+
+        return $next->isPast() ? $next->addDay() : $next;
+    }
+
     /** fail2ban is installed and running on the fake's server, with $address banned in $jail for an hour. */
     public function fail2banBan(string $jail, string $address): static
     {
@@ -635,6 +646,16 @@ final class FakeAgentClient implements AgentClient
             // Only a change to the origin restriction is guarded (R06-D9).
             'cloudflare.mode' => $params + ($params['restrict_origin'] !== $this->cloudflare['restrict_origin'] ? $this->beginChange(120) : []),
             'fail2ban.config' => $this->fail2banAfter($params),
+            'updates.auto' => ['enabled' => $params['enabled'], 'auto_reboot' => $params['auto_reboot']] + ($params['auto_reboot'] ? ['reboot_time' => $params['reboot_time']] : []),
+            'updates.install' => [
+                'scope' => $params['scope'],
+                'upgraded' => [['package' => 'gzip', 'from' => '1.14-1', 'to' => '1.14-1.1']],
+                'restarted' => ['nginx.service'],
+                'reboot_required' => (bool) $this->systemStatus['reboot_required'],
+                'security_pending_after' => 0,
+            ],
+            'system.reboot' => ['at' => $params['at'], 'scheduled_at' => self::goTime(self::rebootAt($params['at']))],
+            'system.reboot.cancel' => ['cancelled' => isset($this->systemStatus['reboot_scheduled'])],
             'fail2ban.unban' => $params + ['unbanned' => in_array($params['address'], array_column(array_column($this->fail2ban['jails'], 'banned', 'name')[$params['jail']] ?? [], 'address'), true)],
             'security.check' => self::securityFindings($params),
             'logs.policy' => $params,
@@ -773,6 +794,19 @@ final class FakeAgentClient implements AgentClient
         // In force at once; a revert puts beginChange's copy back.
         if ($command === 'firewall.rules') {
             $this->firewall['rules'] = $params['rules'];
+        }
+        if ($command === 'updates.auto' && is_array($result)) {
+            $this->systemStatus['auto_updates'] = $result;
+        }
+        // An install counts again at once: nothing is pending after it (R06-D13).
+        if ($command === 'updates.install') {
+            $this->systemStatus['updates'] = ['total' => 0, 'security' => 0, 'checked_at' => self::goTime(CarbonImmutable::now('UTC'))];
+        }
+        if ($command === 'system.reboot' && is_array($result) && $params['at'] !== 'now') {
+            $this->systemStatus['reboot_scheduled'] = $result['scheduled_at'];
+        }
+        if ($command === 'system.reboot.cancel') {
+            unset($this->systemStatus['reboot_scheduled']);
         }
         if ($command === 'cloudflare.mode') {
             $this->cloudflare = ['enabled' => $params['enabled'], 'restrict_origin' => $params['restrict_origin']];
@@ -1089,6 +1123,16 @@ final class FakeAgentClient implements AgentClient
             }
 
             return;
+        }
+        $time = '/^([01][0-9]|2[0-3]):[0-5][0-9]\z/';
+        if ($command->name() === 'updates.auto' && $params['auto_reboot'] && ! preg_match($time, $params['reboot_time'] ?? '')) {
+            throw new AgentValidationFailed('Invalid parameters', ['reboot_time' => 'is required with auto_reboot']);
+        }
+        if ($command->name() === 'updates.install' && ! in_array($params['scope'], ['security', 'all'], true)) {
+            throw new AgentValidationFailed('Invalid parameters', ['scope' => 'must be security or all']);
+        }
+        if ($command->name() === 'system.reboot' && $params['at'] !== 'now' && ! preg_match($time, $params['at'])) {
+            throw new AgentValidationFailed('Invalid parameters', ['at' => 'must be "now" or HH:MM']);
         }
         if ($command->name() === 'cloudflare.mode') {
             if ($params['restrict_origin'] && ! $params['enabled']) {
@@ -1801,6 +1845,8 @@ final class FakeAgentClient implements AgentClient
             ],
             // The zone cron runs in (ruling R7); a test sets another through changeServer().
             'timezone' => 'UTC',
+            // Ubuntu's cloud image ships automatic security updates on (spike).
+            'auto_updates' => ['enabled' => true, 'auto_reboot' => false],
             // R04-D6: Node isn't installed until node.install runs; the allowlist is the agent's (OQ5).
             'node' => [
                 'installed' => false,

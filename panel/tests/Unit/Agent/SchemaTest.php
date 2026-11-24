@@ -59,7 +59,11 @@ use App\Agent\Commands\SiteWorkersRestart;
 use App\Agent\Commands\SiteWorkersStatus;
 use App\Agent\Commands\SshSettings;
 use App\Agent\Commands\SystemMetrics;
+use App\Agent\Commands\SystemReboot;
+use App\Agent\Commands\SystemRebootCancel;
 use App\Agent\Commands\SystemStatus;
+use App\Agent\Commands\UpdatesAuto;
+use App\Agent\Commands\UpdatesInstall;
 use App\Agent\Commands\ValkeyInstall;
 use App\Agent\Exceptions\AgentException;
 use App\Agent\Exceptions\AgentNotFound;
@@ -163,6 +167,10 @@ final class SchemaTest extends TestCase
             new Fail2banStatus,
             new Fail2banUnban('zimam-panel', '192.0.2.44'),
             new CloudflareMode(true, true),
+            new UpdatesAuto(true, true, '03:30'),
+            new UpdatesInstall('all'),
+            new SystemReboot('03:30'),
+            new SystemRebootCancel,
         ];
 
         return array_combine(
@@ -516,6 +524,27 @@ final class SchemaTest extends TestCase
         }
         $this->assertSame([], $fake->call(new Fail2banStatus)->data['jails'][1]['banned']);
         $this->assertArrayHasKey('change', $final->result);
+    }
+
+    /** OS updates and reboots, and system.status with automatic updates and a scheduled reboot (R06-D12..D16). */
+    public function testFakeUpdateResultsMatchSchemas(): void
+    {
+        $fake = new FakeAgentClient;
+        foreach ([new UpdatesAuto(false, false), new UpdatesAuto(true, true, '04:00'), new UpdatesInstall('security'), new SystemReboot('now'), new SystemReboot('03:30'), new SystemRebootCancel] as $command) {
+            $final = $fake->follow($fake->submit($command)->id, 0, function (): void {});
+            $this->assertSame('succeeded', $final->status);
+            $this->assertResult($command->name(), $final->result, "fake {$command->name()} result");
+            if ($command instanceof SystemReboot && $command->at !== 'now') {
+                $this->assertResult('system.status', $fake->call(new SystemStatus)->data, 'system.status with a scheduled reboot');
+            }
+        }
+        $this->assertSame(['enabled' => true, 'auto_reboot' => true, 'reboot_time' => '04:00'], $fake->call(new SystemStatus)->data['auto_updates']);
+        $this->assertParamsValid(new UpdatesAuto(false, false));
+    }
+
+    private function assertParamsValid(AgentCommand $command): void
+    {
+        $this->assertValid(self::wire($command->jsonParams()), file_get_contents($this->schemaPath($command->name().'.params')), $command->name());
     }
 
     /** What the fake's jobs answer when they succeed matches each command's result schema. */

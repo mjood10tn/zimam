@@ -118,11 +118,13 @@ return [
         'warnings' => [
             'reboot' => [
                 'title' => 'Reboot required',
-                'detail' => 'Installed updates take effect after a restart. Restart over SSH with sudo reboot when a short outage suits you.',
+                'detail' => 'Installed updates take effect after a restart. Schedule one for a time when a short outage suits you.',
+                'action' => 'Schedule reboot',
             ],
             'security_updates' => [
                 'title' => '{1} :count security update pending|[2,*] :count security updates pending',
-                'detail' => 'Install them over SSH with sudo apt upgrade.',
+                'detail' => 'Install them from Server security, or turn on automatic security updates there.',
+                'action' => 'Install updates now',
             ],
             'certificate_expiring' => [
                 'title' => '{1} The certificate for :site expires in :days day|[2,*] The certificate for :site expires in :days days',
@@ -777,6 +779,7 @@ return [
         'fix' => [
             'firewall' => 'Open the firewall rules',
             'ssh' => 'Open the SSH settings',
+            'updates' => 'Open the update settings',
         ],
         'https' => [
             'label' => 'HTTPS',
@@ -814,6 +817,7 @@ return [
             'ssh_password_login' => 'SSH password login off',
             'ssh_root_login' => 'SSH root login restricted',
             'fail2ban_active' => 'fail2ban running',
+            'automatic_security_updates' => 'Automatic security updates on',
             'cloudflare_ranges_fresh' => 'Cloudflare ranges up to date',
             'security_updates_pending' => 'No security updates pending',
             'reboot_required' => 'No reboot required',
@@ -1533,6 +1537,70 @@ return [
             'restrict_panel' => ':host (this panel)',
             'restrict_guard' => 'If this page stops loading, the change reverts by itself after 2 minutes.',
             'submitted' => 'Cloudflare settings sent.',
+        ],
+        'updates' => [
+            'heading' => 'Updates',
+            'counts' => '{0} No updates pending.|{1} :count update pending, :security of them security.|[2,*] :count updates pending, :security of them security.',
+            'counts_unknown' => 'Pending updates haven’t been counted yet.',
+            'checked' => 'Counted :time',
+            'auto' => [
+                'enabled' => 'Install security updates automatically',
+                'enabled_help' => 'Ubuntu’s own unattended upgrades, from its security archive only. PHP, Node and other added sources follow the button below.',
+                'auto_reboot' => 'Reboot automatically when an update needs it',
+                'reboot_time' => 'Reboot at',
+                'reboot_help' => 'Sites are down for a minute or two while the server restarts, at this time in the server’s time zone.',
+                'save' => 'Save automatic updates',
+                'submitted' => 'Automatic update settings sent.',
+                'unknown' => "The agent didn't report the automatic update settings; these are the defaults.",
+            ],
+            'install' => [
+                'label' => 'Install updates now',
+                'heading' => 'Install pending updates?',
+                'scope' => 'Which updates',
+                'scopes' => [
+                    'security' => 'Security updates only',
+                    'all' => 'All updates',
+                ],
+                'security_help' => 'From Ubuntu’s security archive. Services that use an updated library restart briefly.',
+                'all_restarts' => 'All updates also upgrade PHP, Node and the other added packages. These restart when theirs are upgraded, so sites drop for a moment: :services.',
+                'submitted' => 'Installing updates. The log below follows it.',
+                'running' => 'Installing updates…',
+            ],
+            'runs' => [
+                'heading' => 'Past installs',
+                'none' => 'No updates installed from the panel yet.',
+                'summary' => '{0} :scope · nothing upgraded|{1} :scope · :count package upgraded|[2,*] :scope · :count packages upgraded',
+                'restarted' => 'Restarted: :units',
+                'reboot' => 'A reboot is needed.',
+                'failed' => ':scope · failed',
+                'upgraded' => ':package :from → :to',
+                'new' => ':package :to (new)',
+            ],
+            'reboot' => [
+                'required' => 'A reboot is needed for installed updates to take effect.',
+                'not_required' => 'No reboot is needed.',
+                'scheduled' => 'Reboot scheduled for :time.',
+                'now' => 'Reboot now',
+                'now_heading' => 'Reboot the server now?',
+                'now_description' => 'Every site and this panel are down until the server is back, usually a minute or two.',
+                'schedule' => 'Schedule reboot',
+                'schedule_heading' => 'Schedule a reboot',
+                'at' => 'Reboot at',
+                'at_help' => 'The next time this comes round in the server’s time zone, within 24 hours. Sites are down for a minute or two then.',
+                'cancel' => 'Cancel reboot',
+                'submitted' => 'Reboot sent.',
+                'cancelled' => 'Cancelling the reboot.',
+            ],
+            'validation' => [
+                'time' => 'Use HH:MM, from 00:00 to 23:59.',
+            ],
+            'services' => [
+                'nginx' => 'Nginx',
+                'php' => 'PHP-FPM',
+                'mysql' => 'MySQL',
+                'valkey' => 'Valkey',
+                'node' => 'Node workers',
+            ],
         ],
         'change' => [
             'heading' => [
