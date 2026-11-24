@@ -352,6 +352,10 @@ func TestSSHPorts(t *testing.T) {
 	if err != nil || !slices.Equal(ports, []contract.TCPPort{22, 2222}) {
 		t.Errorf("SSHPorts = %v, %v", ports, err)
 	}
+	// Without it sshd -T refuses to run (socket-activated ssh, seen on a VPS).
+	if fi, err := os.Stat(e.d.Paths.SSHDRunDir()); err != nil || !fi.IsDir() {
+		t.Errorf("SSHPorts left no %s: %v", e.d.Paths.SSHDRunDir(), err)
+	}
 	e = newEnv(t, "", "", sysexec.Script{Path: sshd, Args: []string{"-T"}, Result: sysexec.Result{Stdout: []byte("port 0\n")}})
 	if _, err := SSHPorts(context.Background(), e.d); err == nil {
 		t.Error("SSHPorts accepted port 0")

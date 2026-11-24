@@ -165,6 +165,7 @@ var production = map[string]string{
 	"UFWConf":                 "/etc/ufw/ufw.conf",
 	"UFWDefaults":             "/etc/default/ufw",
 	"SSHDropIn":               "/etc/ssh/sshd_config.d/10-zimam.conf",
+	"SSHDRunDir":              "/run/sshd",
 	"Fail2banJails":           "/etc/fail2ban/jail.d/zimam.local",
 	"Fail2banPanelFilter":     "/etc/fail2ban/filter.d/zimam-panel.conf",
 	"Fail2banClient":          "/usr/bin/fail2ban-client",

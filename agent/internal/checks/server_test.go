@@ -107,6 +107,11 @@ func TestSshChecks(t *testing.T) {
 	sshd := func(out string) sysexec.Script {
 		return sysexec.Script{Path: "/usr/sbin/sshd", Args: []string{"-T"}, Result: sysexec.Result{Stdout: []byte(out)}}
 	}
+	e := serverEnv(t, sshd("port 22\n"))
+	sshChecks(context.Background(), e)
+	if _, err := os.Stat(e.D.Paths.SSHDRunDir()); err != nil {
+		t.Errorf("sshChecks left no %s: %v", e.D.Paths.SSHDRunDir(), err)
+	}
 	for _, tc := range []struct {
 		out            string
 		password, root contract.FindingStatus
