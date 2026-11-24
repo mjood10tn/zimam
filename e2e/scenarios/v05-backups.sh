@@ -192,7 +192,13 @@ timer_ran() {
 	[[ $(data backup.runs "{\"plan\":\"$plan\"}" | jq_py '" ".join(r["status"] for r in d["runs"] if r["trigger"] == "timer")') == *succeeded* ]]
 }
 until_true 600 timer_ran || die "FAIL no timer run of $plan within 10 minutes: $(in_c journalctl -u "zimam-backup-$plan" -n 20 --no-pager)"
-in_c grep -q '"actor":"cli:root","command":"backup run"' /var/log/zimam/audit.log || die "FAIL the timer run isn't audited as cli:root"
+# The run's record says succeeded before `zimam-agent backup run` writes its
+# audit entry, and maintenance may rotate the log in between.
+# shellcheck disable=SC2329 # called through until_true
+timer_audited() {
+	in_c grep -qs '"actor":"cli:root","command":"backup run"' /var/log/zimam/audit.log /var/log/zimam/audit.log.1
+}
+until_true 60 timer_audited || die "FAIL the timer run isn't audited as cli:root"
 pass "the timer ran $plan at $at (plus its random delay), audited as cli:root; kept: $(backups "$plan")"
 
 # 8. The SFTP plan.
